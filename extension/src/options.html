@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>PDF Editor — Options</title>
+  <style>
+    body { font: 14px system-ui, sans-serif; max-width: 640px; margin: 32px auto; color: #222; }
+    h1 { font-size: 20px; }
+    label { display: flex; gap: 8px; align-items: center; margin: 16px 0; }
+    code, pre { background: #f2f2f5; border-radius: 4px; padding: 2px 6px; }
+    pre { padding: 10px; overflow-x: auto; }
+    .ok { color: #1b7f3b; }
+    .bad { color: #b3261e; }
+    button { padding: 6px 12px; }
+  </style>
+</head>
+<body>
+  <h1>PDF Editor options</h1>
+
+  <label>
+    <input type="checkbox" id="auto-open" />
+    Automatically open PDFs in the editor when navigating to a <code>.pdf</code> link
+    (Adobe sites are always left alone)
+  </label>
+
+  <h2>Native host</h2>
+  <p>
+    Document processing runs in a local native host (C#/.NET). Status:
+    <span id="host-status">checking…</span>
+    <button id="test">Re-test</button>
+  </p>
+  <p>If the host is not connected:</p>
+  <pre>
+# Linux / macOS
+./scripts/install-host.sh &lt;your-extension-id&gt;
+
+# Windows (PowerShell)
+.\scripts\install-host.ps1 -ExtensionId &lt;your-extension-id&gt;</pre>
+  <p>
+    Your extension ID is shown at <code>chrome://extensions</code> with Developer mode on.
+    Full instructions are in the repository README.
+  </p>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>

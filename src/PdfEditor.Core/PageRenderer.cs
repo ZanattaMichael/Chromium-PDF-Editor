@@ -10,8 +10,12 @@ public static class PageRenderer
     public static byte[] RenderPagePng(byte[] pdf, int page, int dpi = 144, string? password = null)
     {
         using var stream = new MemoryStream(pdf);
+        // PDFtoImage annotates ToImage per-platform; every platform this host ships to
+        // (Windows, Linux, macOS — see the install scripts) is on its supported list.
+#pragma warning disable CA1416
         using SKBitmap bitmap = Conversion.ToImage(stream, page: (Index)(page - 1),
             password: password, options: new RenderOptions(Dpi: dpi));
+#pragma warning restore CA1416
         using var image = SKImage.FromBitmap(bitmap);
         using var encoded = image.Encode(SKEncodedImageFormat.Png, 100);
         return encoded.ToArray();

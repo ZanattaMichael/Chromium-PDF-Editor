@@ -70,11 +70,13 @@ internal sealed class ContentStreamEditor : PdfCanvasProcessor
     }
 
     // Wrap every default operator so we can decide, per operator, whether to copy it through.
+    // iText's API predates nullable annotations: both the parameter and the return value
+    // may be null in practice, hence the null-forgiving returns.
     public override IContentOperator RegisterContentOperator(string operatorString, IContentOperator op)
     {
         var wrapper = new OperatorWrapper(op);
         var former = base.RegisterContentOperator(operatorString, wrapper);
-        return former is OperatorWrapper w ? w.Original : former;
+        return former is OperatorWrapper w ? w.Original! : former!;
     }
 
     private sealed class OperatorWrapper : IContentOperator

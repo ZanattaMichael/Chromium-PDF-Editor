@@ -1,4 +1,4 @@
-# A Chromeium PDF Editor
+# A Chromium PDF Editor
 
 A free PDF editor extension for Chromium browsers (Chrome, Edge, Brave, Chromium, Opera).
 The UI is a Manifest V3 browser extension; all document processing is done in **C#/.NET 8**

@@ -66,12 +66,27 @@ Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```bash
 dotnet build            # build everything
-dotnet test             # run the full suite (52 tests: 37 unit + 15 integration)
+dotnet test             # run the .NET suite (52 tests: 37 unit + 15 integration)
 ```
 
 The integration tests launch the real host binary and speak Chrome's framed protocol
 over stdin/stdout — ping, chunked requests/responses, and full user workflows
 (edit → redact → merge → encrypt → sign) are exercised end to end.
+
+### Browser end-to-end tests (Playwright)
+
+A Playwright suite loads the actual extension into Chromium, registers the real
+native host in the test profile, and drives the viewer UI: open/render, redaction
+(preview window + apply, with pixel-level verification of the black box), in-place
+text editing, find & replace, merge, encryption, drawn and digital signatures,
+save, and undo.
+
+```bash
+cd e2e
+npm install
+npx playwright install chromium   # once
+npx playwright test               # 10 scenarios
+```
 
 ## Installing
 

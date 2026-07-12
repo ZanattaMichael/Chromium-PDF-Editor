@@ -33,18 +33,25 @@ async function launchExtension() {
   const executablePath = process.env.PDF_EDITOR_CHROMIUM
     ?? (fs.existsSync(preinstalled) ? preinstalled : undefined);
 
-  const context = await chromium.launchPersistentContext(userDataDir, {
+  const launchOptions = {
     headless: true,
-    executablePath,
     args: [
       `--disable-extensions-except=${EXTENSION_DIR}`,
       `--load-extension=${EXTENSION_DIR}`,
     ],
-  });
+  };
+  if (executablePath) {
+    launchOptions.executablePath = executablePath;
+  } else {
+    // Extensions need the full browser in new-headless mode; plain headless:true
+    // would pick the headless shell, which silently ignores --load-extension.
+    launchOptions.channel = 'chromium';
+  }
+  const context = await chromium.launchPersistentContext(userDataDir, launchOptions);
 
   // The extension ID is the host of any of its pages/workers.
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker');
+  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   const extensionId = new URL(worker.url()).host;
 
   // Native messaging host manifests are looked up under <user-data-dir>/NativeMessagingHosts

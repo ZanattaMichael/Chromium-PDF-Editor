@@ -160,7 +160,8 @@ built zip by hand the first time (which Chrome requires anyway, to create the li
 
 ## Installing
 
-1. **Generate the icons** (one-time, standard-library Python only):
+1. **Generate the icons** (one-time, standard-library Python only — already done if
+   you ran a bootstrap script per [CONTRIBUTING.md](CONTRIBUTING.md)):
 
    ```bash
    python3 scripts/generate-icons.py
@@ -196,13 +197,22 @@ built zip by hand the first time (which Chrome requires anyway, to create the li
 ## Repository layout
 
 ```
-extension/                    Chromium MV3 extension (UI)
-src/PdfEditor.Core/           PDF engine (iText 9 + PDFium rendering)
-src/PdfEditor.NativeHost/     native messaging host executable
-tests/PdfEditor.Core.Tests/   unit tests
+extension/                         Chromium MV3 extension (UI)
+src/PdfEditor.Core/                PDF engine (iText 9 + PDFium rendering)
+src/PdfEditor.NativeHost/          native messaging host executable
+tests/PdfEditor.Core.Tests/        unit tests for the PDF engine
+tests/PdfEditor.NativeHost.Tests/  unit tests for the JSON dispatcher (in-process)
 tests/PdfEditor.IntegrationTests/  process-level protocol & workflow tests
-scripts/                      host install scripts + manifest template
+e2e/                               Playwright browser end-to-end tests
+scripts/                           bootstrap, packaging, coverage, host-install scripts
+.devcontainer/                     dev container definition
 ```
+
+## Contributing
+
+Setting up a dev environment (dev container or a scripted bootstrap for PowerShell or
+Python), the test suites, and PR expectations are covered in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

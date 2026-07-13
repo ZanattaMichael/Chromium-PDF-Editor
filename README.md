@@ -113,6 +113,16 @@ npx playwright install chromium   # once
 npx playwright test               # 10 scenarios
 ```
 
+### CI on pull requests
+
+Every push and PR runs `.github/workflows/ci.yml`'s three jobs: `test` (build + full
+.NET suite with the 90% coverage gate), `e2e` (the Playwright suite above, headless),
+and `package-dry-run` (actually runs `scripts/package-extension.sh` and uploads the
+resulting zip). That last job exists because the release/build pipelines below
+(`release-extension.yml`, `build-main.yml`) only trigger on tags, published Releases, or
+merges to `main` — without a PR-time dry run, a regression in the packaging script
+itself would only surface once someone actually tried to cut a release.
+
 ## Continuous builds on `main`
 
 **`.github/workflows/build-main.yml`** builds and packages the extension every time a

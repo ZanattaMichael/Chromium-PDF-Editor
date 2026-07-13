@@ -1,0 +1,81 @@
+name: Build Main
+
+# Builds a Chrome Web Store-ready zip every time a commit lands on main (typically a
+# PR merge), so there's always an up-to-date, downloadable build without needing to
+# cut an official release for every change. This intentionally does NOT create a git
+# tag, a GitHub Release, or publish anywhere -- it's just a CI build artifact. Actual
+# releases (tag/GitHub Release triggered, optionally published to the Chrome Web
+# Store) are handled by release-extension.yml.
+#
+# The version is computed by bumping the patch number of the latest "v*.*.*" tag
+# (falling back to extension/manifest.json's current version if no tag exists yet),
+# so the artifact is labelled with what the *next* release would be. Because several
+# merges can land before the next real tag, the same base version can repeat across
+# builds -- the artifact name also carries the run number and commit SHA so each
+# build stays uniquely identifiable in the Actions artifact list.
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history/tags, needed to find the previous release
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Build
+        run: dotnet build --configuration Release
+      - name: Test
+        run: dotnet test --configuration Release --no-build --verbosity normal
+
+      - name: Compute next version from the previous tag
+        id: version
+        run: |
+          previous_tag=$(git tag -l 'v*.*.*' | sort -V | tail -1)
+          if [[ -n "$previous_tag" ]]; then
+            base_version="${previous_tag#v}"
+          else
+            base_version=$(python3 -c "import json; print(json.load(open('extension/manifest.json'))['version'])")
+          fi
+          IFS='.' read -r major minor patch <<< "$base_version"
+          next_version="${major}.${minor}.$((patch + 1))"
+
+          echo "Previous tag: ${previous_tag:-(none found; used manifest.json's version as the base)}"
+          echo "Base version: $base_version"
+          echo "Next build version: $next_version"
+
+          echo "version=$next_version" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp manifest.json with the computed version
+        run: |
+          python3 - "${{ steps.version.outputs.version }}" <<'EOF'
+          import json
+          import sys
+
+          path = "extension/manifest.json"
+          with open(path) as f:
+              manifest = json.load(f)
+          manifest["version"] = sys.argv[1]
+          with open(path, "w") as f:
+              json.dump(manifest, f, indent=2)
+              f.write("\n")
+          EOF
+
+      - name: Package extension
+        run: ./scripts/package-extension.sh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdf-editor-extension-v${{ steps.version.outputs.version }}-main.${{ github.run_number }}.${{ steps.version.outputs.short_sha }}
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 30

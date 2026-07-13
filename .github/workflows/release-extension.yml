@@ -1,11 +1,22 @@
 name: Release Extension
 
 # Builds a Chrome Web Store-ready zip of extension/ and publishes it as a build
-# artifact and (on a version tag) a GitHub Release. Optionally uploads straight to
-# the Chrome Web Store when the CHROME_* secrets below are configured.
+# artifact and (on a version tag or a published Release) a GitHub Release asset.
+# Optionally uploads straight to the Chrome Web Store when the CHROME_* secrets
+# below are configured.
+#
+# Two triggers cover the two ways a release gets cut:
+#   - push tags "v*.*.*"   -- `git tag v1.2.3 && git push origin v1.2.3` with no
+#                             GitHub Release object involved.
+#   - release: published   -- creating/publishing a Release in the GitHub UI or API
+#                             (this also creates the tag if it didn't already exist).
+# Both set github.ref to the same refs/tags/<version> ref, so the rest of this
+# workflow doesn't need to distinguish between them.
 on:
   push:
     tags: ["v*.*.*"]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       publish_to_store:

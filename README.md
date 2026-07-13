@@ -113,6 +113,30 @@ npx playwright install chromium   # once
 npx playwright test               # 10 scenarios
 ```
 
+### CI on pull requests
+
+Every push and PR runs `.github/workflows/ci.yml`'s three jobs: `test` (build + full
+.NET suite with the 90% coverage gate), `e2e` (the Playwright suite above, headless),
+and `package-dry-run` (actually runs `scripts/package-extension.sh` and uploads the
+resulting zip). That last job exists because the release/build pipelines below
+(`release-extension.yml`, `build-main.yml`) only trigger on tags, published Releases, or
+merges to `main` — without a PR-time dry run, a regression in the packaging script
+itself would only surface once someone actually tried to cut a release.
+
+## Continuous builds on `main`
+
+**`.github/workflows/build-main.yml`** builds and packages the extension every time a
+commit lands on `main` (typically a PR merge) — so a current, downloadable build always
+exists without cutting an official release for every change. It doesn't create a tag,
+a GitHub Release, or publish anywhere; it's purely a CI artifact.
+
+The version is computed by bumping the patch number of the latest `v*.*.*` tag (falling
+back to `extension/manifest.json`'s committed version if no tag exists yet), so the
+artifact is labelled with what the *next* release would be. Since several merges can
+land before the next real tag, the artifact name also carries the run number and commit
+SHA (`pdf-editor-extension-v<version>-main.<run>.<sha>`) so each build stays uniquely
+identifiable.
+
 ## Releasing the extension
 
 `scripts/package-extension.sh` builds a Chrome Web Store-ready zip: it (re)generates the
@@ -123,14 +147,17 @@ at the zip's root (the format the store requires) rather than nested in a folder
 ./scripts/package-extension.sh          # writes dist/pdf-editor-extension-v<version>.zip
 ```
 
-**CI/CD** (`.github/workflows/release-extension.yml`) automates this on every version tag
-(`git tag v1.2.3 && git push origin v1.2.3`), or on demand via the *Run workflow* button:
+**CI/CD** (`.github/workflows/release-extension.yml`) automates this every time a release
+is cut — whether that's pushing a version tag (`git tag v1.2.3 && git push origin
+v1.2.3`) or **publishing a GitHub Release** in the UI/API (which creates the tag for you
+if it doesn't already exist) — or on demand via the *Run workflow* button:
 
-1. **`verify`** — builds and runs the full .NET test suite, and (for tag pushes) checks
-   the tag matches `manifest.json`'s `version` so a release can't accidentally ship the
-   wrong build.
+1. **`verify`** — builds and runs the full .NET test suite, and (for a tag/release)
+   checks the tag matches `manifest.json`'s `version` so a release can't accidentally
+   ship the wrong build.
 2. **`package`** — runs the script above and uploads the zip as a build artifact.
-3. **`github-release`** (tag pushes only) — attaches the zip to a GitHub Release.
+3. **`github-release`** (tag/release triggers only) — attaches the zip to the GitHub
+   Release (creating it first if you only pushed a tag).
 4. **`publish-to-chrome-web-store`** — uploads (and publishes) straight to the Chrome Web
    Store via its API, **only if** the required secrets are configured on the repository
    (see below); otherwise this step is skipped and the zip from step 2 is still there for

@@ -47,3 +47,25 @@ jobs:
         with:
           name: playwright-report
           path: e2e/playwright-report/
+
+  package-dry-run:
+    # Proves scripts/package-extension.sh (and everything it depends on --
+    # generate-icons.py, extension/manifest.json) still produces a valid Chrome Web
+    # Store zip. This is the same script release-extension.yml and build-main.yml
+    # invoke for real releases/builds, but neither of those trigger on a PR, so
+    # without this job a change to the packaging pipeline itself (or a regression
+    # in it) would only surface at actual release time. Runs on every push and PR.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Package extension
+        run: ./scripts/package-extension.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdf-editor-extension-dry-run
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 7

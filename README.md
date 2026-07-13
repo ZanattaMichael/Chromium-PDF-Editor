@@ -123,14 +123,17 @@ at the zip's root (the format the store requires) rather than nested in a folder
 ./scripts/package-extension.sh          # writes dist/pdf-editor-extension-v<version>.zip
 ```
 
-**CI/CD** (`.github/workflows/release-extension.yml`) automates this on every version tag
-(`git tag v1.2.3 && git push origin v1.2.3`), or on demand via the *Run workflow* button:
+**CI/CD** (`.github/workflows/release-extension.yml`) automates this every time a release
+is cut — whether that's pushing a version tag (`git tag v1.2.3 && git push origin
+v1.2.3`) or **publishing a GitHub Release** in the UI/API (which creates the tag for you
+if it doesn't already exist) — or on demand via the *Run workflow* button:
 
-1. **`verify`** — builds and runs the full .NET test suite, and (for tag pushes) checks
-   the tag matches `manifest.json`'s `version` so a release can't accidentally ship the
-   wrong build.
+1. **`verify`** — builds and runs the full .NET test suite, and (for a tag/release)
+   checks the tag matches `manifest.json`'s `version` so a release can't accidentally
+   ship the wrong build.
 2. **`package`** — runs the script above and uploads the zip as a build artifact.
-3. **`github-release`** (tag pushes only) — attaches the zip to a GitHub Release.
+3. **`github-release`** (tag/release triggers only) — attaches the zip to the GitHub
+   Release (creating it first if you only pushed a tag).
 4. **`publish-to-chrome-web-store`** — uploads (and publishes) straight to the Chrome Web
    Store via its API, **only if** the required secrets are configured on the repository
    (see below); otherwise this step is skipped and the zip from step 2 is still there for

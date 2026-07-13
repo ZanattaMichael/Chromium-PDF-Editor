@@ -1,3 +1,4 @@
+using System.Text;
 using iText.IO.Font.Constants;
 using iText.IO.Image;
 using iText.Kernel.Font;
@@ -6,6 +7,7 @@ using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Annot;
 using iText.Kernel.Pdf.Action;
 using iText.Kernel.Pdf.Canvas;
+using iText.Kernel.Pdf.Xobject;
 using SkiaSharp;
 
 namespace PdfEditor.Tests;
@@ -69,6 +71,247 @@ public static class TestPdfs
             var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
             canvas.BeginText().SetFontAndSize(font, 12)
                 .MoveText(72, 800).ShowText("Document with image").EndText();
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>
+    /// A page with a solid blue square drawn as a genuine inline (BI/ID/EI) image. iText's
+    /// canvas API has no high-level method that reliably emits BI/ID/EI (its "asInline"
+    /// flag on AddImageFittedIntoRectangle still emits a Do-based XObject in this version),
+    /// so the content stream is written by hand, raw pixel bytes included.
+    /// </summary>
+    public static byte[] WithInlineImage(float x, float y, float width, float height)
+    {
+        const int size = 20;
+        byte[] pixels = new byte[size * size * 3];
+        for (int i = 0; i < pixels.Length; i += 3)
+            pixels[i + 2] = 255; // solid blue (R=0, G=0, B=255)
+
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+            var fontName = page.GetResources().AddFont(doc, font).GetValue();
+
+            using var content = new MemoryStream();
+            void Write(string s) => content.Write(Encoding.ASCII.GetBytes(s));
+            Write("q\n");
+            Write($"{width} 0 0 {height} {x} {y} cm\n");
+            Write($"BI\n/W {size}\n/H {size}\n/CS /RGB\n/BPC 8\nID\n");
+            content.Write(pixels);
+            Write("\nEI\nQ\n");
+            Write($"BT /{fontName} 12 Tf 72 800 Td (Document with inline image) Tj ET");
+
+            page.GetPdfObject().Put(PdfName.Contents,
+                (PdfStream)new PdfStream(content.ToArray()).MakeIndirect(doc));
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>
+    /// A page that draws a form XObject at (x, y) whose own content shows <paramref name="formText"/>.
+    /// The form's bounding box occupies exactly the given width/height in page space.
+    /// </summary>
+    public static byte[] WithForm(string formText, float x, float y, float width, float height)
+    {
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+            var form = new PdfFormXObject(new Rectangle(0, 0, width, height));
+            new PdfCanvas(form, doc).BeginText().SetFontAndSize(font, 14)
+                .MoveText(4, height / 2 - 5).ShowText(formText).EndText();
+            new PdfCanvas(page).AddXObjectAt(form, x, y);
+            new PdfCanvas(page).BeginText().SetFontAndSize(font, 12)
+                .MoveText(72, 800).ShowText("Document with a form").EndText();
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>
+    /// A chain of <paramref name="depth"/> nested form XObjects, each drawing the next via Do,
+    /// all sharing the same bounding box in page space — used to exercise the recursion
+    /// depth guard in <c>ContentStreamEditor</c>.
+    /// </summary>
+    public static byte[] WithNestedForms(int depth, float x, float y, float width, float height)
+    {
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+
+            PdfFormXObject? previous = null;
+            for (int level = depth; level >= 1; level--)
+            {
+                var form = new PdfFormXObject(new Rectangle(0, 0, width, height));
+                var formCanvas = new PdfCanvas(form, doc);
+                if (previous == null)
+                    formCanvas.BeginText().SetFontAndSize(font, 10)
+                        .MoveText(2, 2).ShowText("innermost").EndText();
+                else
+                    formCanvas.AddXObjectAt(previous, 0, 0);
+                previous = form;
+            }
+            new PdfCanvas(page).AddXObjectAt(previous!, x, y);
+            new PdfCanvas(page).BeginText().SetFontAndSize(font, 12)
+                .MoveText(72, 800).ShowText("Document with nested forms").EndText();
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>
+    /// A page whose content stream is written by hand so it can use the low-level
+    /// <c>'</c> and <c>"</c> text-showing operators, which iText's canvas API does not expose.
+    /// </summary>
+    public static byte[] WithQuoteOperators(string firstLine, string secondLine, string thirdLine)
+    {
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+            var fontName = page.GetResources().AddFont(doc, font);
+
+            string Escape(string s) => s.Replace("\\", "\\\\").Replace("(", "\\(").Replace(")", "\\)");
+            string content =
+                $"BT\n/{fontName.GetValue()} 12 Tf\n14 TL\n72 700 Td\n" +
+                $"({Escape(firstLine)}) Tj\n" +
+                $"({Escape(secondLine)}) '\n" +
+                $"0 0 ({Escape(thirdLine)}) \"\n" +
+                "ET";
+            page.GetPdfObject().Put(PdfName.Contents,
+                (PdfStream)new PdfStream(Encoding.ASCII.GetBytes(content)).MakeIndirect(doc));
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>
+    /// A page whose content stream shows two strings via a single low-level <c>TJ</c>
+    /// operator (an explicit array of string/number operands), with a real kerning
+    /// number between them. iText's high-level canvas API rarely emits <c>TJ</c> for
+    /// simple text, so this is written by hand.
+    /// </summary>
+    public static byte[] WithTjArray(string first, string second, float x, float y, float size)
+    {
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+            var fontName = page.GetResources().AddFont(doc, font).GetValue();
+
+            string Escape(string s) => s.Replace("\\", "\\\\").Replace("(", "\\(").Replace(")", "\\)");
+            string content =
+                $"BT\n/{fontName} {size} Tf\n{x} {y} Td\n" +
+                $"[({Escape(first)}) -250 ({Escape(second)})] TJ\nET";
+            page.GetPdfObject().Put(PdfName.Contents,
+                (PdfStream)new PdfStream(Encoding.ASCII.GetBytes(content)).MakeIndirect(doc));
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>
+    /// A page whose content stream shows a <c>TJ</c> array containing an empty string
+    /// alongside two real words. Some renderers (including iText's own event source)
+    /// never fire a text-render event for a zero-length string, which makes the number
+    /// of render events disagree with the number of string operands in the array — the
+    /// scenario <c>ContentStreamEditor</c>'s encoding-mismatch fallback guards against.
+    /// </summary>
+    public static byte[] WithTjArrayContainingEmptyString(string first, string second, float x, float y, float size)
+    {
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+            var fontName = page.GetResources().AddFont(doc, font).GetValue();
+
+            string Escape(string s) => s.Replace("\\", "\\\\").Replace("(", "\\(").Replace(")", "\\)");
+            string content =
+                $"BT\n/{fontName} {size} Tf\n{x} {y} Td\n" +
+                $"[({Escape(first)}) -200 () -200 ({Escape(second)})] TJ\nET";
+            page.GetPdfObject().Put(PdfName.Contents,
+                (PdfStream)new PdfStream(Encoding.ASCII.GetBytes(content)).MakeIndirect(doc));
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>A page whose content stream calls <c>Do</c> for an XObject name that is not
+    /// registered in the page's resources at all (a dangling/invalid reference).</summary>
+    public static byte[] WithDanglingXObjectReference(string visibleText, float x, float y, float size)
+    {
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+            var fontName = page.GetResources().AddFont(doc, font).GetValue();
+
+            string content =
+                "q /Ghost Do Q\n" +
+                $"BT /{fontName} {size} Tf {x} {y} Td ({visibleText}) Tj ET";
+            page.GetPdfObject().Put(PdfName.Contents,
+                (PdfStream)new PdfStream(Encoding.ASCII.GetBytes(content)).MakeIndirect(doc));
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>
+    /// A page with an XObject whose Subtype is neither Image nor Form (a made-up
+    /// subtype), used to exercise the redactor's passthrough for unrecognised XObjects.
+    /// </summary>
+    public static byte[] WithUnknownXObjectSubtype(string visibleText, float x, float y, float size)
+    {
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+            var fontName = page.GetResources().AddFont(doc, font).GetValue();
+
+            var weird = (PdfStream)new PdfStream(Array.Empty<byte>()).MakeIndirect(doc);
+            weird.Put(PdfName.Type, PdfName.XObject);
+            weird.Put(PdfName.Subtype, new PdfName("Mystery"));
+            var xobjects = page.GetResources().GetResource(PdfName.XObject) ?? new PdfDictionary();
+            xobjects.Put(new PdfName("Weird1"), weird);
+            page.GetResources().GetPdfObject().Put(PdfName.XObject, xobjects);
+
+            string content =
+                "q /Weird1 Do Q\n" +
+                $"BT /{fontName} {size} Tf {x} {y} Td ({visibleText}) Tj ET";
+            page.GetPdfObject().Put(PdfName.Contents,
+                (PdfStream)new PdfStream(Encoding.ASCII.GetBytes(content)).MakeIndirect(doc));
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>
+    /// An otherwise-normal image XObject whose declared bit depth is invalid for its
+    /// color space (PDF only allows 1/2/4/8/16 bits per component; this sets 3) — the
+    /// structure looks fine but decoding throws, exercising the pixel-scrubber's
+    /// exception-handling path.
+    /// </summary>
+    public static byte[] WithCorruptImage(float x, float y, float width, float height)
+    {
+        byte[] pdf = WithImage(x, y, width, height);
+
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfReader(new MemoryStream(pdf)), new PdfWriter(output)))
+        {
+            var xobjects = doc.GetPage(1).GetResources().GetResource(PdfName.XObject);
+            foreach (var key in xobjects.KeySet())
+            {
+                var stream = xobjects.GetAsStream(key);
+                if (stream != null && PdfName.Image.Equals(stream.GetAsName(PdfName.Subtype)))
+                {
+                    stream.Put(PdfName.BitsPerComponent, new PdfNumber(3));
+                    stream.SetModified();
+                }
+            }
         }
         return output.ToArray();
     }

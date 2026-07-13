@@ -19,6 +19,19 @@ public class TextToolsTests
     }
 
     [Fact]
+    public void GetTextInRegion_InsertsASpace_BetweenSeparateTextRunsOnTheSameLine()
+    {
+        // Two independent ShowText calls on the same baseline, positioned with a gap but
+        // with no space glyph of their own: AssembleText must recognise the visual gap
+        // and stitch them back together with an inferred space.
+        byte[] pdf = TestPdfs.WithText(("Hello", 72, 700, 14), ("World", 160, 700, 14));
+
+        var region = TextTools.GetTextInRegion(pdf, new RectRegion(1, 60, 690, 200, 30));
+
+        Assert.Equal("Hello World", region.Text);
+    }
+
+    [Fact]
     public void GetTextInRegion_EmptyRegion_ReturnsEmpty()
     {
         byte[] pdf = TestPdfs.WithText(("hello", 72, 700, 12));

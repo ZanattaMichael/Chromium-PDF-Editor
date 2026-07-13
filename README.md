@@ -66,12 +66,37 @@ Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```bash
 dotnet build            # build everything
-dotnet test             # run the .NET suite (52 tests: 37 unit + 15 integration)
+dotnet test             # run the .NET suite (98 tests: 56 + 27 unit, 15 integration)
 ```
 
-The integration tests launch the real host binary and speak Chrome's framed protocol
-over stdin/stdout — ping, chunked requests/responses, and full user workflows
-(edit → redact → merge → encrypt → sign) are exercised end to end.
+- **`PdfEditor.Core.Tests`** — unit tests for the PDF engine (redaction, text editing,
+  merge, encryption, signatures, rendering), including hard-to-reach paths like nested
+  form XObjects, the recursion depth guard, inline images, low-level `'`/`"` text
+  operators, and the pixel-scrubber's decode-failure handling.
+- **`PdfEditor.NativeHost.Tests`** — fast in-process unit tests for the JSON dispatcher
+  and chunk reassembly (malformed input, unknown actions, every action's happy path,
+  large-response chunking), with no process spawning.
+- **`PdfEditor.IntegrationTests`** — launches the real host binary and speaks Chrome's
+  framed protocol over stdin/stdout end to end: ping, chunked requests/responses, and
+  full user workflows (edit → redact → merge → encrypt → sign).
+
+### Code coverage
+
+```bash
+./scripts/coverage.sh          # run every .NET test project with coverage, print a summary
+./scripts/coverage.sh 90       # same, but fail if line coverage drops below 90%
+```
+
+This generates an HTML report at `coverage-report/index.html` (via a repo-pinned
+[reportgenerator](https://github.com/danielpalme/ReportGenerator) — `dotnet tool restore`
+picks it up from `.config/dotnet-tools.json`, no global install needed). CI runs this on
+every push, gated at 90%; current coverage is **96% lines / 99% methods** overall
+(`PdfEditor.Core` at 98%, `PdfEditor.NativeHost`'s dispatcher at 100%). The remaining gaps
+are deliberately-defensive code that's impractical to hit without corrupting internal
+state: an encoding-mismatch fallback in `ContentStreamEditor` for text-extraction edge
+cases no known encoder produces, two best-effort certificate-field parsing catches in
+`Signer`, and `NativeHost`'s `Program.cs` entry point (exercised as a real process by the
+integration tests, which coverage instrumentation can't see across a process boundary).
 
 ### Browser end-to-end tests (Playwright)
 

@@ -15,8 +15,13 @@ jobs:
           dotnet-version: "8.0.x"
       - name: Build
         run: dotnet build --configuration Release
-      - name: Test
-        run: dotnet test --configuration Release --no-build --verbosity normal
+      - name: Test with coverage (gated at 90% line coverage)
+        run: ./scripts/coverage.sh 90 --configuration Release
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage-report/
 
   e2e:
     runs-on: ubuntu-latest

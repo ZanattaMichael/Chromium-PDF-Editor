@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>PDF Editor</title>
+  <link rel="stylesheet" href="viewer.css" />
+</head>
+<body>
+  <header id="toolbar">
+    <div class="group">
+      <button id="btn-open" title="Open a PDF file">📂 Open</button>
+      <button id="btn-save" title="Save the edited PDF" disabled>💾 Save</button>
+      <button id="btn-undo" title="Undo last applied change" disabled>↩ Undo</button>
+    </div>
+    <div class="group" id="tools">
+      <button id="tool-select" class="tool active" title="Pan / select">🖐</button>
+      <button id="tool-edit" class="tool" title="Edit text: drag a box around the text to change" disabled>✏ Edit text</button>
+      <button id="tool-redact" class="tool" title="Redact: drag boxes over content to black out" disabled>⬛ Redact</button>
+      <button id="tool-sign" class="tool" title="Place a signature: drag where it should go" disabled>🖋 Sign</button>
+    </div>
+    <div class="group">
+      <button id="btn-find" title="Find &amp; replace text" disabled>🔍 Replace</button>
+      <button id="btn-merge" title="Append other PDFs to this one" disabled>➕ Merge</button>
+      <button id="btn-protect" title="Password-protect (AES-256)" disabled>🔒 Protect</button>
+      <button id="btn-digital" title="Digitally sign with a certificate" disabled>🪪 Certify</button>
+    </div>
+    <div class="group" id="nav">
+      <button id="btn-prev" title="Previous page" disabled>◀</button>
+      <span id="page-label">– / –</span>
+      <button id="btn-next" title="Next page" disabled>▶</button>
+      <button id="btn-zoom-out" title="Zoom out" disabled>−</button>
+      <span id="zoom-label">100%</span>
+      <button id="btn-zoom-in" title="Zoom in" disabled>＋</button>
+    </div>
+  </header>
+
+  <main id="workspace">
+    <div id="scroll-area">
+      <div id="page-wrap">
+        <img id="page-image" alt="PDF page" draggable="false" />
+        <div id="overlay"></div>
+      </div>
+      <div id="empty-state">
+        <h1>PDF Editor</h1>
+        <p>Open a PDF to start editing, or navigate to any PDF and it will open here automatically.</p>
+        <button id="btn-open-empty">📂 Open a PDF…</button>
+        <p id="host-status" class="muted"></p>
+      </div>
+    </div>
+
+    <aside id="panel" hidden>
+      <div id="panel-redact" class="panel-section" hidden>
+        <h2>Redact</h2>
+        <p class="muted">Drag boxes over content. Content behind each box is <strong>permanently removed</strong> when applied.</p>
+        <ul id="redact-list"></ul>
+        <div class="actions">
+          <button id="redact-preview" disabled>👁 Preview</button>
+          <button id="redact-apply" class="danger" disabled>Apply redaction</button>
+          <button id="redact-clear" disabled>Clear</button>
+        </div>
+      </div>
+
+      <div id="panel-edit" class="panel-section" hidden>
+        <h2>Edit text</h2>
+        <p class="muted">Text found in the selected region:</p>
+        <textarea id="edit-text" rows="5"></textarea>
+        <label>Font size <input id="edit-size" type="number" min="4" max="96" step="0.5" /></label>
+        <div class="actions">
+          <button id="edit-apply">Apply</button>
+          <button id="edit-cancel">Cancel</button>
+        </div>
+      </div>
+
+      <div id="panel-sign" class="panel-section" hidden>
+        <h2>Signature</h2>
+        <div class="tabs">
+          <button id="sign-tab-draw" class="tab active">Draw</button>
+          <button id="sign-tab-upload" class="tab">Upload</button>
+        </div>
+        <div id="sign-draw">
+          <canvas id="sign-pad" width="320" height="120"></canvas>
+          <button id="sign-pad-clear">Clear pad</button>
+        </div>
+        <div id="sign-upload" hidden>
+          <input id="sign-file" type="file" accept="image/png,image/jpeg" />
+        </div>
+        <div class="actions">
+          <button id="sign-apply">Place signature</button>
+          <button id="sign-cancel">Cancel</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <footer id="statusbar">
+    <span id="status"></span>
+    <span id="badges"></span>
+  </footer>
+
+  <dialog id="modal"></dialog>
+  <input id="file-input" type="file" accept="application/pdf" hidden />
+  <input id="merge-input" type="file" accept="application/pdf" multiple hidden />
+  <input id="pfx-input" type="file" accept=".p12,.pfx" hidden />
+
+  <script type="module" src="viewer.js"></script>
+</body>
+</html>

@@ -1,0 +1,223 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using PdfEditor.Core;
+
+namespace PdfEditor.NativeHost;
+
+/// <summary>
+/// Stateless JSON dispatcher. Every request carries the document(s) as base64; every
+/// response returns the transformed document the same way. Responses larger than the
+/// native-messaging outgoing limit are split into chunk frames that the extension's
+/// background worker reassembles.
+/// </summary>
+public sealed class MessageProcessor
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    /// <summary>Handles one request and returns the JSON frames to emit (1..n).</summary>
+    public IReadOnlyList<string> Handle(string requestJson)
+    {
+        string id = "";
+        try
+        {
+            var request = JsonNode.Parse(requestJson)?.AsObject()
+                ?? throw new InvalidDataException("Request is not a JSON object.");
+            id = request["id"]?.GetValue<string>() ?? "";
+            string action = request["action"]?.GetValue<string>()
+                ?? throw new InvalidDataException("Missing 'action'.");
+            var payload = request["payload"]?.AsObject() ?? new JsonObject();
+
+            object result = Dispatch(action, payload);
+            return Frame(id, ok: true, JsonSerializer.SerializeToNode(result, JsonOptions));
+        }
+        catch (Exception ex)
+        {
+            return Frame(id, ok: false, new JsonObject { ["error"] = ex.Message });
+        }
+    }
+
+    private static object Dispatch(string action, JsonObject p) => action switch
+    {
+        "ping" => new { pong = true, version = typeof(MessageProcessor).Assembly.GetName().Version?.ToString() },
+        "info" => Info(p),
+        "render" => Render(p),
+        "redact" => Redact(p),
+        "get-region-text" => GetRegionText(p),
+        "replace-region-text" => ReplaceRegionText(p),
+        "find-text" => FindTextAction(p),
+        "replace-all" => ReplaceAllAction(p),
+        "merge" => MergeAction(p),
+        "encrypt" => EncryptAction(p),
+        "decrypt" => DecryptAction(p),
+        "sign-image" => SignImage(p),
+        "sign-digital" => SignDigital(p),
+        "signatures" => Signatures(p),
+        "create-cert" => CreateCert(p),
+        _ => throw new InvalidDataException($"Unknown action '{action}'.")
+    };
+
+    // ------------------------------------------------------------- actions
+
+    private static object Info(JsonObject p)
+    {
+        var info = PdfInspector.GetInfo(Pdf(p), Password(p));
+        return new
+        {
+            pageCount = info.PageCount,
+            encrypted = info.IsEncrypted,
+            pages = info.Pages.Select(pg => new { number = pg.Number, width = pg.Width, height = pg.Height })
+        };
+    }
+
+    private static object Render(JsonObject p)
+    {
+        int page = p["page"]!.GetValue<int>();
+        int dpi = p["dpi"]?.GetValue<int>() ?? 144;
+        byte[] png = PageRenderer.RenderPagePng(Pdf(p), page, dpi, Password(p));
+        return new { png = Convert.ToBase64String(png) };
+    }
+
+    private static object Redact(JsonObject p)
+    {
+        var result = Redactor.Redact(Pdf(p), Regions(p["regions"]!.AsArray()), Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object GetRegionText(JsonObject p)
+    {
+        var text = TextTools.GetTextInRegion(Pdf(p), Region(p["region"]!.AsObject()), Password(p));
+        return new { text = text.Text, fontSize = text.FontSize };
+    }
+
+    private static object ReplaceRegionText(JsonObject p)
+    {
+        var result = TextTools.ReplaceTextInRegion(Pdf(p), Region(p["region"]!.AsObject()),
+            p["text"]?.GetValue<string>() ?? "", p["fontSize"]?.GetValue<float>(), Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object FindTextAction(JsonObject p)
+    {
+        var matches = TextTools.FindText(Pdf(p), p["phrase"]?.GetValue<string>() ?? "", Password(p));
+        return new
+        {
+            matches = matches.Select(m => new
+            {
+                page = m.Page, text = m.Text, x = m.X, y = m.Y, width = m.Width, height = m.Height
+            })
+        };
+    }
+
+    private static object ReplaceAllAction(JsonObject p)
+    {
+        var (result, count) = TextTools.ReplaceAll(Pdf(p),
+            p["phrase"]?.GetValue<string>() ?? "",
+            p["replacement"]?.GetValue<string>() ?? "", Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), count, warnings = result.Warnings };
+    }
+
+    private static object MergeAction(JsonObject p)
+    {
+        var pdfs = p["pdfs"]!.AsArray().Select(n => Convert.FromBase64String(n!.GetValue<string>())).ToList();
+        var passwords = p["passwords"]?.AsArray().Select(n => n?.GetValue<string>()).ToList();
+        return new { pdf = Convert.ToBase64String(Merger.Merge(pdfs, passwords)) };
+    }
+
+    private static object EncryptAction(JsonObject p) => new
+    {
+        pdf = Convert.ToBase64String(Encryptor.Encrypt(Pdf(p),
+            p["userPassword"]!.GetValue<string>(),
+            p["ownerPassword"]?.GetValue<string>(), Password(p)))
+    };
+
+    private static object DecryptAction(JsonObject p) => new
+    {
+        pdf = Convert.ToBase64String(Encryptor.Decrypt(Pdf(p), p["password"]!.GetValue<string>()))
+    };
+
+    private static object SignImage(JsonObject p) => new
+    {
+        pdf = Convert.ToBase64String(Signer.AddImageSignature(Pdf(p),
+            Region(p["region"]!.AsObject()),
+            Convert.FromBase64String(p["png"]!.GetValue<string>()), Password(p)))
+    };
+
+    private static object SignDigital(JsonObject p) => new
+    {
+        pdf = Convert.ToBase64String(Signer.SignDigitally(Pdf(p),
+            Convert.FromBase64String(p["pfx"]!.GetValue<string>()),
+            p["pfxPassword"]!.GetValue<string>(),
+            p["reason"]?.GetValue<string>(),
+            p["location"]?.GetValue<string>(),
+            p["region"] is JsonObject r ? Region(r) : null,
+            p["appearancePng"] is JsonNode img ? Convert.FromBase64String(img.GetValue<string>()) : null,
+            Password(p)))
+    };
+
+    private static object Signatures(JsonObject p) => new
+    {
+        signatures = Signer.GetSignatures(Pdf(p), Password(p)).Select(s => new
+        {
+            name = s.Name, signer = s.SignerName,
+            valid = s.IntegrityValid, coversWholeDocument = s.CoversWholeDocument
+        })
+    };
+
+    private static object CreateCert(JsonObject p) => new
+    {
+        pfx = Convert.ToBase64String(CertificateFactory.CreateSelfSignedPkcs12(
+            p["name"]?.GetValue<string>() ?? "PDF Editor User",
+            p["password"]!.GetValue<string>()))
+    };
+
+    // ------------------------------------------------------------- helpers
+
+    private static byte[] Pdf(JsonObject p) =>
+        Convert.FromBase64String(p["pdf"]?.GetValue<string>()
+            ?? throw new InvalidDataException("Missing 'pdf'."));
+
+    private static string? Password(JsonObject p) => p["pdfPassword"]?.GetValue<string>();
+
+    private static RectRegion Region(JsonObject r) => new(
+        r["page"]!.GetValue<int>(),
+        r["x"]!.GetValue<float>(), r["y"]!.GetValue<float>(),
+        r["width"]!.GetValue<float>(), r["height"]!.GetValue<float>());
+
+    private static List<RectRegion> Regions(JsonArray arr) =>
+        arr.Select(n => Region(n!.AsObject())).ToList();
+
+    /// <summary>Wraps a result in a single frame, or splits it into chunk frames when large.</summary>
+    private static IReadOnlyList<string> Frame(string id, bool ok, JsonNode? body)
+    {
+        var envelope = new JsonObject
+        {
+            ["id"] = id,
+            ["ok"] = ok,
+            ["result"] = body
+        };
+        string json = envelope.ToJsonString(JsonOptions);
+        if (Encoding.UTF8.GetByteCount(json) <= NativeMessaging.MaxOutgoingFrame)
+            return new[] { json };
+
+        string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+        const int chunkSize = 600_000;
+        int count = (encoded.Length + chunkSize - 1) / chunkSize;
+        var frames = new List<string>(count);
+        for (int i = 0; i < count; i++)
+        {
+            var chunk = new JsonObject
+            {
+                ["id"] = id,
+                ["chunkIndex"] = i,
+                ["chunkCount"] = count,
+                ["data"] = encoded.Substring(i * chunkSize, Math.Min(chunkSize, encoded.Length - i * chunkSize))
+            };
+            frames.Add(chunk.ToJsonString(JsonOptions));
+        }
+        return frames;
+    }
+}

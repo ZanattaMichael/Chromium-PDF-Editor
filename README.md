@@ -113,6 +113,51 @@ npx playwright install chromium   # once
 npx playwright test               # 10 scenarios
 ```
 
+## Releasing the extension
+
+`scripts/package-extension.sh` builds a Chrome Web Store-ready zip: it (re)generates the
+icons, validates `extension/manifest.json`, and zips `extension/` so `manifest.json` sits
+at the zip's root (the format the store requires) rather than nested in a folder.
+
+```bash
+./scripts/package-extension.sh          # writes dist/pdf-editor-extension-v<version>.zip
+```
+
+**CI/CD** (`.github/workflows/release-extension.yml`) automates this on every version tag
+(`git tag v1.2.3 && git push origin v1.2.3`), or on demand via the *Run workflow* button:
+
+1. **`verify`** — builds and runs the full .NET test suite, and (for tag pushes) checks
+   the tag matches `manifest.json`'s `version` so a release can't accidentally ship the
+   wrong build.
+2. **`package`** — runs the script above and uploads the zip as a build artifact.
+3. **`github-release`** (tag pushes only) — attaches the zip to a GitHub Release.
+4. **`publish-to-chrome-web-store`** — uploads (and publishes) straight to the Chrome Web
+   Store via its API, **only if** the required secrets are configured on the repository
+   (see below); otherwise this step is skipped and the zip from step 2 is still there for
+   manual upload through the [Developer Dashboard](https://chrome.google.com/webstore/devconsole).
+
+### Enabling automatic Chrome Web Store publishing (optional)
+
+Automatic publishing needs a one-time setup, since the store's API is OAuth-based and
+tied to your developer account:
+
+1. Create/identify the item in the [Developer Dashboard](https://chrome.google.com/webstore/devconsole)
+   and note its **extension ID**.
+2. Follow Google's [API setup guide](https://developer.chrome.com/docs/webstore/using_webstore_api/)
+   to create OAuth client credentials and obtain a refresh token (the
+   [`chrome-webstore-upload-cli`](https://github.com/fregante/chrome-webstore-upload-keys)
+   `generate-tokens` helper automates the OAuth dance).
+3. Add these as repository secrets (Settings → Secrets and variables → Actions), ideally
+   scoped to a `chrome-web-store` [environment](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment)
+   with required reviewers for extra safety before publishing:
+   - `CHROME_EXTENSION_ID`
+   - `CHROME_CLIENT_ID`
+   - `CHROME_CLIENT_SECRET`
+   - `CHROME_REFRESH_TOKEN`
+
+Without these secrets, everything else in the pipeline still works — you just upload the
+built zip by hand the first time (which Chrome requires anyway, to create the listing).
+
 ## Installing
 
 1. **Generate the icons** (one-time, standard-library Python only):

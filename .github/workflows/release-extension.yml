@@ -1,0 +1,114 @@
+name: Release Extension
+
+# Builds a Chrome Web Store-ready zip of extension/ and publishes it as a build
+# artifact and (on a version tag) a GitHub Release. Optionally uploads straight to
+# the Chrome Web Store when the CHROME_* secrets below are configured.
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      publish_to_store:
+        description: "Also upload the package to the Chrome Web Store (requires CHROME_* secrets)"
+        type: boolean
+        default: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build
+        run: dotnet build --configuration Release
+      - name: Test
+        run: dotnet test --configuration Release --no-build --verbosity normal
+      - name: Tag must match manifest.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          manifest_version=$(python3 -c "import json; print(json.load(open('extension/manifest.json'))['version'])")
+          if [[ "$tag_version" != "$manifest_version" ]]; then
+            echo "::error::Tag v$tag_version does not match extension/manifest.json version $manifest_version"
+            exit 1
+          fi
+
+  package:
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+      zip_path: ${{ steps.package.outputs.zip_path }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Package extension
+        id: package
+        run: ./scripts/package-extension.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdf-editor-extension-v${{ steps.package.outputs.version }}
+          path: ${{ steps.package.outputs.zip_path }}
+          if-no-files-found: error
+
+  github-release:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pdf-editor-extension-v${{ needs.package.outputs.version }}
+          path: dist
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true
+
+  publish-to-chrome-web-store:
+    needs: package
+    if: ${{ github.event.inputs.publish_to_store == 'true' || startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-latest
+    environment: chrome-web-store
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pdf-editor-extension-v${{ needs.package.outputs.version }}
+          path: dist
+      - name: Check Chrome Web Store credentials are configured
+        id: creds
+        run: |
+          if [[ -n "${{ secrets.CHROME_EXTENSION_ID }}" && -n "${{ secrets.CHROME_CLIENT_ID }}" \
+                && -n "${{ secrets.CHROME_CLIENT_SECRET }}" && -n "${{ secrets.CHROME_REFRESH_TOKEN }}" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping Chrome Web Store upload — CHROME_EXTENSION_ID/CHROME_CLIENT_ID/CHROME_CLIENT_SECRET/CHROME_REFRESH_TOKEN secrets are not all set. The packaged zip is still available as a build artifact for manual upload."
+          fi
+      - name: Upload (and publish) to the Chrome Web Store
+        if: steps.creds.outputs.configured == 'true'
+        env:
+          EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+        run: |
+          zip_path=$(ls dist/*.zip | head -1)
+          npx --yes chrome-webstore-upload-cli@3 upload \
+            --source "$zip_path" \
+            --extension-id "$EXTENSION_ID" \
+            --client-id "$CLIENT_ID" \
+            --client-secret "$CLIENT_SECRET" \
+            --refresh-token "$REFRESH_TOKEN"
+          npx --yes chrome-webstore-upload-cli@3 publish \
+            --extension-id "$EXTENSION_ID" \
+            --client-id "$CLIENT_ID" \
+            --client-secret "$CLIENT_SECRET" \
+            --refresh-token "$REFRESH_TOKEN"

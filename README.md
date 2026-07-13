@@ -113,6 +113,20 @@ npx playwright install chromium   # once
 npx playwright test               # 10 scenarios
 ```
 
+## Continuous builds on `main`
+
+**`.github/workflows/build-main.yml`** builds and packages the extension every time a
+commit lands on `main` (typically a PR merge) — so a current, downloadable build always
+exists without cutting an official release for every change. It doesn't create a tag,
+a GitHub Release, or publish anywhere; it's purely a CI artifact.
+
+The version is computed by bumping the patch number of the latest `v*.*.*` tag (falling
+back to `extension/manifest.json`'s committed version if no tag exists yet), so the
+artifact is labelled with what the *next* release would be. Since several merges can
+land before the next real tag, the artifact name also carries the run number and commit
+SHA (`pdf-editor-extension-v<version>-main.<run>.<sha>`) so each build stays uniquely
+identifiable.
+
 ## Releasing the extension
 
 `scripts/package-extension.sh` builds a Chrome Web Store-ready zip: it (re)generates the

@@ -29,6 +29,10 @@ EOF
 VERSION=$(python3 -c "import json; print(json.load(open('$EXTENSION_DIR/manifest.json'))['version'])")
 
 mkdir -p "$OUTPUT_DIR"
+# Resolve to an absolute path: the zip is written from inside a subshell that cds
+# into $EXTENSION_DIR below, so a relative $OUTPUT_DIR (e.g. the plain "dist" that
+# CI passes in) would otherwise be looked up relative to the wrong directory.
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 ZIP_PATH="$OUTPUT_DIR/pdf-editor-extension-v${VERSION}.zip"
 rm -f "$ZIP_PATH"
 

@@ -53,6 +53,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
 
       - name: Determine the version to package
         id: version
@@ -112,12 +115,20 @@ jobs:
           path: ${{ steps.package.outputs.zip_path }}
           if-no-files-found: error
 
+      - name: Package native host (all desktop platforms)
+        run: |
+          for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
+            ./scripts/package-host.sh "$rid" dist
+          done
+
       - name: Attach to the GitHub Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.release.tag_name }}
-          files: ${{ steps.package.outputs.zip_path }}
+          files: |
+            dist/pdf-editor-extension-*.zip
+            dist/pdf-editor-host-*.zip
 
   publish-to-chrome-web-store:
     needs: package

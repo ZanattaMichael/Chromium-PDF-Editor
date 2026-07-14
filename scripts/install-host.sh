@@ -1,13 +1,49 @@
 #!/usr/bin/env bash
-# Publishes the native host and registers it with Chromium-based browsers.
-# Usage: ./scripts/install-host.sh <extension-id> [--configuration Release]
+# Installs the PDF Editor native messaging host and registers it with Chromium-based
+# browsers (Chrome, Chromium, Edge, Brave).
+#
+# By default it downloads a prebuilt, self-contained host from the project's latest
+# GitHub release -- the .NET runtime and native libraries are bundled, so no .NET SDK
+# is required. Pass --from-source to build it locally with `dotnet publish` instead
+# (for contributors, or platforms without a prebuilt asset).
+#
+# Usage:
+#   ./scripts/install-host.sh <extension-id> [options]
+#     --from-source              build locally with dotnet instead of downloading
+#     --configuration <cfg>      build configuration for --from-source (default: Release)
+#     --repo <owner/name>        GitHub repo to download from (default: inferred from git remote)
+#     --tag <vX.Y.Z>             release tag to download (default: latest release)
 set -euo pipefail
 
-EXTENSION_ID="${1:-}"
-CONFIGURATION="${3:-Release}"
+DEFAULT_REPO="ZanattaMichael/Chromium-PDF-Editor"
+
+EXTENSION_ID=""
+FROM_SOURCE=false
+CONFIGURATION="Release"
+REPO_OVERRIDE=""
+TAG_OVERRIDE=""
+
+usage() {
+  echo "Usage: $0 <extension-id> [--from-source] [--configuration Release] [--repo owner/name] [--tag vX.Y.Z]" >&2
+  echo "Find the extension ID at chrome://extensions with Developer mode enabled." >&2
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --from-source) FROM_SOURCE=true; shift ;;
+    --configuration) CONFIGURATION="${2:?--configuration needs a value}"; shift 2 ;;
+    --repo) REPO_OVERRIDE="${2:?--repo needs a value}"; shift 2 ;;
+    --tag) TAG_OVERRIDE="${2:?--tag needs a value}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "Unknown option: $1" >&2; usage; exit 1 ;;
+    *)
+      if [[ -z "$EXTENSION_ID" ]]; then EXTENSION_ID="$1"; else echo "Unexpected argument: $1" >&2; usage; exit 1; fi
+      shift ;;
+  esac
+done
+
 if [[ -z "$EXTENSION_ID" ]]; then
-  echo "Usage: $0 <extension-id> [--configuration Release]" >&2
-  echo "Find the ID at chrome://extensions with Developer mode enabled." >&2
+  usage
   exit 1
 fi
 
@@ -15,17 +51,101 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PUBLISH_DIR="$HOME/.local/share/pdf-editor-host"
 HOST_NAME="com.pdfeditor.host"
 
-echo "Publishing native host ($CONFIGURATION)..."
-dotnet publish "$REPO_ROOT/src/PdfEditor.NativeHost" -c "$CONFIGURATION" -o "$PUBLISH_DIR" --nologo -v q
+# The runtime identifier for this machine, in the naming the release assets use.
+detect_rid() {
+  local os arch
+  case "$(uname -s)" in
+    Linux) os="linux" ;;
+    Darwin) os="osx" ;;
+    *) echo "error: unsupported OS '$(uname -s)' for a prebuilt host — use --from-source" >&2; exit 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) arch="x64" ;;
+    arm64|aarch64) arch="arm64" ;;
+    *) echo "error: unsupported architecture '$(uname -m)' for a prebuilt host — use --from-source" >&2; exit 1 ;;
+  esac
+  # Only osx ships both x64 and arm64; linux is published as x64 only.
+  if [[ "$os" == "linux" && "$arch" != "x64" ]]; then
+    echo "error: no prebuilt linux-$arch host is published — use --from-source" >&2
+    exit 1
+  fi
+  echo "$os-$arch"
+}
 
-LAUNCHER="$PUBLISH_DIR/pdf-editor-host.sh"
-cat > "$LAUNCHER" <<LAUNCH
+# owner/name to download from: explicit override, else inferred from origin's URL, else default.
+resolve_repo() {
+  if [[ -n "$REPO_OVERRIDE" ]]; then echo "$REPO_OVERRIDE"; return; fi
+  local url
+  url="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)"
+  if [[ "$url" =~ github\.com[:/]+([^/]+)/([^/.]+) ]]; then
+    echo "${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+  else
+    echo "$DEFAULT_REPO"
+  fi
+}
+
+extract_tag() {
+  grep -m1 '"tag_name"' | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/'
+}
+
+# The release tag to install: explicit override, else the latest final release, else the
+# newest release of any kind (so a repo with only prereleases still resolves).
+resolve_tag() {
+  local repo="$1" tag
+  if [[ -n "$TAG_OVERRIDE" ]]; then echo "$TAG_OVERRIDE"; return; fi
+  tag="$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null | extract_tag || true)"
+  if [[ -z "$tag" ]]; then
+    tag="$(curl -fsSL "https://api.github.com/repos/$repo/releases?per_page=1" 2>/dev/null | extract_tag || true)"
+  fi
+  if [[ -z "$tag" ]]; then
+    echo "error: could not determine the latest release tag for $repo — pass --tag <vX.Y.Z>" >&2
+    exit 1
+  fi
+  echo "$tag"
+}
+
+if [[ "$FROM_SOURCE" == true ]]; then
+  echo "Building native host from source ($CONFIGURATION)..."
+  rm -rf "$PUBLISH_DIR"
+  mkdir -p "$PUBLISH_DIR"
+  dotnet publish "$REPO_ROOT/src/PdfEditor.NativeHost" -c "$CONFIGURATION" -o "$PUBLISH_DIR" --nologo -v q
+  # A framework-dependent build runs via the installed `dotnet`, so launch it through a shim.
+  LAUNCHER="$PUBLISH_DIR/pdf-editor-host.sh"
+  cat > "$LAUNCHER" <<LAUNCH
 #!/usr/bin/env bash
 exec dotnet "$PUBLISH_DIR/PdfEditor.NativeHost.dll" "\$@"
 LAUNCH
-chmod +x "$LAUNCHER"
+  chmod +x "$LAUNCHER"
+  HOST_PATH="$LAUNCHER"
+else
+  for tool in curl unzip; do
+    command -v "$tool" >/dev/null 2>&1 || { echo "error: '$tool' is required to download the prebuilt host — install it or use --from-source" >&2; exit 1; }
+  done
+  RID="$(detect_rid)"
+  REPO="$(resolve_repo)"
+  TAG="$(resolve_tag "$REPO")"
+  URL="https://github.com/$REPO/releases/download/$TAG/pdf-editor-host-$RID.zip"
 
-MANIFEST_JSON=$(sed -e "s|__HOST_PATH__|$LAUNCHER|" -e "s|__EXTENSION_ID__|$EXTENSION_ID|" \
+  echo "Downloading prebuilt host $TAG ($RID) from $REPO..."
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT
+  if ! curl -fSL -o "$TMP/host.zip" "$URL"; then
+    echo "error: could not download $URL" >&2
+    echo "       That release may not have a $RID asset yet. Try --from-source, or --tag/--repo." >&2
+    exit 1
+  fi
+  rm -rf "$PUBLISH_DIR"
+  mkdir -p "$PUBLISH_DIR"
+  unzip -q -o "$TMP/host.zip" -d "$PUBLISH_DIR"
+  HOST_PATH="$PUBLISH_DIR/PdfEditor.NativeHost"
+  if [[ ! -f "$HOST_PATH" ]]; then
+    echo "error: the downloaded package did not contain the host executable" >&2
+    exit 1
+  fi
+  chmod +x "$HOST_PATH"
+fi
+
+MANIFEST_JSON=$(sed -e "s|__HOST_PATH__|$HOST_PATH|" -e "s|__EXTENSION_ID__|$EXTENSION_ID|" \
   "$REPO_ROOT/scripts/com.pdfeditor.host.json.template")
 
 case "$(uname -s)" in

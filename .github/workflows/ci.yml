@@ -49,23 +49,30 @@ jobs:
           path: e2e/playwright-report/
 
   package-dry-run:
-    # Proves scripts/package-extension.sh (and everything it depends on --
-    # generate-icons.py, extension/manifest.json) still produces a valid Chrome Web
-    # Store zip. This is the same script release-candidate.yml and release-extension.yml
-    # invoke for real releases/builds, but neither of those trigger on a PR, so
-    # without this job a change to the packaging pipeline itself (or a regression
-    # in it) would only surface at actual release time. Runs on every push and PR.
+    # Proves the packaging pipeline (scripts/package-extension.sh and
+    # scripts/package-host.sh, plus what they depend on -- generate-icons.py,
+    # extension/manifest.json, the native host's self-contained publish) still produces
+    # valid artifacts. These are the same scripts release-candidate.yml and
+    # release-extension.yml invoke for real releases, but neither triggers on a PR, so
+    # without this job a regression in packaging would only surface at release time.
+    # The host is published for just one platform here to keep PR runs fast; the release
+    # workflows build the full desktop matrix. Runs on every push and PR.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
       - name: Package extension
         run: ./scripts/package-extension.sh dist
+      - name: Package native host (linux-x64 only, smoke check for the release matrix)
+        run: ./scripts/package-host.sh linux-x64 dist
       - uses: actions/upload-artifact@v4
         with:
           name: pdf-editor-extension-dry-run
-          path: dist/*.zip
+          path: dist/pdf-editor-extension-*.zip
           if-no-files-found: error
           retention-days: 7

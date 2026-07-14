@@ -1,20 +1,27 @@
 name: Release Candidate
 
 # Every merge to main creates a release candidate: a tag "vX.Y.Z-<build>" (patch-bumped
-# from the latest *final* release tag, ignoring other RC tags) and a GitHub prerelease
-# for it. Creating that prerelease fires release: published, which hands off to
-# release-extension.yml to actually build, test, package, and attach the zip -- this
-# workflow's only job is deciding the version and creating the pointer, so build/package
-# logic lives in exactly one place.
+# from the latest *final* release tag, ignoring other RC tags), a packaged extension zip,
+# self-contained native-host builds for each desktop platform (Windows, Linux, macOS
+# Intel + Apple Silicon), and a GitHub prerelease with all of those attached as assets.
 #
-# Promoting an RC to a real release is a manual step: create a new GitHub Release
-# targeting the RC's commit, but type a clean tag ("vX.Y.Z", no "-<build>" suffix) and
-# leave "Set as a pre-release" unchecked. release-extension.yml treats that the same
-# way -- except a non-prerelease publish also deploys to the Chrome Web Store.
+# This workflow builds, tests, packages, and publishes the prerelease itself rather than
+# handing the packaging off to release-extension.yml -- and it has to. GitHub deliberately
+# does NOT deliver the "release: published" event to other workflows when the release was
+# created by the built-in GITHUB_TOKEN (its anti-recursion rule), so a "create the prerelease
+# here, let release-extension.yml react and attach the zip" design silently never packages
+# anything. The shared packaging logic still lives in one place -- scripts/package-extension.sh
+# -- which both this workflow and release-extension.yml invoke.
 #
-# Tests must pass here before an RC is even created, and must pass again in
-# release-extension.yml before anything is packaged or deployed -- a failing suite
-# blocks the pipeline at every stage.
+# Promoting an RC to a real release is a manual step: create a new GitHub Release targeting
+# the RC's commit, but type a clean tag ("vX.Y.Z", no "-<build>" suffix) and leave "Set as a
+# pre-release" unchecked. That release IS created by a human, so it does fire
+# "release: published" -> release-extension.yml, which packages again and also deploys to the
+# Chrome Web Store.
+#
+# Tests must pass here before an RC is created or packaged, and again in release-extension.yml
+# before a promotion is packaged or deployed -- a failing suite blocks the pipeline at every
+# stage.
 on:
   push:
     branches: ["main"]
@@ -33,6 +40,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
       - name: Build
         run: dotnet build --configuration Release
       - name: Test
@@ -52,27 +63,61 @@ jobs:
           IFS='.' read -r major minor patch <<< "$base_version"
           next_version="${major}.${minor}.$((patch + 1))"
           rc_tag="v${next_version}-${{ github.run_number }}"
+          # Chrome manifest versions allow up to four integer parts, so the build number
+          # becomes a fourth part (tag v1.0.1-57 -> manifest/package version 1.0.1.57).
+          manifest_version="${next_version}.${{ github.run_number }}"
 
           echo "Previous final release tag: ${previous_tag:-(none found; used the version in manifest.json as the base)}"
           echo "Next release candidate: $rc_tag (would promote to v${next_version})"
           echo "tag=$rc_tag" >> "$GITHUB_OUTPUT"
           echo "final_tag=v${next_version}" >> "$GITHUB_OUTPUT"
+          echo "manifest_version=$manifest_version" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp manifest.json with the release-candidate version
+        run: |
+          python3 - "${{ steps.version.outputs.manifest_version }}" <<'EOF'
+          import json
+          import sys
+
+          path = "extension/manifest.json"
+          with open(path) as f:
+              manifest = json.load(f)
+          manifest["version"] = sys.argv[1]
+          with open(path, "w") as f:
+              json.dump(manifest, f, indent=2)
+              f.write("\n")
+          EOF
+
+      - name: Package extension
+        id: package
+        run: ./scripts/package-extension.sh dist
+
+      - name: Package native host (all desktop platforms)
+        run: |
+          for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
+            ./scripts/package-host.sh "$rid" dist
+          done
 
       - name: Create and push the release candidate tag
         run: |
           git tag "${{ steps.version.outputs.tag }}"
           git push origin "${{ steps.version.outputs.tag }}"
 
-      - name: Create the release candidate (prerelease)
+      - name: Create the release candidate (prerelease) and attach the packages
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           prerelease: true
           generate_release_notes: true
+          files: |
+            dist/pdf-editor-extension-*.zip
+            dist/pdf-editor-host-*.zip
           body: |
             Release candidate built from ${{ github.sha }}.
 
-            This is **not** published to the Chrome Web Store. To promote it, create a
-            new Release targeting this commit with the clean tag
-            `${{ steps.version.outputs.final_tag }}` and leave "Set as a pre-release"
-            unchecked.
+            Attached as build artifacts: the packaged extension zip, and a self-contained
+            native-host build for each desktop platform (`pdf-editor-host-<platform>.zip` —
+            the .NET runtime and native libraries are bundled, so no SDK is needed to run it).
+            This is **not** published to the Chrome Web Store. To promote it, create a new
+            Release targeting this commit with the clean tag
+            `${{ steps.version.outputs.final_tag }}` and leave "Set as a pre-release" unchecked.

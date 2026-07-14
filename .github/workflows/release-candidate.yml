@@ -1,0 +1,78 @@
+name: Release Candidate
+
+# Every merge to main creates a release candidate: a tag "vX.Y.Z-<build>" (patch-bumped
+# from the latest *final* release tag, ignoring other RC tags) and a GitHub prerelease
+# for it. Creating that prerelease fires release: published, which hands off to
+# release-extension.yml to actually build, test, package, and attach the zip -- this
+# workflow's only job is deciding the version and creating the pointer, so build/package
+# logic lives in exactly one place.
+#
+# Promoting an RC to a real release is a manual step: create a new GitHub Release
+# targeting the RC's commit, but type a clean tag ("vX.Y.Z", no "-<build>" suffix) and
+# leave "Set as a pre-release" unchecked. release-extension.yml treats that the same
+# way -- except a non-prerelease publish also deploys to the Chrome Web Store.
+#
+# Tests must pass here before an RC is even created, and must pass again in
+# release-extension.yml before anything is packaged or deployed -- a failing suite
+# blocks the pipeline at every stage.
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: write
+
+jobs:
+  release-candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full tag history, needed to find the previous final release
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build
+        run: dotnet build --configuration Release
+      - name: Test
+        run: dotnet test --configuration Release --no-build --verbosity normal
+
+      - name: Compute the release candidate tag
+        id: version
+        run: |
+          # Only a clean "vX.Y.Z" counts as a previous *final* release -- RC tags
+          # ("vX.Y.Z-<build>") must never feed back into the version calculation.
+          previous_tag=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          if [[ -n "$previous_tag" ]]; then
+            base_version="${previous_tag#v}"
+          else
+            base_version=$(python3 -c "import json; print(json.load(open('extension/manifest.json'))['version'])")
+          fi
+          IFS='.' read -r major minor patch <<< "$base_version"
+          next_version="${major}.${minor}.$((patch + 1))"
+          rc_tag="v${next_version}-${{ github.run_number }}"
+
+          echo "Previous final release tag: ${previous_tag:-(none found; used manifest.json's version as the base)}"
+          echo "Next release candidate: $rc_tag (would promote to v${next_version})"
+          echo "tag=$rc_tag" >> "$GITHUB_OUTPUT"
+          echo "final_tag=v${next_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push the release candidate tag
+        run: |
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Create the release candidate (prerelease)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          prerelease: true
+          generate_release_notes: true
+          body: |
+            Release candidate built from ${{ github.sha }}.
+
+            This is **not** published to the Chrome Web Store. To promote it, create a
+            new Release targeting this commit with the clean tag
+            `${{ steps.version.outputs.final_tag }}` and leave "Set as a pre-release"
+            unchecked.

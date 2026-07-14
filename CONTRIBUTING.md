@@ -128,9 +128,10 @@ manually testing an unpacked build or sanity-checking a release before tagging:
 ./scripts/package-extension.sh
 ```
 
-Actual releases are cut by pushing a version tag (`git tag v1.2.3 && git push origin
-v1.2.3`), which drives `.github/workflows/release-extension.yml` — see the README's
-**Releasing the extension** section for what that pipeline does.
+Every merge to `main` automatically builds a release candidate (a `vX.Y.Z-<build>` tag
+and prerelease); promoting one to a real, Chrome Web Store-published release is a manual
+step (create a Release targeting the RC's commit with a clean `vX.Y.Z` tag). See the
+README's **Release cycle: release candidates → promotion** section for the full flow.
 
 ## Questions
 

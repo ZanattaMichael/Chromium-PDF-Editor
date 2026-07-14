@@ -213,6 +213,11 @@ built zip by hand the first time (which Chrome requires anyway, to create the li
 
    This publishes the .NET host and registers `com.pdfeditor.host` for Chrome,
    Chromium, Edge, and Brave.
+
+   > Don't have the .NET SDK? Every [release](../../releases) attaches a self-contained
+   > host build per platform (`pdf-editor-host-<platform>.zip`) with the runtime and
+   > native libraries bundled — unzip it and point a native-messaging host manifest at
+   > the extracted executable instead of running the publish step above.
 4. Restart the browser. The extension's options page shows the host connection status.
 
 ## Usage notes

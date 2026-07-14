@@ -37,11 +37,5 @@
       "run_at": "document_idle"
     }
   ],
-  "options_page": "src/options.html",
-  "web_accessible_resources": [
-    {
-      "resources": ["src/viewer.html"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  "options_page": "src/options.html"
 }

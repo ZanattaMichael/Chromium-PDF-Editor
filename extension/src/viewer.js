@@ -140,12 +140,23 @@ function updateChrome() {
     $('zoom-label').textContent = `${Math.round(state.zoom * 100)}%`;
     document.title = `${state.fileName} — PDF Editor`;
   }
-  const badges = [];
-  if (state.info?.encrypted || state.password) badges.push('<span class="badge locked">🔒 encrypted</span>');
-  for (const s of state.signatures) {
-    badges.push(`<span class="badge signed" title="${s.name}">🖋 ${s.signer ?? 'signed'}${s.valid ? ' ✓' : ' ✗'}</span>`);
+  const badgesEl = $('badges');
+  badgesEl.innerHTML = '';
+  if (state.info?.encrypted || state.password) {
+    const badge = document.createElement('span');
+    badge.className = 'badge locked';
+    badge.textContent = '🔒 encrypted';
+    badgesEl.appendChild(badge);
   }
-  $('badges').innerHTML = badges.join('');
+  for (const s of state.signatures) {
+    // s.name/s.signer come from the PDF's (attacker-controlled) signature
+    // metadata -- never treat them as HTML.
+    const badge = document.createElement('span');
+    badge.className = 'badge signed';
+    badge.title = s.name ?? '';
+    badge.textContent = `🖋 ${s.signer ?? 'signed'}${s.valid ? ' ✓' : ' ✗'}`;
+    badgesEl.appendChild(badge);
+  }
 }
 
 // -------------------------------------------------------------- region UI
@@ -661,7 +672,26 @@ async function openFilePicker() {
   $('file-input').click();
 }
 
+// Only http(s)/file URLs ending in .pdf are legitimate here -- this page is
+// opened with a `src=` query param that (in principle) reflects whatever the
+// caller passed, so re-validate it ourselves rather than trusting that every
+// caller already did (defense in depth; this must never become an arbitrary-
+// URL-fetch-with-credentials primitive).
+function looksLikePdfUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    if (!/^https?:|^file:/.test(parsed.protocol)) return false;
+    return parsed.pathname.toLowerCase().endsWith('.pdf');
+  } catch {
+    return false;
+  }
+}
+
 async function openFromUrl(url) {
+  if (!looksLikePdfUrl(url)) {
+    fail(new Error('Refusing to open a non-PDF or unsupported URL.'));
+    return;
+  }
   try {
     setStatus(`Fetching ${url}…`, true);
     const response = await fetch(url, { credentials: 'include' });
@@ -770,8 +800,10 @@ async function start() {
     await host.call('ping');
     $('host-status').textContent = '✓ Native host connected.';
   } catch (e) {
-    $('host-status').innerHTML =
-      `⚠ ${e.message}<br/>Open the extension options for install instructions.`;
+    const statusEl = $('host-status');
+    statusEl.textContent = `⚠ ${e.message}`;
+    statusEl.appendChild(document.createElement('br'));
+    statusEl.appendChild(document.createTextNode('Open the extension options for install instructions.'));
   }
   const src = new URLSearchParams(location.search).get('src');
   if (src) await openFromUrl(src);

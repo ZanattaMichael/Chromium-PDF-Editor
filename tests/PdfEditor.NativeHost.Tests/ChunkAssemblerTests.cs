@@ -91,6 +91,20 @@ public class ChunkAssemblerTests
     }
 
     [Fact]
+    public void ExcessiveChunkCount_ThrowsInsteadOfAllocating()
+    {
+        // A malformed or hostile frame must not be able to force an unbounded array
+        // allocation just by claiming a huge chunkCount.
+        Assert.Throws<InvalidDataException>(() => _assembler.Feed(Chunk("req-6", 0, 10_000_001, "AAAA")));
+    }
+
+    [Fact]
+    public void ZeroOrNegativeChunkCount_Throws()
+    {
+        Assert.Throws<InvalidDataException>(() => _assembler.Feed(Chunk("req-7", 0, 0, "AAAA")));
+    }
+
+    [Fact]
     public void RestartingAnId_WithADifferentChunkCount_DiscardsThePreviousAttempt()
     {
         // Feed a partial 3-chunk attempt for "req-5", then restart it as a 2-chunk send —

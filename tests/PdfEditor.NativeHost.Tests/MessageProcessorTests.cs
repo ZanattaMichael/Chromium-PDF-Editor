@@ -123,6 +123,22 @@ public class MessageProcessorTests
         Assert.True(response["ok"]!.GetValue<bool>());
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(601)]
+    [InlineData(1_000_000)]
+    public void Render_RejectsDpiOutsideSupportedRange(int dpi)
+    {
+        string pdf = TestPdf.Base64(TestPdf.OnePage());
+
+        // An unbounded dpi would drive an unbounded bitmap allocation; the host must
+        // reject it as a request error rather than try to render it.
+        var response = HandleOne(Request("render", new { pdf, page = 1, dpi }));
+
+        Assert.False(response["ok"]!.GetValue<bool>());
+    }
+
     [Fact]
     public void GetRegionText_ReturnsTheTextFoundInTheRegion()
     {

@@ -10,6 +10,14 @@ namespace PdfEditor.NativeHost;
 /// </summary>
 public sealed class ChunkAssembler
 {
+    /// <summary>
+    /// Upper bound on chunkCount. host-client.js chunks at 8 MB/slice, so even the
+    /// largest message this host will accept (see NativeMessaging.MaxIncomingFrame)
+    /// needs nowhere near this many chunks -- it only exists to stop a malformed or
+    /// hostile frame from driving an unbounded array allocation.
+    /// </summary>
+    private const int MaxChunkCount = 10_000;
+
     private readonly Dictionary<string, (string?[] Parts, int Received)> _pending = new();
 
     /// <summary>
@@ -27,6 +35,8 @@ public sealed class ChunkAssembler
         int count = node["chunkCount"]!.GetValue<int>();
         string data = node["data"]?.GetValue<string>() ?? "";
 
+        if (count <= 0 || count > MaxChunkCount)
+            throw new InvalidDataException($"Unreasonable chunk count {count} for '{id}'.");
         if (!_pending.TryGetValue(id, out var entry) || entry.Parts.Length != count)
             entry = (new string?[count], 0);
         if (index < 0 || index >= count)

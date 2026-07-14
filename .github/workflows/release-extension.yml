@@ -1,20 +1,21 @@
 name: Release Extension
 
-# Handles both stages of the release cycle, both triggered by "release: published"
-# (GitHub fires this same event whether the release is a prerelease or not):
+# Handles releases created by a human (a "release: published" event). Automated release
+# candidates do NOT reach this workflow: release-candidate.yml creates them with the
+# built-in GITHUB_TOKEN, and GitHub's anti-recursion rule means a GITHUB_TOKEN-created
+# release never fires "release: published" for another workflow -- so release-candidate.yml
+# builds, tests, packages, and attaches the RC zip itself.
 #
-#   - Release candidates: release-candidate.yml creates a "vX.Y.Z-<build>" tag and an
-#     empty prerelease on every merge to main. That prerelease's creation is what fires
-#     this workflow. Builds, tests, packages, and attaches the zip to the RC release --
-#     but does NOT deploy anywhere else.
-#   - Promoting to a real release: manually create a new GitHub Release targeting an
-#     RC's commit, with a clean tag ("vX.Y.Z", no "-<build>" suffix) and "Set as a
-#     pre-release" unchecked. Same build/test/package/attach steps, but this time also
-#     deploys to the Chrome Web Store.
+#   - Promoting to a real release: manually create a new GitHub Release targeting an RC's
+#     commit, with a clean tag ("vX.Y.Z", no "-<build>" suffix) and "Set as a pre-release"
+#     unchecked. Because a human created it, it fires this workflow: build, test, package,
+#     attach the zip, and -- because it is not a prerelease -- deploy to the Chrome Web Store.
+#   - A prerelease created manually in the GitHub UI (or a workflow_dispatch run) also fires
+#     this workflow but stops after packaging; only a non-prerelease publish deploys.
 #
-# The only difference between the two is the release's `prerelease` flag -- see the
-# "publish-to-chrome-web-store" job's `if:`. Tests must pass in `verify` before either
-# path packages or deploys anything.
+# Whether the store-deploy job runs is decided by the release's `prerelease` flag -- see the
+# "publish-to-chrome-web-store" job's `if:`. Tests must pass in `verify` before either path
+# packages or deploys anything.
 on:
   release:
     types: [published]

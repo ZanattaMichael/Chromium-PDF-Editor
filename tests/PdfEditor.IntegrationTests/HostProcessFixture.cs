@@ -44,6 +44,19 @@ public sealed class HostProcessFixture : IDisposable
         }
     }
 
+    /// <summary>
+    /// Writes a raw, already-serialized frame body verbatim — used to feed the host hostile
+    /// or malformed frames (non-JSON, wrong shape) that <see cref="Send"/> would never produce.
+    /// </summary>
+    public JsonObject SendRaw(string frameBody, TimeSpan? timeout = null)
+    {
+        lock (_lock)
+        {
+            NativeMessaging.WriteMessage(_process.StandardInput.BaseStream, frameBody);
+            return ReadResponse(timeout ?? TimeSpan.FromSeconds(60));
+        }
+    }
+
     /// <summary>Sends a request pre-split into chunk frames, as the extension does for large payloads.</summary>
     public JsonObject SendChunked(object request, int chunkSize = 640)
     {

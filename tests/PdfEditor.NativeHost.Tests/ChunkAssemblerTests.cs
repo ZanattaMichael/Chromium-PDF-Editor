@@ -99,9 +99,41 @@ public class ChunkAssemblerTests
     }
 
     [Fact]
-    public void ZeroOrNegativeChunkCount_Throws()
+    public void IntMaxValueChunkCount_Throws_NotAllocatedAsTwoBillionEntries()
     {
-        Assert.Throws<InvalidDataException>(() => _assembler.Feed(Chunk("req-7", 0, 0, "AAAA")));
+        // The concrete DoS value: without the bound this would attempt `new string?[int.MaxValue]`.
+        Assert.Throws<InvalidDataException>(() => _assembler.Feed(Chunk("req-bomb", 0, int.MaxValue, "AAAA")));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(int.MinValue)]
+    public void ZeroOrNegativeChunkCount_Throws(int count)
+    {
+        Assert.Throws<InvalidDataException>(() => _assembler.Feed(Chunk("req-7", 0, count, "AAAA")));
+    }
+
+    [Fact]
+    public void NegativeChunkIndex_Throws()
+    {
+        Assert.Throws<InvalidDataException>(() => _assembler.Feed(Chunk("req-8", -1, 3, "AAAA")));
+    }
+
+    [Fact]
+    public void MalformedBase64InChunkData_Throws_NotSilentlyCorrupted()
+    {
+        // A single self-contained chunk whose data is not valid base64 must surface as an
+        // error (the host turns it into an error envelope), never a silent/garbled decode.
+        Assert.ThrowsAny<Exception>(() => _assembler.Feed(Chunk("req-9", 0, 1, "!!! not base64 !!!")));
+    }
+
+    [Fact]
+    public void MissingDataField_IsTreatedAsEmpty_NotACrash()
+    {
+        // {id, chunkIndex, chunkCount} with no "data" — a truncated/hostile frame shape.
+        string frame = JsonSerializer.Serialize(new { id = "req-10", chunkIndex = 0, chunkCount = 1 });
+        Assert.Equal("", _assembler.Feed(frame));
     }
 
     [Fact]

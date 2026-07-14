@@ -211,13 +211,11 @@ built zip by hand the first time (which Chrome requires anyway, to create the li
    .\scripts\install-host.ps1 -ExtensionId <extension-id>
    ```
 
-   This publishes the .NET host and registers `com.pdfeditor.host` for Chrome,
-   Chromium, Edge, and Brave.
-
-   > Don't have the .NET SDK? Every [release](../../releases) attaches a self-contained
-   > host build per platform (`pdf-editor-host-<platform>.zip`) with the runtime and
-   > native libraries bundled — unzip it and point a native-messaging host manifest at
-   > the extracted executable instead of running the publish step above.
+   By default this **downloads a prebuilt, self-contained host** from the latest
+   [release](../../releases) (the .NET runtime and native libraries are bundled, so no
+   .NET SDK is needed) and registers `com.pdfeditor.host` for Chrome, Chromium, Edge, and
+   Brave. Contributors working from a source checkout can add `--from-source` (bash) or
+   `-FromSource` (PowerShell) to build the host locally with `dotnet publish` instead.
 4. Restart the browser. The extension's options page shows the host connection status.
 
 ## Usage notes

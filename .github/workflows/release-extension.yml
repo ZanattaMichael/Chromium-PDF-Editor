@@ -1,17 +1,32 @@
 name: Release Extension
 
-# Builds a Chrome Web Store-ready zip of extension/ and publishes it as a build
-# artifact and (on a version tag) a GitHub Release. Optionally uploads straight to
-# the Chrome Web Store when the CHROME_* secrets below are configured.
+# Handles both stages of the release cycle, both triggered by "release: published"
+# (GitHub fires this same event whether the release is a prerelease or not):
+#
+#   - Release candidates: release-candidate.yml creates a "vX.Y.Z-<build>" tag and an
+#     empty prerelease on every merge to main. That prerelease's creation is what fires
+#     this workflow. Builds, tests, packages, and attaches the zip to the RC release --
+#     but does NOT deploy anywhere else.
+#   - Promoting to a real release: manually create a new GitHub Release targeting an
+#     RC's commit, with a clean tag ("vX.Y.Z", no "-<build>" suffix) and "Set as a
+#     pre-release" unchecked. Same build/test/package/attach steps, but this time also
+#     deploys to the Chrome Web Store.
+#
+# The only difference between the two is the release's `prerelease` flag -- see the
+# "publish-to-chrome-web-store" job's `if:`. Tests must pass in `verify` before either
+# path packages or deploys anything.
 on:
-  push:
-    tags: ["v*.*.*"]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       publish_to_store:
         description: "Also upload the package to the Chrome Web Store (requires CHROME_* secrets)"
         type: boolean
         default: false
+
+permissions:
+  contents: write
 
 jobs:
   verify:
@@ -25,27 +40,65 @@ jobs:
         run: dotnet build --configuration Release
       - name: Test
         run: dotnet test --configuration Release --no-build --verbosity normal
-      - name: Tag must match manifest.json version
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          tag_version="${GITHUB_REF_NAME#v}"
-          manifest_version=$(python3 -c "import json; print(json.load(open('extension/manifest.json'))['version'])")
-          if [[ "$tag_version" != "$manifest_version" ]]; then
-            echo "::error::Tag v$tag_version does not match extension/manifest.json version $manifest_version"
-            exit 1
-          fi
 
   package:
     needs: verify
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.package.outputs.version }}
-      zip_path: ${{ steps.package.outputs.zip_path }}
+      version: ${{ steps.version.outputs.manifest_version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+
+      - name: Determine the version to package
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            tag_name="${{ github.event.release.tag_name }}"       # e.g. v1.0.1-57 or v1.0.1
+            version_part="${tag_name#v}"
+            if [[ "$version_part" == *-* ]]; then
+              base_version="${version_part%%-*}"                  # 1.0.1
+              build_id="${version_part#*-}"                        # 57
+              manifest_version="${base_version}.${build_id}"       # 1.0.1.57 (Chrome allows up to 4 parts)
+            else
+              manifest_version="$version_part"                    # 1.0.1
+            fi
+            is_prerelease="${{ github.event.release.prerelease }}"
+
+            # A non-prerelease publish deploys to the Chrome Web Store -- refuse to do
+            # that for anything but a clean "vX.Y.Z" tag, so an RC-style tag can never
+            # accidentally ship just because someone unchecked "pre-release" by mistake.
+            if [[ "$is_prerelease" == "false" && ! "$tag_name" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::'$tag_name' is not a plain vX.Y.Z tag but this release isn't marked as a pre-release. Refusing to publish a release-candidate-style tag as a final release."
+              exit 1
+            fi
+          else
+            # workflow_dispatch: leave manifest.json's committed version as-is.
+            manifest_version=""
+            is_prerelease="true"
+          fi
+          echo "manifest_version=$manifest_version" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$is_prerelease" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp manifest.json with the release version
+        if: steps.version.outputs.manifest_version != ''
+        run: |
+          python3 - "${{ steps.version.outputs.manifest_version }}" <<'EOF'
+          import json
+          import sys
+
+          path = "extension/manifest.json"
+          with open(path) as f:
+              manifest = json.load(f)
+          manifest["version"] = sys.argv[1]
+          with open(path, "w") as f:
+              json.dump(manifest, f, indent=2)
+              f.write("\n")
+          EOF
+
       - name: Package extension
         id: package
         run: ./scripts/package-extension.sh dist
@@ -55,26 +108,18 @@ jobs:
           path: ${{ steps.package.outputs.zip_path }}
           if-no-files-found: error
 
-  github-release:
-    needs: package
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: pdf-editor-extension-v${{ needs.package.outputs.version }}
-          path: dist
-      - name: Create GitHub Release
+      - name: Attach to the GitHub Release
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.zip
-          generate_release_notes: true
+          tag_name: ${{ github.event.release.tag_name }}
+          files: ${{ steps.package.outputs.zip_path }}
 
   publish-to-chrome-web-store:
     needs: package
-    if: ${{ github.event.inputs.publish_to_store == 'true' || startsWith(github.ref, 'refs/tags/') }}
+    # Only a non-prerelease Release (the manual "promote" step) deploys to the store;
+    # release candidates from release-candidate.yml are always prereleases and stop here.
+    if: ${{ github.event.inputs.publish_to_store == 'true' || needs.package.outputs.is_prerelease == 'false' }}
     runs-on: ubuntu-latest
     environment: chrome-web-store
     steps:

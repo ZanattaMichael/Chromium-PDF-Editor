@@ -113,28 +113,61 @@ npx playwright install chromium   # once
 npx playwright test               # 10 scenarios
 ```
 
-## Releasing the extension
+### CI on pull requests
 
-`scripts/package-extension.sh` builds a Chrome Web Store-ready zip: it (re)generates the
-icons, validates `extension/manifest.json`, and zips `extension/` so `manifest.json` sits
-at the zip's root (the format the store requires) rather than nested in a folder.
+Every push and PR runs `.github/workflows/ci.yml`'s three jobs: `test` (build + full
+.NET suite with the 90% coverage gate), `e2e` (the Playwright suite above, headless),
+and `package-dry-run` (actually runs `scripts/package-extension.sh` and uploads the
+resulting zip). That last job exists because the release pipeline below
+(`release-candidate.yml`, `release-extension.yml`) only triggers on merges to `main` or
+published Releases — without a PR-time dry run, a regression in the packaging script
+itself would only surface once someone actually tried to cut a release.
+
+## Release cycle: release candidates → promotion
+
+Releases go through two stages, each gated on the full .NET test suite passing —
+nothing is packaged or deployed if `dotnet test` fails.
+
+**1. Every merge to `main` creates a release candidate**
+(`.github/workflows/release-candidate.yml`). It builds and tests the solution, computes
+the next version by bumping the patch number of the latest *final* release tag —
+ignoring other RCs, so they never inflate the version — then creates and pushes a tag
+`vX.Y.Z-<build>` (`<build>` is the GitHub Actions run number, e.g. `v1.0.1-57`) and an
+empty **prerelease** for it. Creating that prerelease triggers stage 2.
+
+**2. `release-extension.yml`** runs for *every* published Release — both the
+auto-created RC prereleases and manually-promoted final releases — and does the actual
+build/test/package/publish work:
+
+1. **`verify`** — builds and runs the full .NET test suite. Nothing downstream runs if
+   this fails.
+2. **`package`** — stamps `extension/manifest.json`'s version from the release's tag
+   (an RC tag `v1.0.1-57` becomes manifest version `1.0.1.57` — Chrome allows up to four
+   dot-separated parts — a final tag `v1.0.1` stays `1.0.1`), packages via
+   `scripts/package-extension.sh`, uploads the zip as a build artifact, and attaches it
+   to the Release that triggered the run.
+3. **`publish-to-chrome-web-store`** — deploys to the Chrome Web Store, **but only when
+   the Release is not a prerelease**. Release candidates always stop at step 2; nothing
+   from `release-candidate.yml` ever reaches the store on its own.
+
+**To promote a release candidate**: pick a known-good RC (its GitHub Release links back
+to the commit it was built from), then create a new Release targeting that same commit
+with a clean tag — `v1.0.1`, no `-<build>` suffix — and leave "Set as a pre-release"
+unchecked. `release-extension.yml` refuses to deploy an RC-style tag if it isn't marked
+as a prerelease, so a mistagged promotion fails loudly instead of shipping the wrong
+version.
+
+`scripts/package-extension.sh` (used by both workflows, and manually if you want) builds
+a Chrome Web Store-ready zip: it (re)generates the icons, validates
+`extension/manifest.json`, and zips `extension/` so `manifest.json` sits at the zip's
+root (the format the store requires) rather than nested in a folder.
 
 ```bash
 ./scripts/package-extension.sh          # writes dist/pdf-editor-extension-v<version>.zip
 ```
 
-**CI/CD** (`.github/workflows/release-extension.yml`) automates this on every version tag
-(`git tag v1.2.3 && git push origin v1.2.3`), or on demand via the *Run workflow* button:
-
-1. **`verify`** — builds and runs the full .NET test suite, and (for tag pushes) checks
-   the tag matches `manifest.json`'s `version` so a release can't accidentally ship the
-   wrong build.
-2. **`package`** — runs the script above and uploads the zip as a build artifact.
-3. **`github-release`** (tag pushes only) — attaches the zip to a GitHub Release.
-4. **`publish-to-chrome-web-store`** — uploads (and publishes) straight to the Chrome Web
-   Store via its API, **only if** the required secrets are configured on the repository
-   (see below); otherwise this step is skipped and the zip from step 2 is still there for
-   manual upload through the [Developer Dashboard](https://chrome.google.com/webstore/devconsole).
+`release-extension.yml` can also be run manually via *Run workflow* (`workflow_dispatch`)
+for ad hoc packaging, with an option to force a Chrome Web Store upload.
 
 ### Enabling automatic Chrome Web Store publishing (optional)
 

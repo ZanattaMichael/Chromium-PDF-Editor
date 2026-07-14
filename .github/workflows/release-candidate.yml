@@ -53,7 +53,7 @@ jobs:
           next_version="${major}.${minor}.$((patch + 1))"
           rc_tag="v${next_version}-${{ github.run_number }}"
 
-          echo "Previous final release tag: ${previous_tag:-(none found; used manifest.json's version as the base)}"
+          echo "Previous final release tag: ${previous_tag:-(none found; used the version in manifest.json as the base)}"
           echo "Next release candidate: $rc_tag (would promote to v${next_version})"
           echo "tag=$rc_tag" >> "$GITHUB_OUTPUT"
           echo "final_tag=v${next_version}" >> "$GITHUB_OUTPUT"

@@ -77,6 +77,10 @@ public sealed class MessageProcessor
     {
         int page = p["page"]!.GetValue<int>();
         int dpi = p["dpi"]?.GetValue<int>() ?? 144;
+        // Bitmap memory grows with the square of dpi; an unbounded value here is a DoS
+        // vector (the UI only ever asks for 110/144, so this range is generous).
+        if (dpi < 1 || dpi > 600)
+            throw new InvalidDataException($"dpi {dpi} is out of the supported range (1-600).");
         byte[] png = PageRenderer.RenderPagePng(Pdf(p), page, dpi, Password(p));
         return new { png = Convert.ToBase64String(png) };
     }

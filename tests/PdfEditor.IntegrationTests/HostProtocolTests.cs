@@ -109,6 +109,35 @@ public class HostProtocolTests : IClassFixture<HostProcessFixture>
     }
 
     [Fact]
+    public void NonJsonFrame_ReturnsError_AndHostSurvives()
+    {
+        // A frame that is correctly length-prefixed but whose body is not JSON at all: the
+        // host must answer with an error envelope over the wire and keep serving.
+        var response = _host.SendRaw("this is not json at all }{");
+
+        Assert.False(response["ok"]!.GetValue<bool>());
+        Assert.True(_host.Send(new { id = "t-alive-1", action = "ping" })["ok"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void FrameClaimingAHugeChunkCount_IsRejected_AndHostSurvives()
+    {
+        // Drives the chunk-reassembly DoS guard through the real process: without the bound
+        // the host would try to allocate an int.MaxValue-length array. It must instead reject
+        // the frame, respond with an error, and remain responsive.
+        var response = _host.Send(new
+        {
+            id = "t-chunk-bomb",
+            chunkIndex = 0,
+            chunkCount = int.MaxValue,
+            data = "AAAA"
+        });
+
+        Assert.False(response["ok"]!.GetValue<bool>());
+        Assert.True(_host.Send(new { id = "t-alive-2", action = "ping" })["ok"]!.GetValue<bool>());
+    }
+
+    [Fact]
     public void CreateCert_ReturnsUsablePkcs12()
     {
         var response = _host.Send(new

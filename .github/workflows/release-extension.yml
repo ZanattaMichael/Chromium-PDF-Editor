@@ -55,9 +55,12 @@ jobs:
 
       - name: Determine the version to package
         id: version
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           if [[ "${{ github.event_name }}" == "release" ]]; then
-            tag_name="${{ github.event.release.tag_name }}"       # e.g. v1.0.1-57 or v1.0.1
+            tag_name="$TAG_NAME"       # e.g. v1.0.1-57 or v1.0.1
             version_part="${tag_name#v}"
             if [[ "$version_part" == *-* ]]; then
               base_version="${version_part%%-*}"                  # 1.0.1
@@ -66,7 +69,7 @@ jobs:
             else
               manifest_version="$version_part"                    # 1.0.1
             fi
-            is_prerelease="${{ github.event.release.prerelease }}"
+            is_prerelease="$RELEASE_PRERELEASE"
 
             # A non-prerelease publish deploys to the Chrome Web Store -- refuse to do
             # that for anything but a clean "vX.Y.Z" tag, so an RC-style tag can never
@@ -129,9 +132,14 @@ jobs:
           path: dist
       - name: Check Chrome Web Store credentials are configured
         id: creds
+        env:
+          EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
         run: |
-          if [[ -n "${{ secrets.CHROME_EXTENSION_ID }}" && -n "${{ secrets.CHROME_CLIENT_ID }}" \
-                && -n "${{ secrets.CHROME_CLIENT_SECRET }}" && -n "${{ secrets.CHROME_REFRESH_TOKEN }}" ]]; then
+          if [[ -n "$EXTENSION_ID" && -n "$CLIENT_ID" \
+                && -n "$CLIENT_SECRET" && -n "$REFRESH_TOKEN" ]]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
@@ -146,13 +154,13 @@ jobs:
           REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
         run: |
           zip_path=$(ls dist/*.zip | head -1)
-          npx --yes chrome-webstore-upload-cli@3 upload \
+          npx --yes chrome-webstore-upload-cli@3.3.2 upload \
             --source "$zip_path" \
             --extension-id "$EXTENSION_ID" \
             --client-id "$CLIENT_ID" \
             --client-secret "$CLIENT_SECRET" \
             --refresh-token "$REFRESH_TOKEN"
-          npx --yes chrome-webstore-upload-cli@3 publish \
+          npx --yes chrome-webstore-upload-cli@3.3.2 publish \
             --extension-id "$EXTENSION_ID" \
             --client-id "$CLIENT_ID" \
             --client-secret "$CLIENT_SECRET" \

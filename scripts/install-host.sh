@@ -2,13 +2,19 @@
 # Installs the PDF Editor native messaging host and registers it with Chromium-based
 # browsers (Chrome, Chromium, Edge, Brave).
 #
-# By default it downloads a prebuilt, self-contained host from the project's latest
-# GitHub release -- the .NET runtime and native libraries are bundled, so no .NET SDK
-# is required. Pass --from-source to build it locally with `dotnet publish` instead
-# (for contributors, or platforms without a prebuilt asset).
+# How the host binary is obtained, in priority order:
+#   1. --host-dir <dir>   use an already-extracted self-contained host (e.g. the host/
+#                         folder from a release bundle) -- no download, no build.
+#   2. a sibling host/    if this script sits inside an unzipped release bundle (a host/
+#                         folder next to it), that is used automatically.
+#   3. --from-source      build locally with `dotnet publish` (needs the .NET SDK).
+#   4. default            download the platform bundle from the latest GitHub release and
+#                         use the host/ inside it -- the runtime and native libs are
+#                         bundled, so no .NET SDK is required.
 #
 # Usage:
 #   ./scripts/install-host.sh <extension-id> [options]
+#     --host-dir <dir>           use an extracted self-contained host in <dir>
 #     --from-source              build locally with dotnet instead of downloading
 #     --configuration <cfg>      build configuration for --from-source (default: Release)
 #     --repo <owner/name>        GitHub repo to download from (default: inferred from git remote)
@@ -22,14 +28,16 @@ FROM_SOURCE=false
 CONFIGURATION="Release"
 REPO_OVERRIDE=""
 TAG_OVERRIDE=""
+HOST_DIR=""
 
 usage() {
-  echo "Usage: $0 <extension-id> [--from-source] [--configuration Release] [--repo owner/name] [--tag vX.Y.Z]" >&2
+  echo "Usage: $0 <extension-id> [--host-dir dir] [--from-source] [--configuration Release] [--repo owner/name] [--tag vX.Y.Z]" >&2
   echo "Find the extension ID at chrome://extensions with Developer mode enabled." >&2
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --host-dir) HOST_DIR="${2:?--host-dir needs a value}"; shift 2 ;;
     --from-source) FROM_SOURCE=true; shift ;;
     --configuration) CONFIGURATION="${2:?--configuration needs a value}"; shift 2 ;;
     --repo) REPO_OVERRIDE="${2:?--repo needs a value}"; shift 2 ;;
@@ -104,7 +112,29 @@ resolve_tag() {
   echo "$tag"
 }
 
-if [[ "$FROM_SOURCE" == true ]]; then
+# Copies an extracted self-contained host directory into PUBLISH_DIR and sets HOST_PATH.
+install_from_dir() {
+  local src="$1"
+  src="$(cd "$src" && pwd)"
+  if [[ ! -f "$src/PdfEditor.NativeHost" ]]; then
+    echo "error: no PdfEditor.NativeHost found in $src" >&2
+    exit 1
+  fi
+  rm -rf "$PUBLISH_DIR"
+  mkdir -p "$PUBLISH_DIR"
+  cp -R "$src/." "$PUBLISH_DIR/"
+  HOST_PATH="$PUBLISH_DIR/PdfEditor.NativeHost"
+  chmod +x "$HOST_PATH"
+}
+
+# When this script is run from inside an unzipped release bundle, the self-contained host
+# sits in a host/ folder next to it (REPO_ROOT is the bundle root here). Use it if present.
+BUNDLED_HOST="$REPO_ROOT/host"
+
+if [[ -n "$HOST_DIR" ]]; then
+  echo "Using the host in $HOST_DIR..."
+  install_from_dir "$HOST_DIR"
+elif [[ "$FROM_SOURCE" == true ]]; then
   echo "Building native host from source ($CONFIGURATION)..."
   rm -rf "$PUBLISH_DIR"
   mkdir -p "$PUBLISH_DIR"
@@ -117,6 +147,9 @@ exec dotnet "$PUBLISH_DIR/PdfEditor.NativeHost.dll" "\$@"
 LAUNCH
   chmod +x "$LAUNCHER"
   HOST_PATH="$LAUNCHER"
+elif [[ -f "$BUNDLED_HOST/PdfEditor.NativeHost" ]]; then
+  echo "Using the bundled host next to this script..."
+  install_from_dir "$BUNDLED_HOST"
 else
   for tool in curl unzip; do
     command -v "$tool" >/dev/null 2>&1 || { echo "error: '$tool' is required to download the prebuilt host — install it or use --from-source" >&2; exit 1; }
@@ -124,25 +157,22 @@ else
   RID="$(detect_rid)"
   REPO="$(resolve_repo)"
   TAG="$(resolve_tag "$REPO")"
-  URL="https://github.com/$REPO/releases/download/$TAG/pdf-editor-host-$RID.zip"
+  URL="https://github.com/$REPO/releases/download/$TAG/pdf-editor-bundle-$RID.zip"
 
-  echo "Downloading prebuilt host $TAG ($RID) from $REPO..."
+  echo "Downloading prebuilt bundle $TAG ($RID) from $REPO..."
   TMP="$(mktemp -d)"
   trap 'rm -rf "$TMP"' EXIT
-  if ! curl -fSL -o "$TMP/host.zip" "$URL"; then
+  if ! curl -fSL -o "$TMP/bundle.zip" "$URL"; then
     echo "error: could not download $URL" >&2
-    echo "       That release may not have a $RID asset yet. Try --from-source, or --tag/--repo." >&2
+    echo "       That release may not have a $RID bundle yet. Try --from-source, or --tag/--repo." >&2
     exit 1
   fi
-  rm -rf "$PUBLISH_DIR"
-  mkdir -p "$PUBLISH_DIR"
-  unzip -q -o "$TMP/host.zip" -d "$PUBLISH_DIR"
-  HOST_PATH="$PUBLISH_DIR/PdfEditor.NativeHost"
-  if [[ ! -f "$HOST_PATH" ]]; then
-    echo "error: the downloaded package did not contain the host executable" >&2
+  unzip -q -o "$TMP/bundle.zip" -d "$TMP/bundle"
+  if [[ ! -d "$TMP/bundle/host" ]]; then
+    echo "error: the downloaded bundle did not contain a host/ folder" >&2
     exit 1
   fi
-  chmod +x "$HOST_PATH"
+  install_from_dir "$TMP/bundle/host"
 fi
 
 MANIFEST_JSON=$(sed -e "s|__HOST_PATH__|$HOST_PATH|" -e "s|__EXTENSION_ID__|$EXTENSION_ID|" \

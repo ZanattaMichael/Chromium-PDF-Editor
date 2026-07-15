@@ -115,10 +115,10 @@ jobs:
           path: ${{ steps.package.outputs.zip_path }}
           if-no-files-found: error
 
-      - name: Package native host (all desktop platforms)
+      - name: Package all-in-one bundles (extension + native host, per platform)
         run: |
           for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
-            ./scripts/package-host.sh "$rid" dist
+            ./scripts/package-bundle.sh "$rid" dist
           done
 
       - name: Attach to the GitHub Release
@@ -128,7 +128,7 @@ jobs:
           tag_name: ${{ github.event.release.tag_name }}
           files: |
             dist/pdf-editor-extension-*.zip
-            dist/pdf-editor-host-*.zip
+            dist/pdf-editor-bundle-*.zip
 
   publish-to-chrome-web-store:
     needs: package

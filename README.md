@@ -193,6 +193,21 @@ built zip by hand the first time (which Chrome requires anyway, to create the li
 
 ## Installing
 
+### Easiest: the all-in-one bundle (no .NET SDK)
+
+Every [release](../../releases) attaches `pdf-editor-bundle-<platform>.zip` for each desktop
+platform. It contains the extension, the matching self-contained native host, and the install
+script — everything in one download. Unzip it and follow the included `INSTALL.md`:
+
+1. `chrome://extensions` → *Developer mode* → *Load unpacked* → select the `extension/`
+   folder. Note the extension ID.
+2. Register the host (auto-detects the bundled `host/`):
+   `./scripts/install-host.sh <extension-id>` (Linux/macOS) or
+   `.\scripts\install-host.ps1 -ExtensionId <extension-id>` (Windows).
+3. Restart the browser.
+
+### From a source checkout
+
 1. **Generate the icons** (one-time, standard-library Python only — already done if
    you ran a bootstrap script per [CONTRIBUTING.md](CONTRIBUTING.md)):
 
@@ -211,11 +226,11 @@ built zip by hand the first time (which Chrome requires anyway, to create the li
    .\scripts\install-host.ps1 -ExtensionId <extension-id>
    ```
 
-   By default this **downloads a prebuilt, self-contained host** from the latest
-   [release](../../releases) (the .NET runtime and native libraries are bundled, so no
-   .NET SDK is needed) and registers `com.pdfeditor.host` for Chrome, Chromium, Edge, and
-   Brave. Contributors working from a source checkout can add `--from-source` (bash) or
-   `-FromSource` (PowerShell) to build the host locally with `dotnet publish` instead.
+   By default this **downloads the prebuilt bundle** from the latest [release](../../releases)
+   and registers the self-contained host it contains for Chrome, Chromium, Edge, and Brave —
+   no .NET SDK needed. Contributors can add `--from-source` (bash) / `-FromSource` (PowerShell)
+   to build the host locally with `dotnet publish`, or `--host-dir`/`-HostDir` to point at an
+   already-extracted host.
 4. Restart the browser. The extension's options page shows the host connection status.
 
 ## Usage notes

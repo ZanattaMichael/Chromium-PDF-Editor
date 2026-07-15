@@ -46,17 +46,24 @@ function pageSize() {
   return state.info.pages[state.page - 1];
 }
 
+// The rendered image spans the page box [x, x+width] × [y, y+height] in PDF user space.
+// x/y are the box's lower-left origin and are non-zero for PDFs whose MediaBox/CropBox
+// doesn't start at (0,0); the image's bottom-left corresponds to (x, y), not (0, 0), so
+// every screen↔document mapping must include that offset or redactions land shifted.
+
 /** CSS pixel (relative to the page image) → PDF user-space point. */
 function cssToPdf(cssX, cssY) {
-  const scale = pageImage.clientWidth / pageSize().width;
-  return { x: cssX / scale, y: pageSize().height - cssY / scale };
+  const p = pageSize();
+  const scale = pageImage.clientWidth / p.width;
+  return { x: p.x + cssX / scale, y: p.y + p.height - cssY / scale };
 }
 
 function pdfRectToCss(region) {
-  const scale = pageImage.clientWidth / pageSize().width;
+  const p = pageSize();
+  const scale = pageImage.clientWidth / p.width;
   return {
-    left: region.x * scale,
-    top: (pageSize().height - region.y - region.height) * scale,
+    left: (region.x - p.x) * scale,
+    top: (p.y + p.height - region.y - region.height) * scale,
     width: region.width * scale,
     height: region.height * scale,
   };

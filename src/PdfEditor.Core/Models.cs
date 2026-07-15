@@ -13,8 +13,13 @@ public sealed record RectRegion(int Page, float X, float Y, float Width, float H
 /// <summary>A located occurrence of a text phrase.</summary>
 public sealed record TextMatch(int Page, string Text, float X, float Y, float Width, float Height);
 
-/// <summary>Basic geometry of a single page.</summary>
-public sealed record PageInfo(int Number, float Width, float Height);
+/// <summary>
+/// Basic geometry of a single page. <paramref name="X"/>/<paramref name="Y"/> are the
+/// lower-left corner of the page box in PDF user space — non-zero when the page's
+/// MediaBox/CropBox does not start at the origin, which the viewer must account for when
+/// mapping screen coordinates back to the document (otherwise redactions land offset).
+/// </summary>
+public sealed record PageInfo(int Number, float X, float Y, float Width, float Height);
 
 /// <summary>Summary of a loaded document.</summary>
 public sealed record DocumentInfo(int PageCount, IReadOnlyList<PageInfo> Pages, bool IsEncrypted);

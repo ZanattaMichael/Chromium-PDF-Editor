@@ -40,9 +40,14 @@ function setWorkingPdf(bytes, base64) {
 }
 
 const $ = (id) => document.getElementById(id);
-const pageImage = $('page-image');
-const overlay = $('overlay');
+const pagesEl = $('pages');
+const scrollArea = $('scroll-area');
 const modal = $('modal');
+
+// One entry per page: { wrap, img, overlay, ratio, renderedKey }. Rebuilt on every load.
+let pageEls = [];
+let nearObserver = null; // renders pages as they approach the viewport
+let visObserver = null;  // tracks which page is currently front-and-centre
 
 // ------------------------------------------------------------------ utils
 
@@ -69,8 +74,8 @@ function fail(err) {
   setStatus(`⚠ ${err.message ?? err}`);
 }
 
-function pageSize() {
-  return state.info.pages[state.page - 1];
+function pageSize(pageNum = state.page) {
+  return state.info.pages[pageNum - 1];
 }
 
 // The rendered image spans the page box [x, x+width] × [y, y+height] in PDF user space.
@@ -78,16 +83,16 @@ function pageSize() {
 // doesn't start at (0,0); the image's bottom-left corresponds to (x, y), not (0, 0), so
 // every screen↔document mapping must include that offset or redactions land shifted.
 
-/** CSS pixel (relative to the page image) → PDF user-space point. */
-function cssToPdf(cssX, cssY) {
-  const p = pageSize();
-  const scale = pageImage.clientWidth / p.width;
+/** CSS pixel (relative to a page's image) → PDF user-space point on that page. */
+function cssToPdf(pageNum, img, cssX, cssY) {
+  const p = pageSize(pageNum);
+  const scale = img.clientWidth / p.width;
   return { x: p.x + cssX / scale, y: p.y + p.height - cssY / scale };
 }
 
-function pdfRectToCss(region) {
-  const p = pageSize();
-  const scale = pageImage.clientWidth / p.width;
+function pdfRectToCss(pageNum, img, region) {
+  const p = pageSize(pageNum);
+  const scale = img.clientWidth / p.width;
   return {
     left: (region.x - p.x) * scale,
     top: (p.y + p.height - region.y - region.height) * scale,
@@ -124,7 +129,7 @@ async function loadDocument(bytes, fileName, { pushHistory = false, password } =
   state.page = Math.min(state.page, info.pageCount);
   state.regions = state.regions.filter((r) => r.page <= info.pageCount);
   await refreshSignatures();
-  await renderPage();
+  await showDocument();
   updateChrome();
 }
 
@@ -194,35 +199,124 @@ function prefetchAround(centerPage, dpi) {
   })();
 }
 
-function showPage(png) {
-  pageImage.src = `data:image/png;base64,${png}`;
-  pageImage.style.width = `${pageSize().width * state.zoom * (96 / 72)}px`;
-  $('page-wrap').classList.add('loaded');
+function displaySize(pageNum) {
+  const p = pageSize(pageNum);
+  const factor = state.zoom * (96 / 72);
+  return { width: p.width * factor, height: p.height * factor };
+}
+
+/** (Re)builds the scrollable column of page placeholders and starts lazy rendering. */
+function buildPages() {
+  nearObserver?.disconnect();
+  visObserver?.disconnect();
+  pageEls = [];
+  pagesEl.innerHTML = '';
   $('empty-state').style.display = 'none';
+
+  for (let n = 1; n <= state.info.pageCount; n++) {
+    const { width, height } = displaySize(n);
+    const wrap = document.createElement('div');
+    wrap.className = 'page';
+    wrap.dataset.page = String(n);
+    wrap.style.width = `${width}px`;
+    wrap.style.height = `${height}px`;
+
+    const img = document.createElement('img');
+    img.className = 'page-image';
+    img.alt = `Page ${n}`;
+    img.draggable = false;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay';
+    if (state.tool !== 'select') overlay.classList.add('tool-active');
+
+    wrap.append(img, overlay);
+    pagesEl.appendChild(wrap);
+    pageEls.push({ wrap, img, overlay, ratio: 0, renderedKey: null });
+  }
+
+  // Render pages a little before they scroll into view; keep the cache warm around them.
+  nearObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) renderPageEl(Number(e.target.dataset.page));
+  }, { root: scrollArea, rootMargin: '500px 0px' });
+
+  // Track which page is most in view so the page counter and nav stay correct.
+  visObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      const pe = pageEls[Number(e.target.dataset.page) - 1];
+      if (pe) pe.ratio = e.isIntersecting ? e.intersectionRatio : 0;
+    }
+    let best = state.page;
+    let bestRatio = -1;
+    pageEls.forEach((pe, i) => { if (pe.ratio > bestRatio) { bestRatio = pe.ratio; best = i + 1; } });
+    if (best !== state.page) {
+      state.page = best;
+      updateNav();
+      prefetchAround(best, currentDpi());
+    }
+  }, { root: scrollArea, threshold: [0, 0.25, 0.5, 0.75, 1] });
+
+  for (const pe of pageEls) { nearObserver.observe(pe.wrap); visObserver.observe(pe.wrap); }
   drawRegions();
 }
 
-async function renderPage() {
-  const page = state.page;
+/** Renders one page's image (from cache when possible) into its placeholder. */
+async function renderPageEl(pageNum) {
+  const pe = pageEls[pageNum - 1];
+  if (!pe) return;
   const dpi = currentDpi();
-  const cached = renderCache.get(cacheKey(page, dpi));
+  const key = cacheKey(pageNum, dpi);
+  if (pe.renderedKey === key) return;
+
+  const cached = renderCache.get(key);
   if (cached !== undefined) {
-    showPage(cached); // instant — no host round-trip, no spinner
-  } else {
-    setStatus(`Rendering page ${page}…`, true);
-    let png;
-    try {
-      png = await renderToCache(page, dpi);
-    } catch (e) {
-      setStatus('');
-      throw e;
-    }
-    // If the user moved on while we awaited, let the newer render win.
-    if (state.page !== page || currentDpi() !== dpi) return;
-    showPage(png);
-    setStatus('');
+    pe.img.src = `data:image/png;base64,${cached}`;
+    pe.renderedKey = key;
+    return;
   }
-  prefetchAround(page, dpi);
+  try {
+    const png = await renderToCache(pageNum, dpi);
+    if (cacheKey(pageNum, currentDpi()) !== key || !pe.wrap.isConnected) return;
+    pe.img.src = `data:image/png;base64,${png}`;
+    pe.renderedKey = key;
+  } catch {
+    /* leave the placeholder blank; it renders again when it next scrolls into view */
+  }
+}
+
+/** Rebuilds the page column for the current document and renders the visible page now. */
+async function showDocument() {
+  buildPages();
+  await renderPageEl(state.page); // render the landing page eagerly rather than waiting on the observer
+  prefetchAround(state.page, currentDpi());
+}
+
+/** Smoothly scrolls a page to the top of the viewport. */
+function goToPage(pageNum, behavior = 'smooth') {
+  const n = Math.max(1, Math.min(state.info?.pageCount ?? 1, pageNum));
+  pageEls[n - 1]?.wrap.scrollIntoView({ behavior, block: 'start' });
+}
+
+/** Re-lays-out every page at a new zoom, keeping the current page in view. */
+function setZoom(z) {
+  if (!state.pdf) return;
+  const clamped = Math.max(0.5, Math.min(3, Math.round(z * 100) / 100));
+  if (clamped === state.zoom) return;
+  state.zoom = clamped;
+  const anchor = state.page;
+  buildPages();
+  renderPageEl(anchor);
+  goToPage(anchor, 'auto'); // jump, not smooth, so the same page stays put
+  updateChrome();
+}
+
+/** Updates just the page counter / nav buttons — cheap enough to call while scrolling. */
+function updateNav() {
+  if (!state.pdf) return;
+  $('page-label').textContent = `${state.page} / ${state.info.pageCount}`;
+  $('btn-prev').disabled = state.page <= 1;
+  $('btn-next').disabled = state.page >= state.info.pageCount;
+  $('zoom-label').textContent = `${Math.round(state.zoom * 100)}%`;
 }
 
 function updateChrome() {
@@ -234,10 +328,7 @@ function updateChrome() {
   }
   $('btn-undo').disabled = state.history.length === 0;
   if (loaded) {
-    $('page-label').textContent = `${state.page} / ${state.info.pageCount}`;
-    $('btn-prev').disabled = state.page <= 1;
-    $('btn-next').disabled = state.page >= state.info.pageCount;
-    $('zoom-label').textContent = `${Math.round(state.zoom * 100)}%`;
+    updateNav();
     document.title = `${state.fileName} — PDF Editor`;
   }
   const badgesEl = $('badges');
@@ -262,24 +353,25 @@ function updateChrome() {
 // -------------------------------------------------------------- region UI
 
 function drawRegions() {
-  overlay.querySelectorAll('.region').forEach((el) => el.remove());
+  for (const pe of pageEls) pe.overlay.querySelectorAll('.region').forEach((el) => el.remove());
   for (const [index, region] of state.regions.entries()) {
-    if (region.page !== state.page) continue;
     addRegionDiv(region, 'redact', `#${index + 1}`);
   }
-  if (state.pendingEditRegion?.page === state.page) addRegionDiv(state.pendingEditRegion, 'edit');
-  if (state.pendingSignRegion?.page === state.page) addRegionDiv(state.pendingSignRegion, 'sign');
+  if (state.pendingEditRegion) addRegionDiv(state.pendingEditRegion, 'edit');
+  if (state.pendingSignRegion) addRegionDiv(state.pendingSignRegion, 'sign');
   renderRedactList();
 }
 
 function addRegionDiv(region, kind, label = '') {
-  const css = pdfRectToCss(region);
+  const pe = pageEls[region.page - 1];
+  if (!pe) return; // page not currently laid out
+  const css = pdfRectToCss(region.page, pe.img, region);
   const div = document.createElement('div');
   div.className = `region ${kind}`;
   div.style.cssText =
     `left:${css.left}px;top:${css.top}px;width:${css.width}px;height:${css.height}px;`;
   div.textContent = label;
-  overlay.appendChild(div);
+  pe.overlay.appendChild(div);
 }
 
 function renderRedactList() {
@@ -303,25 +395,30 @@ function renderRedactList() {
   $('redact-clear').disabled = !any;
 }
 
-// Drag-to-draw on the overlay for edit/redact/sign tools.
+// Drag-to-draw for edit/redact/sign tools. Delegated on the page column so a drag is
+// attributed to whichever page it started on.
 let drag = null;
 
-overlay.addEventListener('pointerdown', (e) => {
+pagesEl.addEventListener('pointerdown', (e) => {
   if (state.tool === 'select' || !state.pdf) return;
+  const overlay = e.target.closest('.overlay');
+  if (!overlay) return;
+  const pe = pageEls.find((p) => p.overlay === overlay);
+  if (!pe) return;
   const rect = overlay.getBoundingClientRect();
-  drag = { x0: e.clientX - rect.left, y0: e.clientY - rect.top, div: null };
+  drag = { pe, pageNum: Number(pe.wrap.dataset.page), x0: e.clientX - rect.left, y0: e.clientY - rect.top, div: null };
   overlay.setPointerCapture(e.pointerId);
 });
 
-overlay.addEventListener('pointermove', (e) => {
+pagesEl.addEventListener('pointermove', (e) => {
   if (!drag) return;
-  const rect = overlay.getBoundingClientRect();
+  const rect = drag.pe.overlay.getBoundingClientRect();
   const x1 = e.clientX - rect.left;
   const y1 = e.clientY - rect.top;
   if (!drag.div) {
     drag.div = document.createElement('div');
     drag.div.className = `region ${state.tool === 'redact' ? '' : state.tool === 'edit' ? 'edit' : 'sign'}`;
-    overlay.appendChild(drag.div);
+    drag.pe.overlay.appendChild(drag.div);
   }
   const left = Math.min(drag.x0, x1);
   const top = Math.min(drag.y0, y1);
@@ -329,21 +426,20 @@ overlay.addEventListener('pointermove', (e) => {
     `left:${left}px;top:${top}px;width:${Math.abs(x1 - drag.x0)}px;height:${Math.abs(y1 - drag.y0)}px;`;
 });
 
-overlay.addEventListener('pointerup', async (e) => {
+pagesEl.addEventListener('pointerup', async (e) => {
   if (!drag) return;
-  const div = drag.div;
-  const rect = overlay.getBoundingClientRect();
+  const { pe, pageNum, x0, y0, div } = drag;
+  const rect = pe.overlay.getBoundingClientRect();
   const x1 = e.clientX - rect.left;
   const y1 = e.clientY - rect.top;
-  const { x0, y0 } = drag;
   drag = null;
   if (div) div.remove();
   if (Math.abs(x1 - x0) < 4 || Math.abs(y1 - y0) < 4) return;
 
-  const a = cssToPdf(Math.min(x0, x1), Math.max(y0, y1)); // bottom-left
-  const b = cssToPdf(Math.max(x0, x1), Math.min(y0, y1)); // top-right
+  const a = cssToPdf(pageNum, pe.img, Math.min(x0, x1), Math.max(y0, y1)); // bottom-left
+  const b = cssToPdf(pageNum, pe.img, Math.max(x0, x1), Math.min(y0, y1)); // top-right
   const region = {
-    page: state.page,
+    page: pageNum,
     x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y,
   };
 
@@ -381,7 +477,7 @@ function setTool(tool) {
   state.tool = tool;
   for (const button of document.querySelectorAll('.tool')) button.classList.remove('active');
   $(`tool-${tool}`).classList.add('active');
-  overlay.classList.toggle('tool-active', tool !== 'select');
+  for (const pe of pageEls) pe.overlay.classList.toggle('tool-active', tool !== 'select');
   if (tool === 'redact') showPanel('panel-redact');
   else if (tool === 'select') hidePanels();
 }
@@ -838,8 +934,8 @@ function undo() {
   state.info = previous.info;
   state.password = previous.password;
   state.page = Math.min(state.page, state.info.pageCount);
-  refreshSignatures().then(() => {
-    renderPage();
+  refreshSignatures().then(async () => {
+    await showDocument();
     updateChrome();
     toast('Undid last change.');
   });
@@ -863,10 +959,10 @@ function wire() {
   $('btn-protect').addEventListener('click', protect);
   $('btn-digital').addEventListener('click', digitallySign);
 
-  $('btn-prev').addEventListener('click', () => { state.page--; renderPage(); updateChrome(); });
-  $('btn-next').addEventListener('click', () => { state.page++; renderPage(); updateChrome(); });
-  $('btn-zoom-in').addEventListener('click', () => { state.zoom = Math.min(3, state.zoom + 0.25); renderPage(); updateChrome(); });
-  $('btn-zoom-out').addEventListener('click', () => { state.zoom = Math.max(0.5, state.zoom - 0.25); renderPage(); updateChrome(); });
+  $('btn-prev').addEventListener('click', () => goToPage(state.page - 1));
+  $('btn-next').addEventListener('click', () => goToPage(state.page + 1));
+  $('btn-zoom-in').addEventListener('click', () => setZoom(state.zoom + 0.25));
+  $('btn-zoom-out').addEventListener('click', () => setZoom(state.zoom - 0.25));
 
   $('redact-preview').addEventListener('click', previewRedaction);
   $('redact-apply').addEventListener('click', () => applyRedaction());

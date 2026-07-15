@@ -27,6 +27,9 @@ function fixture(name, pages, opts) {
   return file;
 }
 
+// In the continuous-scroll layout each page is `.page[data-page="N"]` with its own image.
+const pageImageSel = (n = 1) => `.page[data-page="${n}"] .page-image`;
+
 /** Opens a fresh viewer page and loads the given fixture through the Open button. */
 async function openViewerWith(file) {
   const page = await ext.context.newPage();
@@ -34,8 +37,7 @@ async function openViewerWith(file) {
   const chooser = page.waitForEvent('filechooser');
   await page.click('#btn-open-empty');
   await (await chooser).setFiles(file);
-  await expect(page.locator('#page-wrap')).toHaveClass(/loaded/);
-  await expect(page.locator('#page-image')).toHaveAttribute('src', /data:image\/png/);
+  await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
   return page;
 }
 
@@ -47,7 +49,7 @@ const A4 = [0, 0, 595, 842];
 /** Drags a rectangle on the overlay, in PDF user-space coordinates. */
 async function dragPdfRect(page, { x, y, width, height }, mediaBox = A4) {
   const [llx, lly, urx, ury] = mediaBox;
-  const box = await page.locator('#page-image').boundingBox();
+  const box = await page.locator(pageImageSel(1)).boundingBox();
   const scale = box.width / (urx - llx);
   const cssX = (pdfX) => box.x + (pdfX - llx) * scale;
   const cssY = (pdfY) => box.y + (ury - pdfY) * scale;
@@ -60,7 +62,7 @@ async function dragPdfRect(page, { x, y, width, height }, mediaBox = A4) {
 /** Samples a rendered-page pixel at a PDF user-space point (returns [r,g,b,a]). */
 async function pixelAt(page, pdfX, pdfY, mediaBox = A4) {
   return page.evaluate(async ([px, py, [llx, lly, urx, ury]]) => {
-    const img = document.getElementById('page-image');
+    const img = document.querySelector('.page[data-page="1"] .page-image');
     await img.decode();
     const canvas = document.createElement('canvas');
     canvas.width = img.naturalWidth;
@@ -128,6 +130,77 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // The region renders as opaque black; untouched text area stays white.
     expect(await pixelAt(page, 180, 707)).toEqual([0, 0, 0, 255]);
     expect(await pixelAt(page, 400, 400)).toEqual([255, 255, 255, 255]);
+    await page.close();
+  });
+
+  test('continuous scroll: all pages stack and the counter tracks the visible page', async () => {
+    const file = fixture('scroll.pdf', [
+      [{ text: 'Page one', x: 72, y: 700 }],
+      [{ text: 'Page two', x: 72, y: 700 }],
+      [{ text: 'Page three', x: 72, y: 700 }],
+    ]);
+    const page = await openViewerWith(file);
+
+    await expect(page.locator('.page')).toHaveCount(3); // every page laid out in the column
+    await expect(page.locator('#page-label')).toHaveText('1 / 3');
+    await expect(page.locator('#btn-prev')).toBeDisabled();
+
+    // Paging forward scrolls the next page into view; the counter follows what's visible,
+    // and that page renders lazily once it's near the viewport.
+    await page.click('#btn-next');
+    await expect(page.locator('#page-label')).toHaveText('2 / 3');
+    await expect(page.locator(pageImageSel(2))).toHaveAttribute('src', /data:image\/png/);
+
+    await page.click('#btn-next');
+    await expect(page.locator('#page-label')).toHaveText('3 / 3');
+    await expect(page.locator('#btn-next')).toBeDisabled();
+
+    await page.click('#btn-prev');
+    await expect(page.locator('#page-label')).toHaveText('2 / 3');
+    await page.close();
+  });
+
+  test('redaction works on a page other than the first (per-page overlays)', async () => {
+    // Text near the top of page 2 so it stays on-screen once page 2 is scrolled to the top.
+    const file = fixture('multi-redact.pdf', [
+      [{ text: 'first page', x: 72, y: 700 }],
+      [{ text: 'SECOND SECRET', x: 72, y: 800 }],
+    ]);
+    const page = await openViewerWith(file);
+
+    await page.click('#tool-redact');
+    // Page forward: goToPage top-aligns page 2 in the viewport (deterministic).
+    await page.click('#btn-next');
+    await expect(page.locator('#page-label')).toHaveText('2 / 2');
+    await expect(page.locator(pageImageSel(2))).toHaveAttribute('src', /data:image\/png/);
+
+    // Draw on page 2's own overlay, in that page's A4 user-space (near its top).
+    const box = await page.locator(pageImageSel(2)).boundingBox();
+    const scale = box.width / 595;
+    const cx = (px) => box.x + px * scale;
+    const cy = (py) => box.y + (842 - py) * scale;
+    await page.mouse.move(cx(60), cy(790));
+    await page.mouse.down();
+    await page.mouse.move(cx(320), cy(825), { steps: 5 });
+    await page.mouse.up();
+
+    await expect(page.locator('#redact-list li')).toHaveText(/page 2/);
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+
+    // Page 2's region renders black — proving the drag mapped to page 2, not page 1.
+    const pixel = await page.evaluate(async () => {
+      const img = document.querySelector('.page[data-page="2"] .page-image');
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const s = img.naturalWidth / 595;
+      return [...ctx.getImageData(Math.round(180 * s), Math.round((842 - 807) * s), 1, 1).data];
+    });
+    expect(pixel).toEqual([0, 0, 0, 255]);
     await page.close();
   });
 
@@ -220,7 +293,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // The document stays editable with the retained password (re-render works).
     await page.click('#btn-zoom-in');
     await expect(page.locator('#zoom-label')).toHaveText('125%');
-    await expect(page.locator('#page-wrap')).toHaveClass(/loaded/);
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
     await page.close();
   });
 
@@ -273,7 +346,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const chooser = page.waitForEvent('filechooser');
     await page.click('#btn-open-empty');
     await (await chooser).setFiles(file);
-    await expect(page.locator('#page-wrap')).toHaveClass(/loaded/);
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
 
     // Make one change so there is something to save/undo.
     await page.click('#btn-find');

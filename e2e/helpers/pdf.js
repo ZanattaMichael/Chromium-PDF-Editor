@@ -3,11 +3,15 @@
 /**
  * Builds a minimal, uncompressed, single- or multi-page PDF fixture with
  * absolutely positioned Helvetica text. Deterministic and dependency-free —
- * page size is A4 (595 x 842 pt), matching the .NET test fixtures.
+ * default page size is A4 (595 x 842 pt), matching the .NET test fixtures.
+ *
+ * Pass `{ mediaBox: [llx, lly, urx, ury] }` to give the pages a non-(0,0) origin,
+ * which is what regression-tests the coordinate mapping used for redaction.
  */
-function buildPdf(pages) {
+function buildPdf(pages, { mediaBox = [0, 0, 595, 842] } = {}) {
   const objects = [];
   const pageObjectNumbers = pages.map((_, i) => 4 + i * 2);
+  const box = mediaBox.join(' ');
 
   objects.push('<< /Type /Catalog /Pages 2 0 R >>'); // 1
   objects.push(`<< /Type /Pages /Kids [${pageObjectNumbers.map((n) => `${n} 0 R`).join(' ')}] /Count ${pages.length} >>`); // 2
@@ -19,7 +23,7 @@ function buildPdf(pages) {
         `BT /F1 ${size} Tf ${x} ${y} Td (${text.replace(/([\\()])/g, '\\$1')}) Tj ET`)
       .join('\n');
     objects.push(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] ` +
+      `<< /Type /Page /Parent 2 0 R /MediaBox [${box}] ` +
       `/Resources << /Font << /F1 3 0 R >> >> /Contents ${4 + objects.length - 2} 0 R >>`);
     objects.push(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
   }

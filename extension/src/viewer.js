@@ -7,8 +7,10 @@ const host = new HostClient();
 
 const state = {
   pdf: null,            // Uint8Array — current working document
+  pdfB64: null,         // base64 of pdf, recomputed once per version (not per request)
+  version: 0,           // bumped whenever pdf changes; keys the render cache
   password: null,       // password for the working document, if encrypted
-  info: null,           // { pageCount, encrypted, pages: [{number,width,height}] }
+  info: null,           // { pageCount, encrypted, pages: [{number,x,y,width,height}] }
   page: 1,
   zoom: 1,
   dpi: 144,
@@ -20,6 +22,22 @@ const state = {
   pendingSignRegion: null,
   signatures: [],
 };
+
+// Rendered pages are cached in memory so navigating back and forth is instant instead of
+// re-rendering (and re-uploading the whole document) every time. Entries are keyed by the
+// document version, so any edit invalidates the whole cache automatically.
+const renderCache = new Map(); // `${version}|${page}|${dpi}` -> png base64
+const MAX_CACHED_PAGES = 24;
+let prefetchToken = 0;
+
+/** Installs new working bytes: encode once, bump the version, drop now-stale renders. */
+function setWorkingPdf(bytes, base64) {
+  state.pdf = bytes;
+  state.pdfB64 = base64 ?? bytesToBase64(bytes);
+  state.version++;
+  renderCache.clear();
+  prefetchToken++; // cancel any in-flight prefetch for the previous document
+}
 
 const $ = (id) => document.getElementById(id);
 const pageImage = $('page-image');
@@ -73,7 +91,7 @@ function pdfRectToCss(region) {
 
 async function loadDocument(bytes, fileName, { pushHistory = false, password } = {}) {
   if (pushHistory && state.pdf) {
-    state.history.push({ pdf: state.pdf, info: state.info, password: state.password });
+    state.history.push({ pdf: state.pdf, pdfB64: state.pdfB64, info: state.info, password: state.password });
     if (state.history.length > 10) state.history.shift();
   }
   const pdfB64 = bytesToBase64(bytes);
@@ -90,7 +108,7 @@ async function loadDocument(bytes, fileName, { pushHistory = false, password } =
     }
     throw e;
   }
-  state.pdf = bytes;
+  setWorkingPdf(bytes, pdfB64);
   state.password = password ?? state.password;
   state.info = info;
   if (fileName) state.fileName = fileName;
@@ -109,7 +127,7 @@ async function applyResult(base64Pdf, message) {
 async function refreshSignatures() {
   try {
     const result = await host.call('signatures', {
-      pdf: bytesToBase64(state.pdf), pdfPassword: state.password,
+      pdf: state.pdfB64, pdfPassword: state.password,
     });
     state.signatures = result.signatures ?? [];
   } catch {
@@ -117,19 +135,85 @@ async function refreshSignatures() {
   }
 }
 
-async function renderPage() {
-  const dpi = Math.min(300, Math.round(state.dpi * state.zoom));
-  setStatus(`Rendering page ${state.page}…`, true);
+function currentDpi() {
+  return Math.min(300, Math.round(state.dpi * state.zoom));
+}
+
+function cacheKey(page, dpi) {
+  return `${state.version}|${page}|${dpi}`;
+}
+
+/** Renders one page (or returns it from cache), memoising the result. */
+async function renderToCache(page, dpi) {
+  const key = cacheKey(page, dpi);
+  const cached = renderCache.get(key);
+  if (cached !== undefined) {
+    renderCache.delete(key); // move to most-recently-used
+    renderCache.set(key, cached);
+    return cached;
+  }
   const result = await host.call('render', {
-    pdf: bytesToBase64(state.pdf), page: state.page, dpi, pdfPassword: state.password,
+    pdf: state.pdfB64, page, dpi, pdfPassword: state.password,
   });
-  pageImage.src = `data:image/png;base64,${result.png}`;
-  await pageImage.decode().catch(() => {});
+  renderCache.set(key, result.png);
+  while (renderCache.size > MAX_CACHED_PAGES) {
+    renderCache.delete(renderCache.keys().next().value); // evict least-recently-used
+  }
+  return result.png;
+}
+
+/** Fills the cache for pages near `centerPage`, nearest first, in the background. */
+function prefetchAround(centerPage, dpi) {
+  const token = ++prefetchToken;
+  const total = state.info?.pageCount ?? 0;
+  const order = [];
+  for (let d = 1; d <= total && order.length < MAX_CACHED_PAGES - 1; d++) {
+    if (centerPage - d >= 1) order.push(centerPage - d);
+    if (centerPage + d <= total) order.push(centerPage + d);
+  }
+  (async () => {
+    for (const page of order) {
+      if (token !== prefetchToken) return; // navigation, zoom, or edit superseded us
+      if (renderCache.has(cacheKey(page, dpi))) continue;
+      try {
+        await renderToCache(page, dpi);
+      } catch {
+        /* a prefetch failure is never fatal — the page renders on demand instead */
+      }
+      await new Promise((r) => setTimeout(r, 0)); // yield so the UI stays responsive
+    }
+  })();
+}
+
+function showPage(png) {
+  pageImage.src = `data:image/png;base64,${png}`;
   pageImage.style.width = `${pageSize().width * state.zoom * (96 / 72)}px`;
   $('page-wrap').classList.add('loaded');
   $('empty-state').style.display = 'none';
-  setStatus('');
   drawRegions();
+}
+
+async function renderPage() {
+  const page = state.page;
+  const dpi = currentDpi();
+  const cached = renderCache.get(cacheKey(page, dpi));
+  if (cached !== undefined) {
+    showPage(cached); // instant — no host round-trip, no spinner
+  } else {
+    setStatus(`Rendering page ${page}…`, true);
+    let png;
+    try {
+      png = await renderToCache(page, dpi);
+    } catch (e) {
+      setStatus('');
+      throw e;
+    }
+    // If the user moved on while we awaited, let the newer render win.
+    if (state.page !== page || currentDpi() !== dpi) return;
+    showPage(png);
+    setStatus('');
+  }
+  prefetchAround(page, dpi);
 }
 
 function updateChrome() {
@@ -336,7 +420,7 @@ async function previewRedaction() {
   try {
     setStatus('Building redaction preview…', true);
     const result = await host.call('redact', {
-      pdf: bytesToBase64(state.pdf), regions: state.regions, pdfPassword: state.password,
+      pdf: state.pdfB64, regions: state.regions, pdfPassword: state.password,
     });
     const pages = [...new Set(state.regions.map((r) => r.page))].sort((a, b) => a - b);
     const images = [];
@@ -387,7 +471,7 @@ async function applyRedaction(precomputed) {
   try {
     setStatus('Applying redaction…', true);
     const result = precomputed ?? await host.call('redact', {
-      pdf: bytesToBase64(state.pdf), regions: state.regions, pdfPassword: state.password,
+      pdf: state.pdfB64, regions: state.regions, pdfPassword: state.password,
     });
     const count = state.regions.length;
     state.regions = [];
@@ -405,7 +489,7 @@ async function beginTextEdit(region) {
   try {
     setStatus('Reading text in region…', true);
     const found = await host.call('get-region-text', {
-      pdf: bytesToBase64(state.pdf), region, pdfPassword: state.password,
+      pdf: state.pdfB64, region, pdfPassword: state.password,
     });
     setStatus('');
     $('edit-text').value = found.text;
@@ -423,7 +507,7 @@ async function applyTextEdit() {
   try {
     setStatus('Replacing text…', true);
     const result = await host.call('replace-region-text', {
-      pdf: bytesToBase64(state.pdf),
+      pdf: state.pdfB64,
       region,
       text: $('edit-text').value,
       fontSize: parseFloat($('edit-size').value) || undefined,
@@ -490,7 +574,7 @@ async function applyImageSignature() {
     }
     setStatus('Placing signature…', true);
     const result = await host.call('sign-image', {
-      pdf: bytesToBase64(state.pdf), region, png: pngB64, pdfPassword: state.password,
+      pdf: state.pdfB64, region, png: pngB64, pdfPassword: state.password,
     });
     hidePanels();
     setTool('select');
@@ -528,7 +612,7 @@ async function digitallySign() {
     try {
       setStatus('Signing…', true);
       const result = await host.call('sign-digital', {
-        pdf: bytesToBase64(state.pdf),
+        pdf: state.pdfB64,
         pfx: pfxB64,
         pfxPassword,
         reason: choice.reason || undefined,
@@ -587,7 +671,7 @@ async function mergeFiles() {
     if (files.length === 0) return;
     try {
       setStatus(`Merging ${files.length} file${files.length === 1 ? '' : 's'}…`, true);
-      const pdfs = [bytesToBase64(state.pdf)];
+      const pdfs = [state.pdfB64];
       for (const file of files) {
         pdfs.push(bytesToBase64(new Uint8Array(await file.arrayBuffer())));
       }
@@ -617,7 +701,7 @@ async function protect() {
   try {
     setStatus('Encrypting…', true);
     const result = await host.call('encrypt', {
-      pdf: bytesToBase64(state.pdf),
+      pdf: state.pdfB64,
       userPassword: value.user,
       ownerPassword: value.owner || undefined,
       pdfPassword: state.password,
@@ -640,7 +724,7 @@ async function findReplace() {
   try {
     setStatus('Replacing…', true);
     const result = await host.call('replace-all', {
-      pdf: bytesToBase64(state.pdf),
+      pdf: state.pdfB64,
       phrase: value.find,
       replacement: value.replace,
       pdfPassword: state.password,
@@ -741,7 +825,7 @@ async function save() {
 function undo() {
   const previous = state.history.pop();
   if (!previous) return;
-  state.pdf = previous.pdf;
+  setWorkingPdf(previous.pdf, previous.pdfB64);
   state.info = previous.info;
   state.password = previous.password;
   state.page = Math.min(state.page, state.info.pageCount);

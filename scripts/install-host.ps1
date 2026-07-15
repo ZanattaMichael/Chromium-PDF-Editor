@@ -1,15 +1,21 @@
 # Installs the PDF Editor native messaging host and registers it with Chromium-based
 # browsers (Chrome, Chromium, Edge, Brave) on Windows.
 #
-# By default it downloads a prebuilt, self-contained host from the project's latest
-# GitHub release -- the .NET runtime and native libraries are bundled, so no .NET SDK
-# is required. Use -FromSource to build it locally with `dotnet publish` instead.
+# How the host binary is obtained, in priority order:
+#   1. -HostDir <dir>   use an already-extracted self-contained host (e.g. the host\ folder
+#                       from a release bundle) -- no download, no build.
+#   2. a sibling host\  if this script sits inside an unzipped release bundle (a host\ folder
+#                       next to it), that is used automatically.
+#   3. -FromSource      build locally with `dotnet publish` (needs the .NET SDK).
+#   4. default          download the platform bundle from the latest GitHub release and use
+#                       the host\ inside it -- runtime and native libs bundled, no SDK needed.
 #
 # Usage:
-#   .\scripts\install-host.ps1 -ExtensionId <id> [-FromSource] [-Configuration Release]
-#                              [-Repo owner/name] [-Tag vX.Y.Z]
+#   .\scripts\install-host.ps1 -ExtensionId <id> [-HostDir dir] [-FromSource]
+#                              [-Configuration Release] [-Repo owner/name] [-Tag vX.Y.Z]
 param(
     [Parameter(Mandatory = $true)][string]$ExtensionId,
+    [string]$HostDir = "",
     [switch]$FromSource,
     [string]$Configuration = "Release",
     [string]$Repo = "",
@@ -43,7 +49,25 @@ function Resolve-Tag($r) {
     throw "Could not determine the latest release tag for $r. Pass -Tag <vX.Y.Z>."
 }
 
-if ($FromSource) {
+# Copies an extracted self-contained host directory into $publishDir and returns the exe path.
+function Install-FromDir($src) {
+    $src = (Resolve-Path $src).Path
+    if (-not (Test-Path (Join-Path $src "PdfEditor.NativeHost.exe"))) {
+        throw "No PdfEditor.NativeHost.exe found in $src."
+    }
+    if (Test-Path $publishDir) { Remove-Item -Recurse -Force $publishDir }
+    New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
+    Copy-Item -Path (Join-Path $src "*") -Destination $publishDir -Recurse -Force
+    return (Join-Path $publishDir "PdfEditor.NativeHost.exe")
+}
+
+# When run from inside an unzipped release bundle, the host sits in a host\ folder next to it.
+$bundledHost = Join-Path $repoRoot "host"
+
+if ($HostDir) {
+    Write-Host "Using the host in $HostDir..."
+    $hostPath = Install-FromDir $HostDir
+} elseif ($FromSource) {
     Write-Host "Building native host from source ($Configuration)..."
     if (Test-Path $publishDir) { Remove-Item -Recurse -Force $publishDir }
     dotnet publish (Join-Path $repoRoot "src/PdfEditor.NativeHost") -c $Configuration -o $publishDir --nologo -v q
@@ -51,6 +75,9 @@ if ($FromSource) {
     $launcher = Join-Path $publishDir "pdf-editor-host.bat"
     "@echo off`r`ndotnet `"$publishDir\PdfEditor.NativeHost.dll`" %*" | Set-Content -Path $launcher -Encoding ascii
     $hostPath = $launcher
+} elseif (Test-Path (Join-Path $bundledHost "PdfEditor.NativeHost.exe")) {
+    Write-Host "Using the bundled host next to this script..."
+    $hostPath = Install-FromDir $bundledHost
 } else {
     if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
         throw "No prebuilt win-arm64 host is published. Use -FromSource."
@@ -58,23 +85,23 @@ if ($FromSource) {
     $rid = "win-x64"
     $r = Resolve-Repo
     $t = Resolve-Tag $r
-    $url = "https://github.com/$r/releases/download/$t/pdf-editor-host-$rid.zip"
+    $url = "https://github.com/$r/releases/download/$t/pdf-editor-bundle-$rid.zip"
 
-    Write-Host "Downloading prebuilt host $t ($rid) from $r..."
-    if (Test-Path $publishDir) { Remove-Item -Recurse -Force $publishDir }
-    New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
-    $zip = Join-Path $env:TEMP "pdf-editor-host-$rid.zip"
+    Write-Host "Downloading prebuilt bundle $t ($rid) from $r..."
+    $zip = Join-Path $env:TEMP "pdf-editor-bundle-$rid.zip"
     try {
         Invoke-WebRequest -Uri $url -OutFile $zip
     } catch {
-        throw "Could not download $url. That release may not have a $rid asset yet; try -FromSource, or -Tag/-Repo."
+        throw "Could not download $url. That release may not have a $rid bundle yet; try -FromSource, or -Tag/-Repo."
     }
-    Expand-Archive -Path $zip -DestinationPath $publishDir -Force
+    $extract = Join-Path $env:TEMP "pdf-editor-bundle-$rid"
+    if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
+    Expand-Archive -Path $zip -DestinationPath $extract -Force
     Remove-Item $zip -Force
-    $hostPath = Join-Path $publishDir "PdfEditor.NativeHost.exe"
-    if (-not (Test-Path $hostPath)) {
-        throw "The downloaded package did not contain PdfEditor.NativeHost.exe."
+    if (-not (Test-Path (Join-Path $extract "host"))) {
+        throw "The downloaded bundle did not contain a host\ folder."
     }
+    $hostPath = Install-FromDir (Join-Path $extract "host")
 }
 
 $template = Get-Content (Join-Path $repoRoot "scripts/com.pdfeditor.host.json.template") -Raw

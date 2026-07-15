@@ -92,10 +92,10 @@ jobs:
         id: package
         run: ./scripts/package-extension.sh dist
 
-      - name: Package native host (all desktop platforms)
+      - name: Package all-in-one bundles (extension + native host, per platform)
         run: |
           for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
-            ./scripts/package-host.sh "$rid" dist
+            ./scripts/package-bundle.sh "$rid" dist
           done
 
       - name: Create and push the release candidate tag
@@ -111,13 +111,18 @@ jobs:
           generate_release_notes: true
           files: |
             dist/pdf-editor-extension-*.zip
-            dist/pdf-editor-host-*.zip
+            dist/pdf-editor-bundle-*.zip
           body: |
             Release candidate built from ${{ github.sha }}.
 
-            Attached as build artifacts: the packaged extension zip, and a self-contained
-            native-host build for each desktop platform (`pdf-editor-host-<platform>.zip` —
-            the .NET runtime and native libraries are bundled, so no SDK is needed to run it).
+            Attached as build artifacts:
+            - `pdf-editor-bundle-<platform>.zip` — an all-in-one bundle per desktop platform
+              (Windows, Linux, macOS Intel + Apple Silicon) containing the browser extension,
+              the matching self-contained native host, and the install script. No .NET SDK is
+              needed to use it — see `INSTALL.md` inside.
+            - `pdf-editor-extension-v<version>.zip` — the extension on its own (Chrome Web
+              Store-ready), for anyone who only wants that.
+
             This is **not** published to the Chrome Web Store. To promote it, create a new
             Release targeting this commit with the clean tag
             `${{ steps.version.outputs.final_tag }}` and leave "Set as a pre-release" unchecked.

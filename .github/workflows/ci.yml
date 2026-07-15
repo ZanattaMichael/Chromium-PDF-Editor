@@ -50,12 +50,12 @@ jobs:
 
   package-dry-run:
     # Proves the packaging pipeline (scripts/package-extension.sh and
-    # scripts/package-host.sh, plus what they depend on -- generate-icons.py,
+    # scripts/package-bundle.sh, plus what they depend on -- generate-icons.py,
     # extension/manifest.json, the native host's self-contained publish) still produces
     # valid artifacts. These are the same scripts release-candidate.yml and
     # release-extension.yml invoke for real releases, but neither triggers on a PR, so
     # without this job a regression in packaging would only surface at release time.
-    # The host is published for just one platform here to keep PR runs fast; the release
+    # The bundle is built for just one platform here to keep PR runs fast; the release
     # workflows build the full desktop matrix. Runs on every push and PR.
     runs-on: ubuntu-latest
     steps:
@@ -68,8 +68,8 @@ jobs:
           dotnet-version: "8.0.x"
       - name: Package extension
         run: ./scripts/package-extension.sh dist
-      - name: Package native host (linux-x64 only, smoke check for the release matrix)
-        run: ./scripts/package-host.sh linux-x64 dist
+      - name: Package all-in-one bundle (linux-x64 only, smoke check for the release matrix)
+        run: ./scripts/package-bundle.sh linux-x64 dist
       - uses: actions/upload-artifact@v4
         with:
           name: pdf-editor-extension-dry-run

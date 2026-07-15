@@ -48,6 +48,15 @@ const modal = $('modal');
 
 function setStatus(text, busy = false) {
   $('status').innerHTML = busy ? `<span class="spinner"></span>${text}` : text;
+  // The loading wheel rides along with the busy-status calls that already wrap every
+  // host round-trip, so any operation that makes a button "hang" shows a spinner.
+  const overlay = $('busy-overlay');
+  if (busy) {
+    $('busy-text').textContent = text;
+    overlay.hidden = false;
+  } else {
+    overlay.hidden = true;
+  }
 }
 
 function toast(text) {

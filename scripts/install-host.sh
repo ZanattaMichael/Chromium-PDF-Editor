@@ -115,9 +115,11 @@ resolve_tag() {
 # Copies an extracted self-contained host directory into PUBLISH_DIR and sets HOST_PATH.
 install_from_dir() {
   local src="$1"
+  echo "Installing host from $src..."
+  echo "  (will be copied to $PUBLISH_DIR and registered as $HOST_NAME.json)"
   src="$(cd "$src" && pwd)"
-  if [[ ! -f "$src/PdfEditor.NativeHost" ]]; then
-    echo "error: no PdfEditor.NativeHost found in $src" >&2
+  if [[ ! -d "$src/PdfEditor.NativeHost" ]]; then
+    echo "error: no PdfEditor.NativeHost found in $src ($src/PdfEditor.NativeHost)" >&2
     exit 1
   fi
   rm -rf "$PUBLISH_DIR"

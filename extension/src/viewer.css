@@ -106,6 +106,10 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
 
 .panel-section h2 { margin: 0 0 8px; font-size: 15px; }
 
+#redact-search { display: flex; gap: 6px; margin: 8px 0; }
+#redact-search input { flex: 1; margin: 0; }
+#redact-search button { white-space: nowrap; }
+
 #redact-list { list-style: none; padding: 0; margin: 8px 0; }
 #redact-list li {
   display: flex;

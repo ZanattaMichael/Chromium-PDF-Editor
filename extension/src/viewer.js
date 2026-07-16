@@ -551,6 +551,36 @@ function promptDialog(title, fields, confirmLabel = 'OK') {
 
 // ------------------------------------------------------------- redaction
 
+/** Finds every occurrence of a phrase and marks each as a redaction box. */
+async function searchAndMarkRedactions() {
+  const phrase = $('redact-search-text').value.trim();
+  if (!phrase) { toast('Enter some text to search for.'); return; }
+  if (!state.pdf) return;
+  try {
+    setStatus(`Searching for “${phrase}”…`, true);
+    const result = await host.call('find-text', {
+      pdf: state.pdfB64, phrase, pdfPassword: state.password,
+    });
+    const matches = result.matches ?? [];
+    setStatus('');
+    if (matches.length === 0) { toast(`No matches for “${phrase}”.`); return; }
+    // Pad each match slightly so the box fully covers the glyphs' edges.
+    const pad = 1;
+    for (const m of matches) {
+      state.regions.push({
+        page: m.page,
+        x: m.x - pad, y: m.y - pad,
+        width: m.width + 2 * pad, height: m.height + 2 * pad,
+      });
+    }
+    $('redact-search-text').value = '';
+    drawRegions();
+    toast(`Marked ${matches.length} match${matches.length === 1 ? '' : 'es'} of “${phrase}” — review, then Preview or Apply.`);
+  } catch (e) {
+    fail(e);
+  }
+}
+
 async function previewRedaction() {
   try {
     setStatus('Building redaction preview…', true);
@@ -1011,6 +1041,10 @@ function wire() {
   $('redact-preview').addEventListener('click', previewRedaction);
   $('redact-apply').addEventListener('click', () => applyRedaction());
   $('redact-clear').addEventListener('click', () => { state.regions = []; drawRegions(); });
+  $('redact-search-btn').addEventListener('click', searchAndMarkRedactions);
+  $('redact-search-text').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); searchAndMarkRedactions(); }
+  });
 
   $('edit-apply').addEventListener('click', applyTextEdit);
   $('edit-cancel').addEventListener('click', () => { hidePanels(); setTool('select'); });

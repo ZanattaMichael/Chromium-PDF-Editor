@@ -133,6 +133,50 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('search & mark: finds every occurrence of a phrase, marks boxes, redacts them', async () => {
+    // Two copies of the secret word plus an unrelated line. Searching marks both copies as
+    // redaction boxes; applying blacks out both spots and leaves the other line untouched.
+    const file = fixture('search-redact.pdf', [[
+      { text: 'CONFIDENTIAL summary', x: 72, y: 700 },
+      { text: 'again CONFIDENTIAL here', x: 72, y: 600 },
+      { text: 'ordinary public line', x: 72, y: 500 },
+    ]]);
+    const page = await openViewerWith(file);
+
+    // The Redact panel is shown by the redact tool; the search box lives inside it.
+    await page.click('#tool-redact');
+    await page.fill('#redact-search-text', 'CONFIDENTIAL');
+    await page.click('#redact-search-btn');
+
+    // Both occurrences are marked as boxes (and the input is cleared for the next search).
+    await expect(page.locator('#redact-list li')).toHaveCount(2);
+    await expect(page.locator('#redact-search-text')).toHaveValue('');
+
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+
+    // Both words are blacked out; the ordinary line survives (its glyphs are not a black box)
+    // and blank paper stays white.
+    expect(await pixelAt(page, 90, 704)).toEqual([0, 0, 0, 255]);
+    expect(await pixelAt(page, 120, 604)).toEqual([0, 0, 0, 255]);
+    expect(await pixelAt(page, 90, 504)).not.toEqual([0, 0, 0, 255]);
+    expect(await pixelAt(page, 400, 504)).toEqual([255, 255, 255, 255]);
+    await page.close();
+  });
+
+  test('search & mark: reports when a phrase is not found and marks nothing', async () => {
+    const file = fixture('search-none.pdf', [[{ text: 'nothing to hide here', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await page.click('#tool-redact');
+    await page.fill('#redact-search-text', 'MISSING');
+    await page.click('#redact-search-btn');
+
+    await expect(page.locator('#status')).toContainText('No matches');
+    await expect(page.locator('#redact-list li')).toHaveCount(0);
+    await page.close();
+  });
+
   test('continuous scroll: all pages stack and the counter tracks the visible page', async () => {
     const file = fixture('scroll.pdf', [
       [{ text: 'Page one', x: 72, y: 700 }],

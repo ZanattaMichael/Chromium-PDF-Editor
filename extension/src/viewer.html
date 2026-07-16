@@ -48,7 +48,12 @@
     <aside id="panel" hidden>
       <div id="panel-redact" class="panel-section" hidden>
         <h2>Redact</h2>
-        <p class="muted">Drag boxes over content. Content behind each box is <strong>permanently removed</strong> when applied.</p>
+        <p class="muted">Drag boxes over content, or search for text to mark every match. Content
+          behind each box is <strong>permanently removed</strong> when applied.</p>
+        <div id="redact-search">
+          <input id="redact-search-text" type="text" placeholder="Find text to redact…" />
+          <button id="redact-search-btn">🔍 Find &amp; mark</button>
+        </div>
         <ul id="redact-list"></ul>
         <div class="actions">
           <button id="redact-preview" disabled>👁 Preview</button>

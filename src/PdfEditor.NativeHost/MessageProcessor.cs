@@ -69,7 +69,7 @@ public sealed class MessageProcessor
         {
             pageCount = info.PageCount,
             encrypted = info.IsEncrypted,
-            pages = info.Pages.Select(pg => new { number = pg.Number, x = pg.X, y = pg.Y, width = pg.Width, height = pg.Height })
+            pages = info.Pages.Select(pg => new { number = pg.Number, x = pg.X, y = pg.Y, width = pg.Width, height = pg.Height, rotation = pg.Rotation })
         };
     }
 

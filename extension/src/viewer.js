@@ -78,26 +78,52 @@ function pageSize(pageNum = state.page) {
   return state.info.pages[pageNum - 1];
 }
 
-// The rendered image spans the page box [x, x+width] × [y, y+height] in PDF user space.
-// x/y are the box's lower-left origin and are non-zero for PDFs whose MediaBox/CropBox
-// doesn't start at (0,0); the image's bottom-left corresponds to (x, y), not (0, 0), so
-// every screen↔document mapping must include that offset or redactions land shifted.
+// The rendered image is the page's crop box (origin x,y; size width×height in PDF user
+// space) with the page's clockwise rotation applied. So mapping between the image and the
+// document has to account for both the crop-box origin AND the rotation, or redactions land
+// shifted/rotated. (fx,fy) below are fractions across the *unrotated* crop box — fx from its
+// left, fy from its bottom — and (u,v) are fractions across the *displayed* image, u from
+// its left, v from its top.
+
+/** Fraction across the displayed image (u,v) → fraction across the unrotated crop box. */
+function displayToPage(rotation, u, v) {
+  switch (rotation) {
+    case 90: return [v, u];
+    case 180: return [1 - u, v];
+    case 270: return [1 - v, 1 - u];
+    default: return [u, 1 - v];
+  }
+}
+
+/** Fraction across the unrotated crop box (fx,fy) → fraction across the displayed image. */
+function pageToDisplay(rotation, fx, fy) {
+  switch (rotation) {
+    case 90: return [fy, fx];
+    case 180: return [1 - fx, fy];
+    case 270: return [1 - fy, 1 - fx];
+    default: return [fx, 1 - fy];
+  }
+}
 
 /** CSS pixel (relative to a page's image) → PDF user-space point on that page. */
 function cssToPdf(pageNum, img, cssX, cssY) {
   const p = pageSize(pageNum);
-  const scale = img.clientWidth / p.width;
-  return { x: p.x + cssX / scale, y: p.y + p.height - cssY / scale };
+  const [fx, fy] = displayToPage(p.rotation, cssX / img.clientWidth, cssY / img.clientHeight);
+  return { x: p.x + fx * p.width, y: p.y + fy * p.height };
 }
 
 function pdfRectToCss(pageNum, img, region) {
   const p = pageSize(pageNum);
-  const scale = img.clientWidth / p.width;
+  const [ua, va] = pageToDisplay(p.rotation, (region.x - p.x) / p.width, (region.y - p.y) / p.height);
+  const [ub, vb] = pageToDisplay(p.rotation,
+    (region.x + region.width - p.x) / p.width, (region.y + region.height - p.y) / p.height);
+  const w = img.clientWidth;
+  const h = img.clientHeight;
   return {
-    left: (region.x - p.x) * scale,
-    top: (p.y + p.height - region.y - region.height) * scale,
-    width: region.width * scale,
-    height: region.height * scale,
+    left: Math.min(ua, ub) * w,
+    top: Math.min(va, vb) * h,
+    width: Math.abs(ua - ub) * w,
+    height: Math.abs(va - vb) * h,
   };
 }
 
@@ -202,7 +228,11 @@ function prefetchAround(centerPage, dpi) {
 function displaySize(pageNum) {
   const p = pageSize(pageNum);
   const factor = state.zoom * (96 / 72);
-  return { width: p.width * factor, height: p.height * factor };
+  const swap = p.rotation === 90 || p.rotation === 270; // landscape when rotated a quarter-turn
+  return {
+    width: (swap ? p.height : p.width) * factor,
+    height: (swap ? p.width : p.height) * factor,
+  };
 }
 
 /** (Re)builds the scrollable column of page placeholders and starts lazy rendering. */

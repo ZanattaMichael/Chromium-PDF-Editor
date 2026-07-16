@@ -169,10 +169,12 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(file);
 
     await page.click('#tool-redact');
-    // Page forward: goToPage top-aligns page 2 in the viewport (deterministic).
-    await page.click('#btn-next');
-    await expect(page.locator('#page-label')).toHaveText('2 / 2');
+    // Top-align page 2 *instantly* (no smooth-scroll animation, so boundingBox() below is
+    // settled and the drag can't land on stale coordinates), then let it render.
+    await page.evaluate(() =>
+      document.querySelector('.page[data-page="2"]').scrollIntoView({ block: 'start', behavior: 'instant' }));
     await expect(page.locator(pageImageSel(2))).toHaveAttribute('src', /data:image\/png/);
+    await expect(page.locator('#page-label')).toHaveText('2 / 2');
 
     // Draw on page 2's own overlay, in that page's A4 user-space (near its top).
     const box = await page.locator(pageImageSel(2)).boundingBox();
@@ -228,6 +230,43 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // outside it stays white.
     expect(await pixelAt(page, 200, 905, box)).toEqual([0, 0, 0, 255]);
     expect(await pixelAt(page, 600, 400, box)).toEqual([255, 255, 255, 255]);
+    await page.close();
+  });
+
+  test('redaction on a rotated (/Rotate 90) page lands where it is drawn', async () => {
+    // On a rotated page PDFium renders a width/height-swapped image; if the viewer ignores
+    // the rotation the box is drawn in one place and redacted in another. Draw a box at a
+    // known spot on the *displayed* image and prove that exact spot goes black — a full
+    // display -> PDF -> redact -> render round-trip that only closes if rotation is handled.
+    const file = fixture('rotated.pdf', [[{ text: 'rotated secret', x: 120, y: 400 }]], { rotate: 90 });
+    const page = await openViewerWith(file);
+
+    await page.click('#tool-redact');
+    const box = await page.locator(pageImageSel(1)).boundingBox();
+    // Landscape image (rotated): draw a rectangle across the middle in display coordinates.
+    await page.mouse.move(box.x + box.width * 0.30, box.y + box.height * 0.40);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.62, box.y + box.height * 0.62, { steps: 5 });
+    await page.mouse.up();
+
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+
+    // The centre of the drawn rectangle (display fractions ~0.46, 0.51) is now opaque black.
+    const pixel = await page.evaluate(async (sel) => {
+      const img = document.querySelector(sel);
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const px = Math.round(0.46 * img.naturalWidth);
+      const py = Math.round(0.51 * img.naturalHeight);
+      return [...ctx.getImageData(px, py, 1, 1).data];
+    }, pageImageSel(1));
+    expect(pixel).toEqual([0, 0, 0, 255]);
     await page.close();
   });
 

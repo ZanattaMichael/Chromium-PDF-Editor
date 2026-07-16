@@ -14,12 +14,15 @@ public sealed record RectRegion(int Page, float X, float Y, float Width, float H
 public sealed record TextMatch(int Page, string Text, float X, float Y, float Width, float Height);
 
 /// <summary>
-/// Basic geometry of a single page. <paramref name="X"/>/<paramref name="Y"/> are the
-/// lower-left corner of the page box in PDF user space — non-zero when the page's
-/// MediaBox/CropBox does not start at the origin, which the viewer must account for when
-/// mapping screen coordinates back to the document (otherwise redactions land offset).
+/// Geometry of a single page, describing exactly the box that gets rendered so the viewer
+/// can map screen coordinates back to the document. <paramref name="X"/>/<paramref name="Y"/>
+/// are the lower-left corner of the (crop) box in PDF user space — non-zero when it does not
+/// start at the origin. <paramref name="Width"/>/<paramref name="Height"/> are the box size
+/// in that space (before any rotation). <paramref name="Rotation"/> is the page's clockwise
+/// display rotation (0/90/180/270); at 90/270 the rendered image is width/height-swapped.
+/// Ignoring the crop box or the rotation makes redactions land in the wrong place.
 /// </summary>
-public sealed record PageInfo(int Number, float X, float Y, float Width, float Height);
+public sealed record PageInfo(int Number, float X, float Y, float Width, float Height, int Rotation);
 
 /// <summary>Summary of a loaded document.</summary>
 public sealed record DocumentInfo(int PageCount, IReadOnlyList<PageInfo> Pages, bool IsEncrypted);

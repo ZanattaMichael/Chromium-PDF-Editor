@@ -291,6 +291,36 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('text edit: change the font family, size, and style', async () => {
+    const file = fixture('font-edit.pdf', [[{ text: 'Plain Heading', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await page.click('#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 690, width: 260, height: 34 });
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-text')).toHaveValue('Plain Heading');
+    // Plain Helvetica text pre-fills the controls with the sans-serif default.
+    await expect(page.locator('#edit-font')).toHaveValue('helvetica');
+    await expect(page.locator('#edit-bold')).not.toHaveClass(/active/);
+
+    // Change the text, switch to Times, bump the size, and turn on bold.
+    await page.fill('#edit-text', 'Styled Heading');
+    await page.selectOption('#edit-font', 'times');
+    await page.fill('#edit-size', '20');
+    await page.click('#edit-bold');
+    await expect(page.locator('#edit-bold')).toHaveClass(/active/);
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text replaced');
+
+    // Re-selecting the region shows the new text, and the detected font/style round-trips.
+    await page.click('#tool-edit');
+    await dragPdfRect(page, { x: 55, y: 685, width: 300, height: 45 });
+    await expect(page.locator('#edit-text')).toHaveValue(/Styled Heading/);
+    await expect(page.locator('#edit-font')).toHaveValue('times');
+    await expect(page.locator('#edit-bold')).toHaveClass(/active/);
+    await page.close();
+  });
+
   test('find & replace across the document', async () => {
     const file = fixture('replace.pdf', [[
       { text: 'Contract with OldCorp', x: 72, y: 700 },

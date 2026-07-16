@@ -237,9 +237,12 @@ script — everything in one download. Unzip it and follow the included `INSTALL
 
 - **Redaction preview**: draw boxes with the ⬛ tool, then *Preview* renders the result
   in a window before anything is committed. *Apply* performs the destructive removal.
-- **Text editing**: with the ✏ tool, drag around the text you want to change; the
-  editor pre-fills what it found there. Replacement text is stamped in Helvetica at a
-  matched size (font-exact reproduction of arbitrary embedded fonts is not attempted).
+- **Text editing**: with the ✏ tool, drag around the text you want to change; the editor
+  pre-fills what it found there, including the detected font. You can set the replacement
+  font family (Helvetica / Times / Courier), size, **bold**/*italic*, and colour before
+  applying. The controls default to the region's detected style, so leaving them alone keeps
+  the look; font-exact reproduction of arbitrary embedded fonts is not attempted (the
+  replacement uses the closest standard font).
 - **Sign then don't rewrite**: a digital signature is invalidated by any subsequent
   full rewrite — encrypt **before** signing (the UI warns about this ordering).
 - Files opened from `file://` URLs need *Allow access to file URLs* enabled for the

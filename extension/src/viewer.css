@@ -130,6 +130,49 @@ textarea, input[type="number"], input[type="text"], input[type="password"] {
 
 label { display: block; margin: 6px 0; color: var(--muted); font-size: 12px; }
 
+select {
+  width: 100%;
+  background: #26262b;
+  color: var(--text);
+  border: 1px solid #55555e;
+  border-radius: 4px;
+  padding: 6px;
+  font: inherit;
+  margin: 4px 0;
+}
+
+#edit-style {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+#edit-style label { margin: 0; flex: 1 1 70px; }
+#edit-style input[type="number"] { margin: 2px 0; }
+
+.style-toggle {
+  min-width: 34px;
+  padding: 6px 8px;
+  line-height: 1;
+}
+.style-toggle.active { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+
+.color-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.color-field input[type="color"] {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #55555e;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
 .actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 
 .tabs { display: flex; gap: 4px; margin-bottom: 8px; }

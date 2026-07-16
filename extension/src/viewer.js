@@ -620,6 +620,10 @@ async function applyRedaction(precomputed) {
 
 // ------------------------------------------------------------- text edit
 
+function setStyleToggle(id, on) {
+  $(id).classList.toggle('active', !!on);
+}
+
 async function beginTextEdit(region) {
   try {
     setStatus('Reading text in region…', true);
@@ -629,6 +633,12 @@ async function beginTextEdit(region) {
     setStatus('');
     $('edit-text').value = found.text;
     $('edit-size').value = Number(found.fontSize).toFixed(1);
+    // Pre-fill the font controls with what was detected in the region.
+    $('edit-font').value = ['helvetica', 'times', 'courier'].includes(found.fontFamily)
+      ? found.fontFamily : 'helvetica';
+    setStyleToggle('edit-bold', found.bold);
+    setStyleToggle('edit-italic', found.italic);
+    $('edit-color').value = '#000000';
     showPanel('panel-edit');
     $('edit-text').focus();
   } catch (e) {
@@ -646,6 +656,10 @@ async function applyTextEdit() {
       region,
       text: $('edit-text').value,
       fontSize: parseFloat($('edit-size').value) || undefined,
+      fontFamily: $('edit-font').value,
+      bold: $('edit-bold').classList.contains('active'),
+      italic: $('edit-italic').classList.contains('active'),
+      color: $('edit-color').value,
       pdfPassword: state.password,
     });
     hidePanels();
@@ -1000,6 +1014,8 @@ function wire() {
 
   $('edit-apply').addEventListener('click', applyTextEdit);
   $('edit-cancel').addEventListener('click', () => { hidePanels(); setTool('select'); });
+  $('edit-bold').addEventListener('click', () => $('edit-bold').classList.toggle('active'));
+  $('edit-italic').addEventListener('click', () => $('edit-italic').classList.toggle('active'));
 
   $('sign-tab-draw').addEventListener('click', () => {
     $('sign-tab-draw').classList.add('active');

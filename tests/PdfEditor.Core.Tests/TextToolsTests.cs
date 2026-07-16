@@ -53,6 +53,60 @@ public class TextToolsTests
     }
 
     [Fact]
+    public void GetTextInRegion_ReportsHelveticaSansForPlainText()
+    {
+        byte[] pdf = TestPdfs.WithText(("basic helvetica", 72, 700, 14));
+
+        var region = TextTools.GetTextInRegion(pdf, new RectRegion(1, 60, 690, 300, 30));
+
+        Assert.Equal("helvetica", region.FontFamily);
+        Assert.False(region.Bold);
+        Assert.False(region.Italic);
+    }
+
+    [Fact]
+    public void ReplaceTextInRegion_AppliesTheChosenFontFamilyAndStyle()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain text here", 72, 700, 14));
+        var region = new RectRegion(1, 60, 690, 300, 30);
+
+        var result = TextTools.ReplaceTextInRegion(pdf, region, "styled words",
+            fontSize: 14, fontFamily: "times", bold: true, italic: true);
+
+        // Re-reading the region detects the family/style that was stamped.
+        var reread = TextTools.GetTextInRegion(result.Pdf, region);
+        Assert.Contains("styled words", reread.Text);
+        Assert.Equal("times", reread.FontFamily);
+        Assert.True(reread.Bold);
+        Assert.True(reread.Italic);
+    }
+
+    [Fact]
+    public void ReplaceTextInRegion_WithColour_ProducesReadableText()
+    {
+        byte[] pdf = TestPdfs.WithText(("colour me", 72, 700, 14));
+
+        var result = TextTools.ReplaceTextInRegion(pdf, new RectRegion(1, 60, 690, 300, 30),
+            "red text", fontSize: 14, colorHex: "#ff0000");
+
+        Assert.Contains("red text", TestPdfAssert.ExtractText(result.Pdf));
+    }
+
+    [Theory]
+    [InlineData("times", true, true)]
+    [InlineData("courier", false, false)]
+    [InlineData("helvetica", true, false)]
+    public void ReplaceTextInRegion_EveryFamilyStyleCombination_StaysReadable(string family, bool bold, bool italic)
+    {
+        byte[] pdf = TestPdfs.WithText(("before", 72, 700, 14));
+
+        var result = TextTools.ReplaceTextInRegion(pdf, new RectRegion(1, 60, 690, 300, 30),
+            "after words", fontSize: 14, fontFamily: family, bold: bold, italic: italic);
+
+        Assert.Contains("after words", TestPdfAssert.ExtractText(result.Pdf));
+    }
+
+    [Fact]
     public void FindText_LocatesPhraseOnCorrectPage()
     {
         byte[] pdf = TestPdfs.MultiPage(3, "Chapter");

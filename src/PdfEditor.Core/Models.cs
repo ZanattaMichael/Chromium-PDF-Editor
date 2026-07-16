@@ -27,8 +27,12 @@ public sealed record PageInfo(int Number, float X, float Y, float Width, float H
 /// <summary>Summary of a loaded document.</summary>
 public sealed record DocumentInfo(int PageCount, IReadOnlyList<PageInfo> Pages, bool IsEncrypted);
 
-/// <summary>Text found inside a region, along with the dominant font size (user-space points).</summary>
-public sealed record RegionText(string Text, float FontSize);
+/// <summary>
+/// Text found inside a region, with the dominant font size (user-space points) and a
+/// best-effort read of the dominant font: family (<c>helvetica</c>/<c>times</c>/<c>courier</c>)
+/// and whether it is bold/italic — used to pre-fill the edit controls.
+/// </summary>
+public sealed record RegionText(string Text, float FontSize, string FontFamily, bool Bold, bool Italic);
 
 /// <summary>Result of an operation that rewrites the document.</summary>
 public sealed record EditResult(byte[] Pdf, IReadOnlyList<string> Warnings)

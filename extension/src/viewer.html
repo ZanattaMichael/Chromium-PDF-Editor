@@ -61,7 +61,19 @@
         <h2>Edit text</h2>
         <p class="muted">Text found in the selected region:</p>
         <textarea id="edit-text" rows="5"></textarea>
-        <label>Font size <input id="edit-size" type="number" min="4" max="96" step="0.5" /></label>
+        <label>Font
+          <select id="edit-font">
+            <option value="helvetica">Helvetica (sans-serif)</option>
+            <option value="times">Times (serif)</option>
+            <option value="courier">Courier (monospace)</option>
+          </select>
+        </label>
+        <div id="edit-style">
+          <label>Size <input id="edit-size" type="number" min="4" max="96" step="0.5" /></label>
+          <button type="button" id="edit-bold" class="style-toggle" title="Bold"><b>B</b></button>
+          <button type="button" id="edit-italic" class="style-toggle" title="Italic"><i>I</i></button>
+          <label class="color-field" title="Text colour">Colour <input id="edit-color" type="color" value="#000000" /></label>
+        </div>
         <div class="actions">
           <button id="edit-apply">Apply</button>
           <button id="edit-cancel">Cancel</button>

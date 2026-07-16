@@ -94,13 +94,25 @@ public sealed class MessageProcessor
     private static object GetRegionText(JsonObject p)
     {
         var text = TextTools.GetTextInRegion(Pdf(p), Region(p["region"]!.AsObject()), Password(p));
-        return new { text = text.Text, fontSize = text.FontSize };
+        return new
+        {
+            text = text.Text,
+            fontSize = text.FontSize,
+            fontFamily = text.FontFamily,
+            bold = text.Bold,
+            italic = text.Italic
+        };
     }
 
     private static object ReplaceRegionText(JsonObject p)
     {
         var result = TextTools.ReplaceTextInRegion(Pdf(p), Region(p["region"]!.AsObject()),
-            p["text"]?.GetValue<string>() ?? "", p["fontSize"]?.GetValue<float>(), Password(p));
+            p["text"]?.GetValue<string>() ?? "", p["fontSize"]?.GetValue<float>(),
+            p["fontFamily"]?.GetValue<string>(),
+            p["bold"]?.GetValue<bool>() ?? false,
+            p["italic"]?.GetValue<bool>() ?? false,
+            p["color"]?.GetValue<string>(),
+            Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 

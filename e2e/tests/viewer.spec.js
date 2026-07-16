@@ -233,6 +233,28 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('redaction lands correctly when the CropBox exceeds the MediaBox', async () => {
+    // Real-world regression: some PDFs set a CropBox larger than the MediaBox. The renderer
+    // clamps to the media box, so if the viewer trusted the oversized crop box the whole page
+    // was scaled and the redaction landed above where it was drawn. The page here is a normal
+    // A4 media box with a crop box 160pt taller; text sits inside the real (media) area.
+    const file = fixture('oversized-crop.pdf',
+      [[{ text: 'CLAMP ME', x: 72, y: 500 }]],
+      { mediaBox: [0, 0, 595, 842], cropBox: [0, 0, 595, 1002] });
+    const page = await openViewerWith(file);
+
+    await page.click('#tool-redact');
+    await dragPdfRect(page, { x: 60, y: 492, width: 220, height: 30 });
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+
+    // The drawn spot (not a shifted one) is what turns black.
+    expect(await pixelAt(page, 150, 507)).toEqual([0, 0, 0, 255]);
+    expect(await pixelAt(page, 450, 300)).toEqual([255, 255, 255, 255]);
+    await page.close();
+  });
+
   test('redaction on a rotated (/Rotate 90) page lands where it is drawn', async () => {
     // On a rotated page PDFium renders a width/height-swapped image; if the viewer ignores
     // the rotation the box is drawn in one place and redacted in another. Draw a box at a

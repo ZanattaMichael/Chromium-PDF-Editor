@@ -9,11 +9,12 @@
  * `{ rotate: 90|180|270 }` to rotate them — both regression-test the coordinate mapping
  * used for redaction.
  */
-function buildPdf(pages, { mediaBox = [0, 0, 595, 842], rotate = 0 } = {}) {
+function buildPdf(pages, { mediaBox = [0, 0, 595, 842], cropBox = null, rotate = 0 } = {}) {
   const objects = [];
   const pageObjectNumbers = pages.map((_, i) => 4 + i * 2);
   const box = mediaBox.join(' ');
   const rotateEntry = rotate ? ` /Rotate ${rotate}` : '';
+  const cropEntry = cropBox ? ` /CropBox [${cropBox.join(' ')}]` : '';
 
   objects.push('<< /Type /Catalog /Pages 2 0 R >>'); // 1
   objects.push(`<< /Type /Pages /Kids [${pageObjectNumbers.map((n) => `${n} 0 R`).join(' ')}] /Count ${pages.length} >>`); // 2
@@ -25,7 +26,7 @@ function buildPdf(pages, { mediaBox = [0, 0, 595, 842], rotate = 0 } = {}) {
         `BT /F1 ${size} Tf ${x} ${y} Td (${text.replace(/([\\()])/g, '\\$1')}) Tj ET`)
       .join('\n');
     objects.push(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [${box}]${rotateEntry} ` +
+      `<< /Type /Page /Parent 2 0 R /MediaBox [${box}]${cropEntry}${rotateEntry} ` +
       `/Resources << /Font << /F1 3 0 R >> >> /Contents ${4 + objects.length - 2} 0 R >>`);
     objects.push(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
   }

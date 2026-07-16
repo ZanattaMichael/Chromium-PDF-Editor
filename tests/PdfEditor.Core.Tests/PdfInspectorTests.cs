@@ -67,6 +67,26 @@ public class PdfInspectorTests
         Assert.Equal(500, info.Pages[0].Height);
     }
 
+    [Fact]
+    public void ClampsACropBoxThatExceedsTheMediaBox_ToWhatIsRendered()
+    {
+        // A crop box larger than / offset beyond the media box: the renderer only shows the
+        // intersection, so that is what must be reported (not iText's unclamped crop box).
+        using var ms = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(ms)))
+        {
+            var page = doc.AddNewPage(new PageSize(new Rectangle(0, 0, 612, 792)));
+            page.SetCropBox(new Rectangle(-50, -50, 712, 892)); // extends past the media box every side
+        }
+
+        var info = PdfInspector.GetInfo(ms.ToArray());
+
+        Assert.Equal(0, info.Pages[0].X);
+        Assert.Equal(0, info.Pages[0].Y);
+        Assert.Equal(612, info.Pages[0].Width);
+        Assert.Equal(792, info.Pages[0].Height);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(90)]

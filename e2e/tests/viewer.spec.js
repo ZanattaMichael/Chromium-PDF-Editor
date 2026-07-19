@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { launchExtension } = require('../helpers/harness');
-const { buildPdf } = require('../helpers/pdf');
+const { buildPdf, buildLeftoverCtmPdf } = require('../helpers/pdf');
 
 /** @type {Awaited<ReturnType<typeof launchExtension>>} */
 let ext;
@@ -21,11 +21,14 @@ test.afterAll(async () => {
   if (fixtureDir) fs.rmSync(fixtureDir, { recursive: true, force: true });
 });
 
-function fixture(name, pages) {
+function fixture(name, pages, opts) {
   const file = path.join(fixtureDir, name);
-  fs.writeFileSync(file, buildPdf(pages));
+  fs.writeFileSync(file, buildPdf(pages, opts));
   return file;
 }
+
+// In the continuous-scroll layout each page is `.page[data-page="N"]` with its own image.
+const pageImageSel = (n = 1) => `.page[data-page="${n}"] .page-image`;
 
 /** Opens a fresh viewer page and loads the given fixture through the Open button. */
 async function openViewerWith(file) {
@@ -34,17 +37,22 @@ async function openViewerWith(file) {
   const chooser = page.waitForEvent('filechooser');
   await page.click('#btn-open-empty');
   await (await chooser).setFiles(file);
-  await expect(page.locator('#page-wrap')).toHaveClass(/loaded/);
-  await expect(page.locator('#page-image')).toHaveAttribute('src', /data:image\/png/);
+  await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
   return page;
 }
 
+// PDF user-space coordinate helpers. The page box defaults to A4 at the origin; pass a
+// [llx, lly, urx, ury] box to work with pages whose MediaBox does not start at (0,0) — the
+// rendered image's bottom-left is (llx, lly), so mappings must subtract that origin.
+const A4 = [0, 0, 595, 842];
+
 /** Drags a rectangle on the overlay, in PDF user-space coordinates. */
-async function dragPdfRect(page, { x, y, width, height }) {
-  const box = await page.locator('#page-image').boundingBox();
-  const scale = box.width / 595; // A4 width in points
-  const cssX = (pdfX) => box.x + pdfX * scale;
-  const cssY = (pdfY) => box.y + (842 - pdfY) * scale;
+async function dragPdfRect(page, { x, y, width, height }, mediaBox = A4) {
+  const [llx, lly, urx, ury] = mediaBox;
+  const box = await page.locator(pageImageSel(1)).boundingBox();
+  const scale = box.width / (urx - llx);
+  const cssX = (pdfX) => box.x + (pdfX - llx) * scale;
+  const cssY = (pdfY) => box.y + (ury - pdfY) * scale;
   await page.mouse.move(cssX(x), cssY(y + height));
   await page.mouse.down();
   await page.mouse.move(cssX(x + width), cssY(y), { steps: 5 });
@@ -52,19 +60,20 @@ async function dragPdfRect(page, { x, y, width, height }) {
 }
 
 /** Samples a rendered-page pixel at a PDF user-space point (returns [r,g,b,a]). */
-async function pixelAt(page, pdfX, pdfY) {
-  return page.evaluate(async ([px, py]) => {
-    const img = document.getElementById('page-image');
+async function pixelAt(page, pdfX, pdfY, mediaBox = A4) {
+  return page.evaluate(async ([px, py, [llx, lly, urx, ury]]) => {
+    const img = document.querySelector('.page[data-page="1"] .page-image');
     await img.decode();
     const canvas = document.createElement('canvas');
     canvas.width = img.naturalWidth;
     canvas.height = img.naturalHeight;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0);
-    const scale = img.naturalWidth / 595;
-    const data = ctx.getImageData(Math.round(px * scale), Math.round((842 - py) * scale), 1, 1).data;
+    const scale = img.naturalWidth / (urx - llx);
+    const data = ctx.getImageData(
+      Math.round((px - llx) * scale), Math.round((ury - py) * scale), 1, 1).data;
     return [...data];
-  }, [pdfX, pdfY]);
+  }, [pdfX, pdfY, mediaBox]);
 }
 
 /** Fills the promptDialog() form (inputs in creation order) and confirms. */
@@ -124,6 +133,267 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('search & mark: finds every occurrence of a phrase, marks boxes, redacts them', async () => {
+    // Two copies of the secret word plus an unrelated line. Searching marks both copies as
+    // redaction boxes; applying blacks out both spots and leaves the other line untouched.
+    const file = fixture('search-redact.pdf', [[
+      { text: 'CONFIDENTIAL summary', x: 72, y: 700 },
+      { text: 'again CONFIDENTIAL here', x: 72, y: 600 },
+      { text: 'ordinary public line', x: 72, y: 500 },
+    ]]);
+    const page = await openViewerWith(file);
+
+    // The Redact panel is shown by the redact tool; the search box lives inside it.
+    await page.click('#tool-redact');
+    await page.fill('#redact-search-text', 'CONFIDENTIAL');
+    await page.click('#redact-search-btn');
+
+    // Both occurrences are marked as boxes (and the input is cleared for the next search).
+    await expect(page.locator('#redact-list li')).toHaveCount(2);
+    await expect(page.locator('#redact-search-text')).toHaveValue('');
+
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+
+    // Both words are blacked out; the ordinary line survives (its glyphs are not a black box)
+    // and blank paper stays white.
+    expect(await pixelAt(page, 90, 704)).toEqual([0, 0, 0, 255]);
+    expect(await pixelAt(page, 120, 604)).toEqual([0, 0, 0, 255]);
+    expect(await pixelAt(page, 90, 504)).not.toEqual([0, 0, 0, 255]);
+    expect(await pixelAt(page, 400, 504)).toEqual([255, 255, 255, 255]);
+    await page.close();
+  });
+
+  test('redaction lands on the text on a Chrome/Google-Docs PDF (leftover transform)', async () => {
+    // Regression for the reported bug: Chrome / Google-Docs-exported PDFs leave a scale+flip
+    // matrix active at the end of the page content. The black box used to inherit it and land
+    // scaled/flipped away, while the text under it was correctly removed. Here we search for the
+    // word (absolute coordinates, no screen mapping), redact it, and prove the black box covers
+    // exactly the pixels the word occupied — end-to-end through the extension and native host.
+    const file = path.join(fixtureDir, 'leftover-ctm.pdf');
+    fs.writeFileSync(file, buildLeftoverCtmPdf('SECRET'));
+    const page = await openViewerWith(file);
+
+    // Find the centroid of the word's dark pixels on the rendered page (natural-image pixels).
+    const darkCentroid = async () => page.evaluate(async () => {
+      const img = document.querySelector('.page[data-page="1"] .page-image');
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
+      let sx = 0, sy = 0, n = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = (y * width + x) * 4;
+          if (data[i] < 100 && data[i + 1] < 100 && data[i + 2] < 100) { sx += x; sy += y; n++; }
+        }
+      }
+      return n ? { x: Math.round(sx / n), y: Math.round(sy / n), n, width, height } : null;
+    });
+
+    const before = await darkCentroid();
+    expect(before).not.toBeNull();       // the word actually renders
+    expect(before.n).toBeGreaterThan(50);
+
+    // Search + mark + apply through the real UI / native host.
+    await page.click('#tool-redact');
+    await page.fill('#redact-search-text', 'SECRET');
+    await page.click('#redact-search-btn');
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+
+    // The pixel at the word's former centroid is now opaque black — the box landed on the word.
+    const pixel = await page.evaluate(async (pt) => {
+      const img = document.querySelector('.page[data-page="1"] .page-image');
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      // Sample relative to the (possibly re-rendered at a different scale) image.
+      const x = Math.round(pt.x / pt.width * c.width);
+      const y = Math.round(pt.y / pt.height * c.height);
+      return [...ctx.getImageData(x, y, 1, 1).data];
+    }, before);
+    expect(pixel).toEqual([0, 0, 0, 255]);
+    await page.close();
+  });
+
+  test('search & mark: reports when a phrase is not found and marks nothing', async () => {
+    const file = fixture('search-none.pdf', [[{ text: 'nothing to hide here', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await page.click('#tool-redact');
+    await page.fill('#redact-search-text', 'MISSING');
+    await page.click('#redact-search-btn');
+
+    await expect(page.locator('#status')).toContainText('No matches');
+    await expect(page.locator('#redact-list li')).toHaveCount(0);
+    await page.close();
+  });
+
+  test('continuous scroll: all pages stack and the counter tracks the visible page', async () => {
+    const file = fixture('scroll.pdf', [
+      [{ text: 'Page one', x: 72, y: 700 }],
+      [{ text: 'Page two', x: 72, y: 700 }],
+      [{ text: 'Page three', x: 72, y: 700 }],
+    ]);
+    const page = await openViewerWith(file);
+
+    await expect(page.locator('.page')).toHaveCount(3); // every page laid out in the column
+    await expect(page.locator('#page-label')).toHaveText('1 / 3');
+    await expect(page.locator('#btn-prev')).toBeDisabled();
+
+    // Paging forward scrolls the next page into view; the counter follows what's visible,
+    // and that page renders lazily once it's near the viewport.
+    await page.click('#btn-next');
+    await expect(page.locator('#page-label')).toHaveText('2 / 3');
+    await expect(page.locator(pageImageSel(2))).toHaveAttribute('src', /data:image\/png/);
+
+    await page.click('#btn-next');
+    await expect(page.locator('#page-label')).toHaveText('3 / 3');
+    await expect(page.locator('#btn-next')).toBeDisabled();
+
+    await page.click('#btn-prev');
+    await expect(page.locator('#page-label')).toHaveText('2 / 3');
+    await page.close();
+  });
+
+  test('redaction works on a page other than the first (per-page overlays)', async () => {
+    // Text near the top of page 2 so it stays on-screen once page 2 is scrolled to the top.
+    const file = fixture('multi-redact.pdf', [
+      [{ text: 'first page', x: 72, y: 700 }],
+      [{ text: 'SECOND SECRET', x: 72, y: 800 }],
+    ]);
+    const page = await openViewerWith(file);
+
+    await page.click('#tool-redact');
+    // Top-align page 2 *instantly* (no smooth-scroll animation, so boundingBox() below is
+    // settled and the drag can't land on stale coordinates), then let it render.
+    await page.evaluate(() =>
+      document.querySelector('.page[data-page="2"]').scrollIntoView({ block: 'start', behavior: 'instant' }));
+    await expect(page.locator(pageImageSel(2))).toHaveAttribute('src', /data:image\/png/);
+    await expect(page.locator('#page-label')).toHaveText('2 / 2');
+
+    // Draw on page 2's own overlay, in that page's A4 user-space (near its top).
+    const box = await page.locator(pageImageSel(2)).boundingBox();
+    const scale = box.width / 595;
+    const cx = (px) => box.x + px * scale;
+    const cy = (py) => box.y + (842 - py) * scale;
+    await page.mouse.move(cx(60), cy(790));
+    await page.mouse.down();
+    await page.mouse.move(cx(320), cy(825), { steps: 5 });
+    await page.mouse.up();
+
+    await expect(page.locator('#redact-list li')).toHaveText(/page 2/);
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+
+    // Page 2's region renders black — proving the drag mapped to page 2, not page 1.
+    const pixel = await page.evaluate(async () => {
+      const img = document.querySelector('.page[data-page="2"] .page-image');
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const s = img.naturalWidth / 595;
+      return [...ctx.getImageData(Math.round(180 * s), Math.round((842 - 807) * s), 1, 1).data];
+    });
+    expect(pixel).toEqual([0, 0, 0, 255]);
+    await page.close();
+  });
+
+  test('redaction lands correctly on a page whose box origin is not (0,0)', async () => {
+    // Regression: the viewer used to assume the page's lower-left is (0,0). PDFium renders
+    // the MediaBox at its true origin, so on a box like [100 200 695 1042] every redaction
+    // landed offset by (100,200). Draw a box over the text and prove the *text's* location
+    // (not the shifted one) is what gets blacked out.
+    const box = [100, 200, 695, 1042];
+    const file = fixture('offset-redact.pdf',
+      [[{ text: 'OFFSET SECRET', x: 150, y: 900 }]], { mediaBox: box });
+    const page = await openViewerWith(file);
+
+    await page.click('#tool-redact');
+    await dragPdfRect(page, { x: 140, y: 892, width: 240, height: 30 }, box);
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+
+    await page.click('#redact-preview');
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Apply redaction' }).click();
+    await expect(page.locator('#status')).toContainText('content removed');
+
+    // The redaction box is painted exactly over the text (origin honoured), and a point
+    // outside it stays white.
+    expect(await pixelAt(page, 200, 905, box)).toEqual([0, 0, 0, 255]);
+    expect(await pixelAt(page, 600, 400, box)).toEqual([255, 255, 255, 255]);
+    await page.close();
+  });
+
+  test('redaction lands correctly when the CropBox exceeds the MediaBox', async () => {
+    // Real-world regression: some PDFs set a CropBox larger than the MediaBox. The renderer
+    // clamps to the media box, so if the viewer trusted the oversized crop box the whole page
+    // was scaled and the redaction landed above where it was drawn. The page here is a normal
+    // A4 media box with a crop box 160pt taller; text sits inside the real (media) area.
+    const file = fixture('oversized-crop.pdf',
+      [[{ text: 'CLAMP ME', x: 72, y: 500 }]],
+      { mediaBox: [0, 0, 595, 842], cropBox: [0, 0, 595, 1002] });
+    const page = await openViewerWith(file);
+
+    await page.click('#tool-redact');
+    await dragPdfRect(page, { x: 60, y: 492, width: 220, height: 30 });
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+
+    // The drawn spot (not a shifted one) is what turns black.
+    expect(await pixelAt(page, 150, 507)).toEqual([0, 0, 0, 255]);
+    expect(await pixelAt(page, 450, 300)).toEqual([255, 255, 255, 255]);
+    await page.close();
+  });
+
+  test('redaction on a rotated (/Rotate 90) page lands where it is drawn', async () => {
+    // On a rotated page PDFium renders a width/height-swapped image; if the viewer ignores
+    // the rotation the box is drawn in one place and redacted in another. Draw a box at a
+    // known spot on the *displayed* image and prove that exact spot goes black — a full
+    // display -> PDF -> redact -> render round-trip that only closes if rotation is handled.
+    const file = fixture('rotated.pdf', [[{ text: 'rotated secret', x: 120, y: 400 }]], { rotate: 90 });
+    const page = await openViewerWith(file);
+
+    await page.click('#tool-redact');
+    const box = await page.locator(pageImageSel(1)).boundingBox();
+    // Landscape image (rotated): draw a rectangle across the middle in display coordinates.
+    await page.mouse.move(box.x + box.width * 0.30, box.y + box.height * 0.40);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.62, box.y + box.height * 0.62, { steps: 5 });
+    await page.mouse.up();
+
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+
+    // The centre of the drawn rectangle (display fractions ~0.46, 0.51) is now opaque black.
+    const pixel = await page.evaluate(async (sel) => {
+      const img = document.querySelector(sel);
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const px = Math.round(0.46 * img.naturalWidth);
+      const py = Math.round(0.51 * img.naturalHeight);
+      return [...ctx.getImageData(px, py, 1, 1).data];
+    }, pageImageSel(1));
+    expect(pixel).toEqual([0, 0, 0, 255]);
+    await page.close();
+  });
+
   test('text edit: reads existing text, replaces it in place', async () => {
     const file = fixture('edit.pdf', [[{ text: 'Amount Due: $500', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
@@ -142,6 +412,36 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await dragPdfRect(page, { x: 60, y: 685, width: 300, height: 40 });
     await expect(page.locator('#edit-text')).toHaveValue(/\$750 \(revised\)/);
     await expect(page.locator('#edit-text')).not.toHaveValue(/\$500/);
+    await page.close();
+  });
+
+  test('text edit: change the font family, size, and style', async () => {
+    const file = fixture('font-edit.pdf', [[{ text: 'Plain Heading', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await page.click('#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 690, width: 260, height: 34 });
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-text')).toHaveValue('Plain Heading');
+    // Plain Helvetica text pre-fills the controls with the sans-serif default.
+    await expect(page.locator('#edit-font')).toHaveValue('helvetica');
+    await expect(page.locator('#edit-bold')).not.toHaveClass(/active/);
+
+    // Change the text, switch to Times, bump the size, and turn on bold.
+    await page.fill('#edit-text', 'Styled Heading');
+    await page.selectOption('#edit-font', 'times');
+    await page.fill('#edit-size', '20');
+    await page.click('#edit-bold');
+    await expect(page.locator('#edit-bold')).toHaveClass(/active/);
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text replaced');
+
+    // Re-selecting the region shows the new text, and the detected font/style round-trips.
+    await page.click('#tool-edit');
+    await dragPdfRect(page, { x: 55, y: 685, width: 300, height: 45 });
+    await expect(page.locator('#edit-text')).toHaveValue(/Styled Heading/);
+    await expect(page.locator('#edit-font')).toHaveValue('times');
+    await expect(page.locator('#edit-bold')).toHaveClass(/active/);
     await page.close();
   });
 
@@ -186,7 +486,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // The document stays editable with the retained password (re-render works).
     await page.click('#btn-zoom-in');
     await expect(page.locator('#zoom-label')).toHaveText('125%');
-    await expect(page.locator('#page-wrap')).toHaveClass(/loaded/);
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
     await page.close();
   });
 
@@ -239,7 +539,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const chooser = page.waitForEvent('filechooser');
     await page.click('#btn-open-empty');
     await (await chooser).setFiles(file);
-    await expect(page.locator('#page-wrap')).toHaveClass(/loaded/);
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
 
     // Make one change so there is something to save/undo.
     await page.click('#btn-find');

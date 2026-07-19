@@ -53,6 +53,82 @@ public class TextToolsTests
     }
 
     [Fact]
+    public void ReplaceTextInRegion_StampsNewText_WhenPageLeavesATransformActive()
+    {
+        // Regression (same root cause as the redaction box): on a Chrome / Google-Docs PDF whose
+        // content leaves a scale+flip matrix active, stamped replacement text used to be scaled and
+        // flipped away instead of landing at the region. The new glyphs must render at the region.
+        byte[] pdf = TestPdfs.ChromeStyleLeftoverCtm("SECRET");
+        var match = Assert.Single(TextTools.FindText(pdf, "SECRET"));
+        var region = new RectRegion(match.Page, match.X - 2, match.Y - 2, match.Width + 80, match.Height + 4);
+
+        var result = TextTools.ReplaceTextInRegion(pdf, region, "PUBLIC", fontSize: match.Height);
+
+        // Some glyph of the stamped word renders dark somewhere along the region's baseline.
+        bool anyDark = false;
+        for (float dx = 0; dx < region.Width && !anyDark; dx += 2)
+        {
+            var px = TestPdfAssert.PixelAt(result.Pdf, 1, region.X + dx, match.Y + match.Height * 0.45f, 150);
+            if (px.Red < 128 && px.Green < 128 && px.Blue < 128) anyDark = true;
+        }
+        Assert.True(anyDark, "stamped replacement text did not render at the region — a leftover transform likely displaced it");
+    }
+
+    [Fact]
+    public void GetTextInRegion_ReportsHelveticaSansForPlainText()
+    {
+        byte[] pdf = TestPdfs.WithText(("basic helvetica", 72, 700, 14));
+
+        var region = TextTools.GetTextInRegion(pdf, new RectRegion(1, 60, 690, 300, 30));
+
+        Assert.Equal("helvetica", region.FontFamily);
+        Assert.False(region.Bold);
+        Assert.False(region.Italic);
+    }
+
+    [Fact]
+    public void ReplaceTextInRegion_AppliesTheChosenFontFamilyAndStyle()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain text here", 72, 700, 14));
+        var region = new RectRegion(1, 60, 690, 300, 30);
+
+        var result = TextTools.ReplaceTextInRegion(pdf, region, "styled words",
+            fontSize: 14, fontFamily: "times", bold: true, italic: true);
+
+        // Re-reading the region detects the family/style that was stamped.
+        var reread = TextTools.GetTextInRegion(result.Pdf, region);
+        Assert.Contains("styled words", reread.Text);
+        Assert.Equal("times", reread.FontFamily);
+        Assert.True(reread.Bold);
+        Assert.True(reread.Italic);
+    }
+
+    [Fact]
+    public void ReplaceTextInRegion_WithColour_ProducesReadableText()
+    {
+        byte[] pdf = TestPdfs.WithText(("colour me", 72, 700, 14));
+
+        var result = TextTools.ReplaceTextInRegion(pdf, new RectRegion(1, 60, 690, 300, 30),
+            "red text", fontSize: 14, colorHex: "#ff0000");
+
+        Assert.Contains("red text", TestPdfAssert.ExtractText(result.Pdf));
+    }
+
+    [Theory]
+    [InlineData("times", true, true)]
+    [InlineData("courier", false, false)]
+    [InlineData("helvetica", true, false)]
+    public void ReplaceTextInRegion_EveryFamilyStyleCombination_StaysReadable(string family, bool bold, bool italic)
+    {
+        byte[] pdf = TestPdfs.WithText(("before", 72, 700, 14));
+
+        var result = TextTools.ReplaceTextInRegion(pdf, new RectRegion(1, 60, 690, 300, 30),
+            "after words", fontSize: 14, fontFamily: family, bold: bold, italic: italic);
+
+        Assert.Contains("after words", TestPdfAssert.ExtractText(result.Pdf));
+    }
+
+    [Fact]
     public void FindText_LocatesPhraseOnCorrectPage()
     {
         byte[] pdf = TestPdfs.MultiPage(3, "Chapter");

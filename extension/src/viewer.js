@@ -7,8 +7,10 @@ const host = new HostClient();
 
 const state = {
   pdf: null,            // Uint8Array — current working document
+  pdfB64: null,         // base64 of pdf, recomputed once per version (not per request)
+  version: 0,           // bumped whenever pdf changes; keys the render cache
   password: null,       // password for the working document, if encrypted
-  info: null,           // { pageCount, encrypted, pages: [{number,width,height}] }
+  info: null,           // { pageCount, encrypted, pages: [{number,x,y,width,height}] }
   page: 1,
   zoom: 1,
   dpi: 144,
@@ -21,15 +23,45 @@ const state = {
   signatures: [],
 };
 
+// Rendered pages are cached in memory so navigating back and forth is instant instead of
+// re-rendering (and re-uploading the whole document) every time. Entries are keyed by the
+// document version, so any edit invalidates the whole cache automatically.
+const renderCache = new Map(); // `${version}|${page}|${dpi}` -> png base64
+const MAX_CACHED_PAGES = 24;
+let prefetchToken = 0;
+
+/** Installs new working bytes: encode once, bump the version, drop now-stale renders. */
+function setWorkingPdf(bytes, base64) {
+  state.pdf = bytes;
+  state.pdfB64 = base64 ?? bytesToBase64(bytes);
+  state.version++;
+  renderCache.clear();
+  prefetchToken++; // cancel any in-flight prefetch for the previous document
+}
+
 const $ = (id) => document.getElementById(id);
-const pageImage = $('page-image');
-const overlay = $('overlay');
+const pagesEl = $('pages');
+const scrollArea = $('scroll-area');
 const modal = $('modal');
+
+// One entry per page: { wrap, img, overlay, ratio, renderedKey }. Rebuilt on every load.
+let pageEls = [];
+let nearObserver = null; // renders pages as they approach the viewport
+let visObserver = null;  // tracks which page is currently front-and-centre
 
 // ------------------------------------------------------------------ utils
 
 function setStatus(text, busy = false) {
   $('status').innerHTML = busy ? `<span class="spinner"></span>${text}` : text;
+  // The loading wheel rides along with the busy-status calls that already wrap every
+  // host round-trip, so any operation that makes a button "hang" shows a spinner.
+  const overlay = $('busy-overlay');
+  if (busy) {
+    $('busy-text').textContent = text;
+    overlay.hidden = false;
+  } else {
+    overlay.hidden = true;
+  }
 }
 
 function toast(text) {
@@ -42,23 +74,56 @@ function fail(err) {
   setStatus(`⚠ ${err.message ?? err}`);
 }
 
-function pageSize() {
-  return state.info.pages[state.page - 1];
+function pageSize(pageNum = state.page) {
+  return state.info.pages[pageNum - 1];
 }
 
-/** CSS pixel (relative to the page image) → PDF user-space point. */
-function cssToPdf(cssX, cssY) {
-  const scale = pageImage.clientWidth / pageSize().width;
-  return { x: cssX / scale, y: pageSize().height - cssY / scale };
+// The rendered image is the page's crop box (origin x,y; size width×height in PDF user
+// space) with the page's clockwise rotation applied. So mapping between the image and the
+// document has to account for both the crop-box origin AND the rotation, or redactions land
+// shifted/rotated. (fx,fy) below are fractions across the *unrotated* crop box — fx from its
+// left, fy from its bottom — and (u,v) are fractions across the *displayed* image, u from
+// its left, v from its top.
+
+/** Fraction across the displayed image (u,v) → fraction across the unrotated crop box. */
+function displayToPage(rotation, u, v) {
+  switch (rotation) {
+    case 90: return [v, u];
+    case 180: return [1 - u, v];
+    case 270: return [1 - v, 1 - u];
+    default: return [u, 1 - v];
+  }
 }
 
-function pdfRectToCss(region) {
-  const scale = pageImage.clientWidth / pageSize().width;
+/** Fraction across the unrotated crop box (fx,fy) → fraction across the displayed image. */
+function pageToDisplay(rotation, fx, fy) {
+  switch (rotation) {
+    case 90: return [fy, fx];
+    case 180: return [1 - fx, fy];
+    case 270: return [1 - fy, 1 - fx];
+    default: return [fx, 1 - fy];
+  }
+}
+
+/** CSS pixel (relative to a page's image) → PDF user-space point on that page. */
+function cssToPdf(pageNum, img, cssX, cssY) {
+  const p = pageSize(pageNum);
+  const [fx, fy] = displayToPage(p.rotation, cssX / img.clientWidth, cssY / img.clientHeight);
+  return { x: p.x + fx * p.width, y: p.y + fy * p.height };
+}
+
+function pdfRectToCss(pageNum, img, region) {
+  const p = pageSize(pageNum);
+  const [ua, va] = pageToDisplay(p.rotation, (region.x - p.x) / p.width, (region.y - p.y) / p.height);
+  const [ub, vb] = pageToDisplay(p.rotation,
+    (region.x + region.width - p.x) / p.width, (region.y + region.height - p.y) / p.height);
+  const w = img.clientWidth;
+  const h = img.clientHeight;
   return {
-    left: region.x * scale,
-    top: (pageSize().height - region.y - region.height) * scale,
-    width: region.width * scale,
-    height: region.height * scale,
+    left: Math.min(ua, ub) * w,
+    top: Math.min(va, vb) * h,
+    width: Math.abs(ua - ub) * w,
+    height: Math.abs(va - vb) * h,
   };
 }
 
@@ -66,7 +131,7 @@ function pdfRectToCss(region) {
 
 async function loadDocument(bytes, fileName, { pushHistory = false, password } = {}) {
   if (pushHistory && state.pdf) {
-    state.history.push({ pdf: state.pdf, info: state.info, password: state.password });
+    state.history.push({ pdf: state.pdf, pdfB64: state.pdfB64, info: state.info, password: state.password });
     if (state.history.length > 10) state.history.shift();
   }
   const pdfB64 = bytesToBase64(bytes);
@@ -83,14 +148,14 @@ async function loadDocument(bytes, fileName, { pushHistory = false, password } =
     }
     throw e;
   }
-  state.pdf = bytes;
+  setWorkingPdf(bytes, pdfB64);
   state.password = password ?? state.password;
   state.info = info;
   if (fileName) state.fileName = fileName;
   state.page = Math.min(state.page, info.pageCount);
   state.regions = state.regions.filter((r) => r.page <= info.pageCount);
   await refreshSignatures();
-  await renderPage();
+  await showDocument();
   updateChrome();
 }
 
@@ -102,7 +167,7 @@ async function applyResult(base64Pdf, message) {
 async function refreshSignatures() {
   try {
     const result = await host.call('signatures', {
-      pdf: bytesToBase64(state.pdf), pdfPassword: state.password,
+      pdf: state.pdfB64, pdfPassword: state.password,
     });
     state.signatures = result.signatures ?? [];
   } catch {
@@ -110,19 +175,178 @@ async function refreshSignatures() {
   }
 }
 
-async function renderPage() {
-  const dpi = Math.min(300, Math.round(state.dpi * state.zoom));
-  setStatus(`Rendering page ${state.page}…`, true);
+function currentDpi() {
+  return Math.min(300, Math.round(state.dpi * state.zoom));
+}
+
+function cacheKey(page, dpi) {
+  return `${state.version}|${page}|${dpi}`;
+}
+
+/** Renders one page (or returns it from cache), memoising the result. */
+async function renderToCache(page, dpi) {
+  const key = cacheKey(page, dpi);
+  const cached = renderCache.get(key);
+  if (cached !== undefined) {
+    renderCache.delete(key); // move to most-recently-used
+    renderCache.set(key, cached);
+    return cached;
+  }
   const result = await host.call('render', {
-    pdf: bytesToBase64(state.pdf), page: state.page, dpi, pdfPassword: state.password,
+    pdf: state.pdfB64, page, dpi, pdfPassword: state.password,
   });
-  pageImage.src = `data:image/png;base64,${result.png}`;
-  await pageImage.decode().catch(() => {});
-  pageImage.style.width = `${pageSize().width * state.zoom * (96 / 72)}px`;
-  $('page-wrap').classList.add('loaded');
+  renderCache.set(key, result.png);
+  while (renderCache.size > MAX_CACHED_PAGES) {
+    renderCache.delete(renderCache.keys().next().value); // evict least-recently-used
+  }
+  return result.png;
+}
+
+/** Fills the cache for pages near `centerPage`, nearest first, in the background. */
+function prefetchAround(centerPage, dpi) {
+  const token = ++prefetchToken;
+  const total = state.info?.pageCount ?? 0;
+  const order = [];
+  for (let d = 1; d <= total && order.length < MAX_CACHED_PAGES - 1; d++) {
+    if (centerPage - d >= 1) order.push(centerPage - d);
+    if (centerPage + d <= total) order.push(centerPage + d);
+  }
+  (async () => {
+    for (const page of order) {
+      if (token !== prefetchToken) return; // navigation, zoom, or edit superseded us
+      if (renderCache.has(cacheKey(page, dpi))) continue;
+      try {
+        await renderToCache(page, dpi);
+      } catch {
+        /* a prefetch failure is never fatal — the page renders on demand instead */
+      }
+      await new Promise((r) => setTimeout(r, 0)); // yield so the UI stays responsive
+    }
+  })();
+}
+
+function displaySize(pageNum) {
+  const p = pageSize(pageNum);
+  const factor = state.zoom * (96 / 72);
+  const swap = p.rotation === 90 || p.rotation === 270; // landscape when rotated a quarter-turn
+  return {
+    width: (swap ? p.height : p.width) * factor,
+    height: (swap ? p.width : p.height) * factor,
+  };
+}
+
+/** (Re)builds the scrollable column of page placeholders and starts lazy rendering. */
+function buildPages() {
+  nearObserver?.disconnect();
+  visObserver?.disconnect();
+  pageEls = [];
+  pagesEl.innerHTML = '';
   $('empty-state').style.display = 'none';
-  setStatus('');
+
+  for (let n = 1; n <= state.info.pageCount; n++) {
+    const { width, height } = displaySize(n);
+    const wrap = document.createElement('div');
+    wrap.className = 'page';
+    wrap.dataset.page = String(n);
+    wrap.style.width = `${width}px`;
+    wrap.style.height = `${height}px`;
+
+    const img = document.createElement('img');
+    img.className = 'page-image';
+    img.alt = `Page ${n}`;
+    img.draggable = false;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay';
+    if (state.tool !== 'select') overlay.classList.add('tool-active');
+
+    wrap.append(img, overlay);
+    pagesEl.appendChild(wrap);
+    pageEls.push({ wrap, img, overlay, ratio: 0, renderedKey: null });
+  }
+
+  // Render pages a little before they scroll into view; keep the cache warm around them.
+  nearObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) renderPageEl(Number(e.target.dataset.page));
+  }, { root: scrollArea, rootMargin: '500px 0px' });
+
+  // Track which page is most in view so the page counter and nav stay correct.
+  visObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      const pe = pageEls[Number(e.target.dataset.page) - 1];
+      if (pe) pe.ratio = e.isIntersecting ? e.intersectionRatio : 0;
+    }
+    let best = state.page;
+    let bestRatio = -1;
+    pageEls.forEach((pe, i) => { if (pe.ratio > bestRatio) { bestRatio = pe.ratio; best = i + 1; } });
+    if (best !== state.page) {
+      state.page = best;
+      updateNav();
+      prefetchAround(best, currentDpi());
+    }
+  }, { root: scrollArea, threshold: [0, 0.25, 0.5, 0.75, 1] });
+
+  for (const pe of pageEls) { nearObserver.observe(pe.wrap); visObserver.observe(pe.wrap); }
   drawRegions();
+}
+
+/** Renders one page's image (from cache when possible) into its placeholder. */
+async function renderPageEl(pageNum) {
+  const pe = pageEls[pageNum - 1];
+  if (!pe) return;
+  const dpi = currentDpi();
+  const key = cacheKey(pageNum, dpi);
+  if (pe.renderedKey === key) return;
+
+  const cached = renderCache.get(key);
+  if (cached !== undefined) {
+    pe.img.src = `data:image/png;base64,${cached}`;
+    pe.renderedKey = key;
+    return;
+  }
+  try {
+    const png = await renderToCache(pageNum, dpi);
+    if (cacheKey(pageNum, currentDpi()) !== key || !pe.wrap.isConnected) return;
+    pe.img.src = `data:image/png;base64,${png}`;
+    pe.renderedKey = key;
+  } catch {
+    /* leave the placeholder blank; it renders again when it next scrolls into view */
+  }
+}
+
+/** Rebuilds the page column for the current document and renders the visible page now. */
+async function showDocument() {
+  buildPages();
+  await renderPageEl(state.page); // render the landing page eagerly rather than waiting on the observer
+  prefetchAround(state.page, currentDpi());
+}
+
+/** Smoothly scrolls a page to the top of the viewport. */
+function goToPage(pageNum, behavior = 'smooth') {
+  const n = Math.max(1, Math.min(state.info?.pageCount ?? 1, pageNum));
+  pageEls[n - 1]?.wrap.scrollIntoView({ behavior, block: 'start' });
+}
+
+/** Re-lays-out every page at a new zoom, keeping the current page in view. */
+function setZoom(z) {
+  if (!state.pdf) return;
+  const clamped = Math.max(0.5, Math.min(3, Math.round(z * 100) / 100));
+  if (clamped === state.zoom) return;
+  state.zoom = clamped;
+  const anchor = state.page;
+  buildPages();
+  renderPageEl(anchor);
+  goToPage(anchor, 'auto'); // jump, not smooth, so the same page stays put
+  updateChrome();
+}
+
+/** Updates just the page counter / nav buttons — cheap enough to call while scrolling. */
+function updateNav() {
+  if (!state.pdf) return;
+  $('page-label').textContent = `${state.page} / ${state.info.pageCount}`;
+  $('btn-prev').disabled = state.page <= 1;
+  $('btn-next').disabled = state.page >= state.info.pageCount;
+  $('zoom-label').textContent = `${Math.round(state.zoom * 100)}%`;
 }
 
 function updateChrome() {
@@ -134,10 +358,7 @@ function updateChrome() {
   }
   $('btn-undo').disabled = state.history.length === 0;
   if (loaded) {
-    $('page-label').textContent = `${state.page} / ${state.info.pageCount}`;
-    $('btn-prev').disabled = state.page <= 1;
-    $('btn-next').disabled = state.page >= state.info.pageCount;
-    $('zoom-label').textContent = `${Math.round(state.zoom * 100)}%`;
+    updateNav();
     document.title = `${state.fileName} — PDF Editor`;
   }
   const badgesEl = $('badges');
@@ -162,24 +383,25 @@ function updateChrome() {
 // -------------------------------------------------------------- region UI
 
 function drawRegions() {
-  overlay.querySelectorAll('.region').forEach((el) => el.remove());
+  for (const pe of pageEls) pe.overlay.querySelectorAll('.region').forEach((el) => el.remove());
   for (const [index, region] of state.regions.entries()) {
-    if (region.page !== state.page) continue;
     addRegionDiv(region, 'redact', `#${index + 1}`);
   }
-  if (state.pendingEditRegion?.page === state.page) addRegionDiv(state.pendingEditRegion, 'edit');
-  if (state.pendingSignRegion?.page === state.page) addRegionDiv(state.pendingSignRegion, 'sign');
+  if (state.pendingEditRegion) addRegionDiv(state.pendingEditRegion, 'edit');
+  if (state.pendingSignRegion) addRegionDiv(state.pendingSignRegion, 'sign');
   renderRedactList();
 }
 
 function addRegionDiv(region, kind, label = '') {
-  const css = pdfRectToCss(region);
+  const pe = pageEls[region.page - 1];
+  if (!pe) return; // page not currently laid out
+  const css = pdfRectToCss(region.page, pe.img, region);
   const div = document.createElement('div');
   div.className = `region ${kind}`;
   div.style.cssText =
     `left:${css.left}px;top:${css.top}px;width:${css.width}px;height:${css.height}px;`;
   div.textContent = label;
-  overlay.appendChild(div);
+  pe.overlay.appendChild(div);
 }
 
 function renderRedactList() {
@@ -203,25 +425,30 @@ function renderRedactList() {
   $('redact-clear').disabled = !any;
 }
 
-// Drag-to-draw on the overlay for edit/redact/sign tools.
+// Drag-to-draw for edit/redact/sign tools. Delegated on the page column so a drag is
+// attributed to whichever page it started on.
 let drag = null;
 
-overlay.addEventListener('pointerdown', (e) => {
+pagesEl.addEventListener('pointerdown', (e) => {
   if (state.tool === 'select' || !state.pdf) return;
+  const overlay = e.target.closest('.overlay');
+  if (!overlay) return;
+  const pe = pageEls.find((p) => p.overlay === overlay);
+  if (!pe) return;
   const rect = overlay.getBoundingClientRect();
-  drag = { x0: e.clientX - rect.left, y0: e.clientY - rect.top, div: null };
+  drag = { pe, pageNum: Number(pe.wrap.dataset.page), x0: e.clientX - rect.left, y0: e.clientY - rect.top, div: null };
   overlay.setPointerCapture(e.pointerId);
 });
 
-overlay.addEventListener('pointermove', (e) => {
+pagesEl.addEventListener('pointermove', (e) => {
   if (!drag) return;
-  const rect = overlay.getBoundingClientRect();
+  const rect = drag.pe.overlay.getBoundingClientRect();
   const x1 = e.clientX - rect.left;
   const y1 = e.clientY - rect.top;
   if (!drag.div) {
     drag.div = document.createElement('div');
     drag.div.className = `region ${state.tool === 'redact' ? '' : state.tool === 'edit' ? 'edit' : 'sign'}`;
-    overlay.appendChild(drag.div);
+    drag.pe.overlay.appendChild(drag.div);
   }
   const left = Math.min(drag.x0, x1);
   const top = Math.min(drag.y0, y1);
@@ -229,21 +456,20 @@ overlay.addEventListener('pointermove', (e) => {
     `left:${left}px;top:${top}px;width:${Math.abs(x1 - drag.x0)}px;height:${Math.abs(y1 - drag.y0)}px;`;
 });
 
-overlay.addEventListener('pointerup', async (e) => {
+pagesEl.addEventListener('pointerup', async (e) => {
   if (!drag) return;
-  const div = drag.div;
-  const rect = overlay.getBoundingClientRect();
+  const { pe, pageNum, x0, y0, div } = drag;
+  const rect = pe.overlay.getBoundingClientRect();
   const x1 = e.clientX - rect.left;
   const y1 = e.clientY - rect.top;
-  const { x0, y0 } = drag;
   drag = null;
   if (div) div.remove();
   if (Math.abs(x1 - x0) < 4 || Math.abs(y1 - y0) < 4) return;
 
-  const a = cssToPdf(Math.min(x0, x1), Math.max(y0, y1)); // bottom-left
-  const b = cssToPdf(Math.max(x0, x1), Math.min(y0, y1)); // top-right
+  const a = cssToPdf(pageNum, pe.img, Math.min(x0, x1), Math.max(y0, y1)); // bottom-left
+  const b = cssToPdf(pageNum, pe.img, Math.max(x0, x1), Math.min(y0, y1)); // top-right
   const region = {
-    page: state.page,
+    page: pageNum,
     x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y,
   };
 
@@ -281,7 +507,7 @@ function setTool(tool) {
   state.tool = tool;
   for (const button of document.querySelectorAll('.tool')) button.classList.remove('active');
   $(`tool-${tool}`).classList.add('active');
-  overlay.classList.toggle('tool-active', tool !== 'select');
+  for (const pe of pageEls) pe.overlay.classList.toggle('tool-active', tool !== 'select');
   if (tool === 'redact') showPanel('panel-redact');
   else if (tool === 'select') hidePanels();
 }
@@ -325,11 +551,41 @@ function promptDialog(title, fields, confirmLabel = 'OK') {
 
 // ------------------------------------------------------------- redaction
 
+/** Finds every occurrence of a phrase and marks each as a redaction box. */
+async function searchAndMarkRedactions() {
+  const phrase = $('redact-search-text').value.trim();
+  if (!phrase) { toast('Enter some text to search for.'); return; }
+  if (!state.pdf) return;
+  try {
+    setStatus(`Searching for “${phrase}”…`, true);
+    const result = await host.call('find-text', {
+      pdf: state.pdfB64, phrase, pdfPassword: state.password,
+    });
+    const matches = result.matches ?? [];
+    setStatus('');
+    if (matches.length === 0) { toast(`No matches for “${phrase}”.`); return; }
+    // Pad each match slightly so the box fully covers the glyphs' edges.
+    const pad = 1;
+    for (const m of matches) {
+      state.regions.push({
+        page: m.page,
+        x: m.x - pad, y: m.y - pad,
+        width: m.width + 2 * pad, height: m.height + 2 * pad,
+      });
+    }
+    $('redact-search-text').value = '';
+    drawRegions();
+    toast(`Marked ${matches.length} match${matches.length === 1 ? '' : 'es'} of “${phrase}” — review, then Preview or Apply.`);
+  } catch (e) {
+    fail(e);
+  }
+}
+
 async function previewRedaction() {
   try {
     setStatus('Building redaction preview…', true);
     const result = await host.call('redact', {
-      pdf: bytesToBase64(state.pdf), regions: state.regions, pdfPassword: state.password,
+      pdf: state.pdfB64, regions: state.regions, pdfPassword: state.password,
     });
     const pages = [...new Set(state.regions.map((r) => r.page))].sort((a, b) => a - b);
     const images = [];
@@ -380,7 +636,7 @@ async function applyRedaction(precomputed) {
   try {
     setStatus('Applying redaction…', true);
     const result = precomputed ?? await host.call('redact', {
-      pdf: bytesToBase64(state.pdf), regions: state.regions, pdfPassword: state.password,
+      pdf: state.pdfB64, regions: state.regions, pdfPassword: state.password,
     });
     const count = state.regions.length;
     state.regions = [];
@@ -394,15 +650,25 @@ async function applyRedaction(precomputed) {
 
 // ------------------------------------------------------------- text edit
 
+function setStyleToggle(id, on) {
+  $(id).classList.toggle('active', !!on);
+}
+
 async function beginTextEdit(region) {
   try {
     setStatus('Reading text in region…', true);
     const found = await host.call('get-region-text', {
-      pdf: bytesToBase64(state.pdf), region, pdfPassword: state.password,
+      pdf: state.pdfB64, region, pdfPassword: state.password,
     });
     setStatus('');
     $('edit-text').value = found.text;
     $('edit-size').value = Number(found.fontSize).toFixed(1);
+    // Pre-fill the font controls with what was detected in the region.
+    $('edit-font').value = ['helvetica', 'times', 'courier'].includes(found.fontFamily)
+      ? found.fontFamily : 'helvetica';
+    setStyleToggle('edit-bold', found.bold);
+    setStyleToggle('edit-italic', found.italic);
+    $('edit-color').value = '#000000';
     showPanel('panel-edit');
     $('edit-text').focus();
   } catch (e) {
@@ -416,10 +682,14 @@ async function applyTextEdit() {
   try {
     setStatus('Replacing text…', true);
     const result = await host.call('replace-region-text', {
-      pdf: bytesToBase64(state.pdf),
+      pdf: state.pdfB64,
       region,
       text: $('edit-text').value,
       fontSize: parseFloat($('edit-size').value) || undefined,
+      fontFamily: $('edit-font').value,
+      bold: $('edit-bold').classList.contains('active'),
+      italic: $('edit-italic').classList.contains('active'),
+      color: $('edit-color').value,
       pdfPassword: state.password,
     });
     hidePanels();
@@ -483,7 +753,7 @@ async function applyImageSignature() {
     }
     setStatus('Placing signature…', true);
     const result = await host.call('sign-image', {
-      pdf: bytesToBase64(state.pdf), region, png: pngB64, pdfPassword: state.password,
+      pdf: state.pdfB64, region, png: pngB64, pdfPassword: state.password,
     });
     hidePanels();
     setTool('select');
@@ -521,7 +791,7 @@ async function digitallySign() {
     try {
       setStatus('Signing…', true);
       const result = await host.call('sign-digital', {
-        pdf: bytesToBase64(state.pdf),
+        pdf: state.pdfB64,
         pfx: pfxB64,
         pfxPassword,
         reason: choice.reason || undefined,
@@ -580,7 +850,7 @@ async function mergeFiles() {
     if (files.length === 0) return;
     try {
       setStatus(`Merging ${files.length} file${files.length === 1 ? '' : 's'}…`, true);
-      const pdfs = [bytesToBase64(state.pdf)];
+      const pdfs = [state.pdfB64];
       for (const file of files) {
         pdfs.push(bytesToBase64(new Uint8Array(await file.arrayBuffer())));
       }
@@ -610,7 +880,7 @@ async function protect() {
   try {
     setStatus('Encrypting…', true);
     const result = await host.call('encrypt', {
-      pdf: bytesToBase64(state.pdf),
+      pdf: state.pdfB64,
       userPassword: value.user,
       ownerPassword: value.owner || undefined,
       pdfPassword: state.password,
@@ -633,7 +903,7 @@ async function findReplace() {
   try {
     setStatus('Replacing…', true);
     const result = await host.call('replace-all', {
-      pdf: bytesToBase64(state.pdf),
+      pdf: state.pdfB64,
       phrase: value.find,
       replacement: value.replace,
       pdfPassword: state.password,
@@ -734,12 +1004,12 @@ async function save() {
 function undo() {
   const previous = state.history.pop();
   if (!previous) return;
-  state.pdf = previous.pdf;
+  setWorkingPdf(previous.pdf, previous.pdfB64);
   state.info = previous.info;
   state.password = previous.password;
   state.page = Math.min(state.page, state.info.pageCount);
-  refreshSignatures().then(() => {
-    renderPage();
+  refreshSignatures().then(async () => {
+    await showDocument();
     updateChrome();
     toast('Undid last change.');
   });
@@ -763,17 +1033,23 @@ function wire() {
   $('btn-protect').addEventListener('click', protect);
   $('btn-digital').addEventListener('click', digitallySign);
 
-  $('btn-prev').addEventListener('click', () => { state.page--; renderPage(); updateChrome(); });
-  $('btn-next').addEventListener('click', () => { state.page++; renderPage(); updateChrome(); });
-  $('btn-zoom-in').addEventListener('click', () => { state.zoom = Math.min(3, state.zoom + 0.25); renderPage(); updateChrome(); });
-  $('btn-zoom-out').addEventListener('click', () => { state.zoom = Math.max(0.5, state.zoom - 0.25); renderPage(); updateChrome(); });
+  $('btn-prev').addEventListener('click', () => goToPage(state.page - 1));
+  $('btn-next').addEventListener('click', () => goToPage(state.page + 1));
+  $('btn-zoom-in').addEventListener('click', () => setZoom(state.zoom + 0.25));
+  $('btn-zoom-out').addEventListener('click', () => setZoom(state.zoom - 0.25));
 
   $('redact-preview').addEventListener('click', previewRedaction);
   $('redact-apply').addEventListener('click', () => applyRedaction());
   $('redact-clear').addEventListener('click', () => { state.regions = []; drawRegions(); });
+  $('redact-search-btn').addEventListener('click', searchAndMarkRedactions);
+  $('redact-search-text').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); searchAndMarkRedactions(); }
+  });
 
   $('edit-apply').addEventListener('click', applyTextEdit);
   $('edit-cancel').addEventListener('click', () => { hidePanels(); setTool('select'); });
+  $('edit-bold').addEventListener('click', () => $('edit-bold').classList.toggle('active'));
+  $('edit-italic').addEventListener('click', () => $('edit-italic').classList.toggle('active'));
 
   $('sign-tab-draw').addEventListener('click', () => {
     $('sign-tab-draw').classList.add('active');

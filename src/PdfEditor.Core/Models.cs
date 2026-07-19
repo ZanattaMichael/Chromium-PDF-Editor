@@ -13,14 +13,26 @@ public sealed record RectRegion(int Page, float X, float Y, float Width, float H
 /// <summary>A located occurrence of a text phrase.</summary>
 public sealed record TextMatch(int Page, string Text, float X, float Y, float Width, float Height);
 
-/// <summary>Basic geometry of a single page.</summary>
-public sealed record PageInfo(int Number, float Width, float Height);
+/// <summary>
+/// Geometry of a single page, describing exactly the box that gets rendered so the viewer
+/// can map screen coordinates back to the document. <paramref name="X"/>/<paramref name="Y"/>
+/// are the lower-left corner of the (crop) box in PDF user space — non-zero when it does not
+/// start at the origin. <paramref name="Width"/>/<paramref name="Height"/> are the box size
+/// in that space (before any rotation). <paramref name="Rotation"/> is the page's clockwise
+/// display rotation (0/90/180/270); at 90/270 the rendered image is width/height-swapped.
+/// Ignoring the crop box or the rotation makes redactions land in the wrong place.
+/// </summary>
+public sealed record PageInfo(int Number, float X, float Y, float Width, float Height, int Rotation);
 
 /// <summary>Summary of a loaded document.</summary>
 public sealed record DocumentInfo(int PageCount, IReadOnlyList<PageInfo> Pages, bool IsEncrypted);
 
-/// <summary>Text found inside a region, along with the dominant font size (user-space points).</summary>
-public sealed record RegionText(string Text, float FontSize);
+/// <summary>
+/// Text found inside a region, with the dominant font size (user-space points) and a
+/// best-effort read of the dominant font: family (<c>helvetica</c>/<c>times</c>/<c>courier</c>)
+/// and whether it is bold/italic — used to pre-fill the edit controls.
+/// </summary>
+public sealed record RegionText(string Text, float FontSize, string FontFamily, bool Bold, bool Italic);
 
 /// <summary>Result of an operation that rewrites the document.</summary>
 public sealed record EditResult(byte[] Pdf, IReadOnlyList<string> Warnings)

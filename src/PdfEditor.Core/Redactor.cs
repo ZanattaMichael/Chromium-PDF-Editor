@@ -41,16 +41,25 @@ public static class Redactor
                 RemoveAnnotationsIn(page, rects);
 
                 if (drawBoxes)
-                {
-                    var canvas = new PdfCanvas(page);
-                    canvas.SaveState().SetFillColor(ColorConstants.BLACK);
-                    foreach (var r in rects)
-                        canvas.Rectangle(r.GetLeft(), r.GetBottom(), r.GetWidth(), r.GetHeight()).Fill();
-                    canvas.RestoreState();
-                }
+                    DrawBoxesInDefaultUserSpace(doc, page, rects);
             }
         }
         return new EditResult(output.ToArray(), warnings);
+    }
+
+    /// <summary>
+    /// Paints the opaque black boxes over the regions. Drawing in the page's default user space
+    /// (see <see cref="PdfContentGuard.InDefaultUserSpace"/>) keeps the boxes aligned with the
+    /// content even when the page leaves a scale/flip transform active — which is why the box used
+    /// to land in the wrong place on Chrome / Google-Docs-exported PDFs while the removal was fine.
+    /// </summary>
+    private static void DrawBoxesInDefaultUserSpace(PdfDocument doc, PdfPage page, IList<Rectangle> rects)
+    {
+        var canvas = PdfContentGuard.InDefaultUserSpace(page, doc);
+        canvas.SetFillColor(ColorConstants.BLACK);
+        foreach (var r in rects)
+            canvas.Rectangle(r.GetLeft(), r.GetBottom(), r.GetWidth(), r.GetHeight());
+        canvas.Fill();
     }
 
     private static void RemoveAnnotationsIn(PdfPage page, IList<Rectangle> regions)

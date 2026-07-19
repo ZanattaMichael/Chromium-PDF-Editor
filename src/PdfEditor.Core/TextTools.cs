@@ -1,4 +1,5 @@
 using System.Text;
+using iText.IO.Font.Constants;
 using iText.Kernel.Font;
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
@@ -19,26 +20,85 @@ namespace PdfEditor.Core;
 /// </summary>
 public static class TextTools
 {
-    /// <summary>Returns the text inside a region plus its dominant font size.</summary>
+    /// <summary>Returns the text inside a region plus its dominant font size and style.</summary>
     public static RegionText GetTextInRegion(byte[] pdf, RectRegion region, string? password = null)
     {
         using var doc = PdfIo.OpenReadOnly(pdf, password);
         var rect = new Rectangle(region.X, region.Y, region.Width, region.Height);
         var chunks = CollectChunks(doc, region.Page).Where(c => ContainsCenter(rect, c.BBox)).ToList();
-        return new RegionText(AssembleText(chunks), chunks.Count == 0 ? 12f : chunks.Max(c => c.FontHeight));
+        float size = chunks.Count == 0 ? 12f : chunks.Max(c => c.FontHeight);
+        string dominantFont = chunks
+            .Where(c => !string.IsNullOrEmpty(c.FontName))
+            .GroupBy(c => c.FontName)
+            .OrderByDescending(g => g.Count())
+            .FirstOrDefault()?.Key ?? "";
+        var (family, bold, italic) = DetectFont(dominantFont);
+        return new RegionText(AssembleText(chunks), size, family, bold, italic);
     }
 
     /// <summary>
     /// Replaces the text inside a region: original text operators are removed from the
-    /// file and the new text is laid out inside the same rectangle.
+    /// file and the new text is laid out inside the same rectangle, in the requested font,
+    /// size, style, and colour (all optional — omitted values fall back to what was there).
     /// </summary>
     public static EditResult ReplaceTextInRegion(byte[] pdf, RectRegion region, string newText,
-        float? fontSize = null, string? password = null)
+        float? fontSize = null, string? fontFamily = null, bool bold = false, bool italic = false,
+        string? colorHex = null, string? password = null)
     {
         float size = fontSize ?? GetTextInRegion(pdf, region, password).FontSize;
         var removed = Redactor.RemoveContent(pdf, new[] { region }, password);
-        var stamped = StampText(removed.Pdf, region, newText, size, password);
+        var stamped = StampText(removed.Pdf, region, newText, size, password,
+            fontName: ResolveFont(fontFamily, bold, italic), color: ParseColor(colorHex));
         return new EditResult(stamped, removed.Warnings);
+    }
+
+    /// <summary>Maps a family name (helvetica/times/courier) + style to a standard-14 PDF font.</summary>
+    internal static string ResolveFont(string? family, bool bold, bool italic)
+    {
+        switch ((family ?? "helvetica").Trim().ToLowerInvariant())
+        {
+            case "times":
+            case "serif":
+                return bold && italic ? StandardFonts.TIMES_BOLDITALIC
+                    : bold ? StandardFonts.TIMES_BOLD
+                    : italic ? StandardFonts.TIMES_ITALIC
+                    : StandardFonts.TIMES_ROMAN;
+            case "courier":
+            case "mono":
+            case "monospace":
+                return bold && italic ? StandardFonts.COURIER_BOLDOBLIQUE
+                    : bold ? StandardFonts.COURIER_BOLD
+                    : italic ? StandardFonts.COURIER_OBLIQUE
+                    : StandardFonts.COURIER;
+            default: // helvetica / sans-serif
+                return bold && italic ? StandardFonts.HELVETICA_BOLDOBLIQUE
+                    : bold ? StandardFonts.HELVETICA_BOLD
+                    : italic ? StandardFonts.HELVETICA_OBLIQUE
+                    : StandardFonts.HELVETICA;
+        }
+    }
+
+    /// <summary>Best-effort read of a font's PostScript name into family + bold/italic flags.</summary>
+    internal static (string Family, bool Bold, bool Italic) DetectFont(string? postScriptName)
+    {
+        string n = (postScriptName ?? "").ToLowerInvariant();
+        string family =
+            n.Contains("times") || n.Contains("serif") || n.Contains("georgia") || n.Contains("roman") || n.Contains("minion") ? "times"
+            : n.Contains("courier") || n.Contains("mono") || n.Contains("consol") ? "courier"
+            : "helvetica";
+        bool bold = n.Contains("bold") || n.Contains("black") || n.Contains("heavy") || n.Contains("semibold");
+        bool italic = n.Contains("italic") || n.Contains("oblique");
+        return (family, bold, italic);
+    }
+
+    private static iText.Kernel.Colors.Color? ParseColor(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return null;
+        string h = hex.Trim().TrimStart('#');
+        if (h.Length != 6 ||
+            !int.TryParse(h, System.Globalization.NumberStyles.HexNumber, null, out int rgb))
+            return null;
+        return new iText.Kernel.Colors.DeviceRgb((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
     }
 
     /// <summary>Finds every occurrence of a phrase across the document.</summary>
@@ -87,28 +147,34 @@ public static class TextTools
     }
 
     private static byte[] StampText(byte[] pdf, RectRegion region, string text, float fontSize,
-        string? password, bool wrap = true)
+        string? password, bool wrap = true, string? fontName = null,
+        iText.Kernel.Colors.Color? color = null)
     {
         using var output = new MemoryStream();
         using (var doc = PdfIo.Open(pdf, output, password))
         {
             var page = doc.GetPage(region.Page);
-            var font = PdfFontFactory.CreateFont(iText.IO.Font.Constants.StandardFonts.HELVETICA);
-            var pdfCanvas = new PdfCanvas(page);
+            var font = PdfFontFactory.CreateFont(fontName ?? StandardFonts.HELVETICA);
+            // Draw in the page's default user space so the stamped text isn't thrown off by a
+            // leftover transform the page content leaves active (e.g. Chrome / Google Docs exports).
+            var pdfCanvas = PdfContentGuard.InDefaultUserSpace(page, doc);
             if (wrap)
             {
                 var box = new Rectangle(region.X, region.Y, region.Width, region.Height);
                 using var canvas = new Canvas(pdfCanvas, box);
-                canvas.Add(new Paragraph(text).SetFont(font).SetFontSize(fontSize)
+                var paragraph = new Paragraph(text).SetFont(font).SetFontSize(fontSize)
                     .SetMargin(0).SetMultipliedLeading(1.05f)
-                    .SetVerticalAlignment(VerticalAlignment.TOP));
+                    .SetVerticalAlignment(VerticalAlignment.TOP);
+                if (color != null) paragraph.SetFontColor(color);
+                canvas.Add(paragraph);
             }
             else
             {
                 // Single-line stamp on the original baseline (used by find & replace).
                 float baseline = region.Y + fontSize * 0.21f; // approximate descender share
-                pdfCanvas.BeginText().SetFontAndSize(font, fontSize)
-                    .MoveText(region.X, baseline).ShowText(text).EndText();
+                pdfCanvas.BeginText().SetFontAndSize(font, fontSize);
+                if (color != null) pdfCanvas.SetFillColor(color);
+                pdfCanvas.MoveText(region.X, baseline).ShowText(text).EndText();
             }
         }
         return output.ToArray();
@@ -116,7 +182,7 @@ public static class TextTools
 
     // ------------------------------------------------------------ extraction
 
-    private sealed record Chunk(string Text, Rectangle BBox, float FontHeight);
+    private sealed record Chunk(string Text, Rectangle BBox, float FontHeight, string FontName);
 
     private static List<Chunk> CollectChunks(PdfDocument doc, int pageNumber)
     {
@@ -143,8 +209,11 @@ public static class TextTools
                 float minY = desc.GetStartPoint().Get(1);
                 float maxY = asc.GetStartPoint().Get(1);
                 if (maxX <= minX) continue;
+                string fontName = "";
+                try { fontName = single.GetFont()?.GetFontProgram()?.GetFontNames()?.GetFontName() ?? ""; }
+                catch { /* some embedded fonts expose no usable name; family detection just falls back */ }
                 _chunks.Add(new Chunk(single.GetText(),
-                    new Rectangle(minX, minY, maxX - minX, maxY - minY), maxY - minY));
+                    new Rectangle(minX, minY, maxX - minX, maxY - minY), maxY - minY, fontName));
             }
         }
 

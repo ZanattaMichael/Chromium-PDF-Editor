@@ -36,10 +36,7 @@
 
   <main id="workspace">
     <div id="scroll-area">
-      <div id="page-wrap">
-        <img id="page-image" alt="PDF page" draggable="false" />
-        <div id="overlay"></div>
-      </div>
+      <div id="pages"></div>
       <div id="empty-state">
         <h1>PDF Editor</h1>
         <p>Open a PDF to start editing, or navigate to any PDF and it will open here automatically.</p>
@@ -51,7 +48,12 @@
     <aside id="panel" hidden>
       <div id="panel-redact" class="panel-section" hidden>
         <h2>Redact</h2>
-        <p class="muted">Drag boxes over content. Content behind each box is <strong>permanently removed</strong> when applied.</p>
+        <p class="muted">Drag boxes over content, or search for text to mark every match. Content
+          behind each box is <strong>permanently removed</strong> when applied.</p>
+        <div id="redact-search">
+          <input id="redact-search-text" type="text" placeholder="Find text to redact…" />
+          <button id="redact-search-btn">🔍 Find &amp; mark</button>
+        </div>
         <ul id="redact-list"></ul>
         <div class="actions">
           <button id="redact-preview" disabled>👁 Preview</button>
@@ -64,7 +66,19 @@
         <h2>Edit text</h2>
         <p class="muted">Text found in the selected region:</p>
         <textarea id="edit-text" rows="5"></textarea>
-        <label>Font size <input id="edit-size" type="number" min="4" max="96" step="0.5" /></label>
+        <label>Font
+          <select id="edit-font">
+            <option value="helvetica">Helvetica (sans-serif)</option>
+            <option value="times">Times (serif)</option>
+            <option value="courier">Courier (monospace)</option>
+          </select>
+        </label>
+        <div id="edit-style">
+          <label>Size <input id="edit-size" type="number" min="4" max="96" step="0.5" /></label>
+          <button type="button" id="edit-bold" class="style-toggle" title="Bold"><b>B</b></button>
+          <button type="button" id="edit-italic" class="style-toggle" title="Italic"><i>I</i></button>
+          <label class="color-field" title="Text colour">Colour <input id="edit-color" type="color" value="#000000" /></label>
+        </div>
         <div class="actions">
           <button id="edit-apply">Apply</button>
           <button id="edit-cancel">Cancel</button>
@@ -96,6 +110,13 @@
     <span id="status"></span>
     <span id="badges"></span>
   </footer>
+
+  <div id="busy-overlay" hidden>
+    <div class="busy-card">
+      <span class="spinner-lg"></span>
+      <span id="busy-text"></span>
+    </div>
+  </div>
 
   <dialog id="modal"></dialog>
   <input id="file-input" type="file" accept="application/pdf" hidden />

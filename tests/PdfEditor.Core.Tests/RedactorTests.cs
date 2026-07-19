@@ -123,6 +123,37 @@ public class RedactorTests
     }
 
     [Fact]
+    public void BlackBox_LandsOnTheContent_WhenPageLeavesATransformActive()
+    {
+        // Regression: Chrome / Google-Docs-exported PDFs apply a top-level scale+flip matrix that
+        // is never wrapped in q/Q, so it is still active at the end of the content stream. A box
+        // appended with a plain PdfCanvas inherited that matrix and landed scaled/flipped away,
+        // even though the content removal (CTM-aware) was correct. The box must land on the word.
+        byte[] pdf = TestPdfs.ChromeStyleLeftoverCtm("SECRET");
+        var match = Assert.Single(TextTools.FindText(pdf, "SECRET"));
+        float cy = match.Y + match.Height / 2;
+
+        // The word really renders where iText reports it: some pixel along that band is dark
+        // (before redaction), proving iText's coordinates agree with what PDFium renders.
+        bool textRendersHere = false;
+        for (float dx = 1; dx < match.Width && !textRendersHere; dx += 1)
+            if (TestPdfAssert.PixelAt(pdf, 1, match.X + dx, cy, 150).Red < 128) textRendersHere = true;
+        Assert.True(textRendersHere, $"expected the word to render along y={cy:F0} but that band was blank");
+
+        var result = Redactor.Redact(pdf, new[]
+        {
+            new RectRegion(match.Page, match.X, match.Y, match.Width, match.Height)
+        });
+
+        // After redaction the box is opaque black across the whole word (not shifted elsewhere).
+        for (float dx = 2; dx < match.Width; dx += 4)
+        {
+            var boxPixel = TestPdfAssert.PixelAt(result.Pdf, 1, match.X + dx, cy, 150);
+            Assert.Equal(new SKColor(0, 0, 0, 255), boxPixel);
+        }
+    }
+
+    [Fact]
     public void NoRegions_ReturnsDocumentUnchanged()
     {
         byte[] pdf = TestPdfs.WithText(("hello", 72, 700, 12));

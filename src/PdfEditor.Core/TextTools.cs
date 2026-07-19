@@ -155,7 +155,9 @@ public static class TextTools
         {
             var page = doc.GetPage(region.Page);
             var font = PdfFontFactory.CreateFont(fontName ?? StandardFonts.HELVETICA);
-            var pdfCanvas = new PdfCanvas(page);
+            // Draw in the page's default user space so the stamped text isn't thrown off by a
+            // leftover transform the page content leaves active (e.g. Chrome / Google Docs exports).
+            var pdfCanvas = PdfContentGuard.InDefaultUserSpace(page, doc);
             if (wrap)
             {
                 var box = new Rectangle(region.X, region.Y, region.Width, region.Height);

@@ -53,6 +53,28 @@ public class TextToolsTests
     }
 
     [Fact]
+    public void ReplaceTextInRegion_StampsNewText_WhenPageLeavesATransformActive()
+    {
+        // Regression (same root cause as the redaction box): on a Chrome / Google-Docs PDF whose
+        // content leaves a scale+flip matrix active, stamped replacement text used to be scaled and
+        // flipped away instead of landing at the region. The new glyphs must render at the region.
+        byte[] pdf = TestPdfs.ChromeStyleLeftoverCtm("SECRET");
+        var match = Assert.Single(TextTools.FindText(pdf, "SECRET"));
+        var region = new RectRegion(match.Page, match.X - 2, match.Y - 2, match.Width + 80, match.Height + 4);
+
+        var result = TextTools.ReplaceTextInRegion(pdf, region, "PUBLIC", fontSize: match.Height);
+
+        // Some glyph of the stamped word renders dark somewhere along the region's baseline.
+        bool anyDark = false;
+        for (float dx = 0; dx < region.Width && !anyDark; dx += 2)
+        {
+            var px = TestPdfAssert.PixelAt(result.Pdf, 1, region.X + dx, match.Y + match.Height * 0.45f, 150);
+            if (px.Red < 128 && px.Green < 128 && px.Blue < 128) anyDark = true;
+        }
+        Assert.True(anyDark, "stamped replacement text did not render at the region — a leftover transform likely displaced it");
+    }
+
+    [Fact]
     public void GetTextInRegion_ReportsHelveticaSansForPlainText()
     {
         byte[] pdf = TestPdfs.WithText(("basic helvetica", 72, 700, 14));

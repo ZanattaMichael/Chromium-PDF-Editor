@@ -332,4 +332,50 @@ public static class TestPdfs
         }
         return output.ToArray();
     }
+
+    /// <summary>
+    /// A raw, uncompressed page that mimics how Chrome / Skia print-to-PDF (what Google Docs
+    /// "Download as PDF" produces) structures its content: a top-level scale + Y-flip matrix
+    /// applied <em>outside</em> any q/Q, so it is never restored and stays active at the end of the
+    /// content stream. Text is drawn under that transform via a text matrix, so it renders upright
+    /// at a normal absolute position — but anything naively appended to the page inherits the
+    /// leftover matrix. Used to regression-test that redaction/edit draw in the page's default
+    /// user space regardless. The single Helvetica word renders around absolute (50, 300).
+    /// </summary>
+    public static byte[] ChromeStyleLeftoverCtm(string word = "SECRET")
+    {
+        // Top-level CTM: scale by 0.5, flip Y, translate up by 600  ->  maps (x,y) to (0.5x, 600-0.5y).
+        // Inside it: clip to the page, then a text object whose text matrix flips glyphs upright.
+        string content =
+            "0.5 0 0 -0.5 0 600 cm\n" +   // unbalanced top-level transform (never restored)
+            "q\n" +
+            "0 0 800 1200 re W n\n" +      // clip to the page (in the scaled space)
+            "BT\n/F1 48 Tf\n1 0 0 -1 100 600 Tm\n(" + word + ") Tj\nET\n" +
+            "Q\n";
+        byte[] contentBytes = Encoding.ASCII.GetBytes(content);
+
+        var objs = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] " +
+                "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+            $"<< /Length {contentBytes.Length} >>\nstream\n{content}endstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        };
+
+        var sb = new StringBuilder("%PDF-1.4\n");
+        var offsets = new List<int> { 0 };
+        for (int i = 0; i < objs.Count; i++)
+        {
+            offsets.Add(sb.Length);
+            sb.Append($"{i + 1} 0 obj\n{objs[i]}\nendobj\n");
+        }
+        int xref = sb.Length;
+        sb.Append($"xref\n0 {objs.Count + 1}\n0000000000 65535 f \n");
+        for (int i = 1; i <= objs.Count; i++)
+            sb.Append($"{offsets[i].ToString().PadLeft(10, '0')} 00000 n \n");
+        sb.Append($"trailer\n<< /Size {objs.Count + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
+        return Encoding.Latin1.GetBytes(sb.ToString());
+    }
 }

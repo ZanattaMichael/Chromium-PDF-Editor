@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { launchExtension } = require('../helpers/harness');
-const { buildPdf } = require('../helpers/pdf');
+const { buildPdf, buildLeftoverCtmPdf } = require('../helpers/pdf');
 
 /** @type {Awaited<ReturnType<typeof launchExtension>>} */
 let ext;
@@ -161,6 +161,64 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     expect(await pixelAt(page, 120, 604)).toEqual([0, 0, 0, 255]);
     expect(await pixelAt(page, 90, 504)).not.toEqual([0, 0, 0, 255]);
     expect(await pixelAt(page, 400, 504)).toEqual([255, 255, 255, 255]);
+    await page.close();
+  });
+
+  test('redaction lands on the text on a Chrome/Google-Docs PDF (leftover transform)', async () => {
+    // Regression for the reported bug: Chrome / Google-Docs-exported PDFs leave a scale+flip
+    // matrix active at the end of the page content. The black box used to inherit it and land
+    // scaled/flipped away, while the text under it was correctly removed. Here we search for the
+    // word (absolute coordinates, no screen mapping), redact it, and prove the black box covers
+    // exactly the pixels the word occupied — end-to-end through the extension and native host.
+    const file = path.join(fixtureDir, 'leftover-ctm.pdf');
+    fs.writeFileSync(file, buildLeftoverCtmPdf('SECRET'));
+    const page = await openViewerWith(file);
+
+    // Find the centroid of the word's dark pixels on the rendered page (natural-image pixels).
+    const darkCentroid = async () => page.evaluate(async () => {
+      const img = document.querySelector('.page[data-page="1"] .page-image');
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
+      let sx = 0, sy = 0, n = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = (y * width + x) * 4;
+          if (data[i] < 100 && data[i + 1] < 100 && data[i + 2] < 100) { sx += x; sy += y; n++; }
+        }
+      }
+      return n ? { x: Math.round(sx / n), y: Math.round(sy / n), n, width, height } : null;
+    });
+
+    const before = await darkCentroid();
+    expect(before).not.toBeNull();       // the word actually renders
+    expect(before.n).toBeGreaterThan(50);
+
+    // Search + mark + apply through the real UI / native host.
+    await page.click('#tool-redact');
+    await page.fill('#redact-search-text', 'SECRET');
+    await page.click('#redact-search-btn');
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+
+    // The pixel at the word's former centroid is now opaque black — the box landed on the word.
+    const pixel = await page.evaluate(async (pt) => {
+      const img = document.querySelector('.page[data-page="1"] .page-image');
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      // Sample relative to the (possibly re-rendered at a different scale) image.
+      const x = Math.round(pt.x / pt.width * c.width);
+      const y = Math.round(pt.y / pt.height * c.height);
+      return [...ctx.getImageData(x, y, 1, 1).data];
+    }, before);
+    expect(pixel).toEqual([0, 0, 0, 255]);
     await page.close();
   });
 

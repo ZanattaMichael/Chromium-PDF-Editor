@@ -328,6 +328,69 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('add text: click to place a text box, type, and stamp it onto the page', async () => {
+    const file = fixture('addtext.pdf', [[{ text: 'background', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await page.click('#tool-text');
+    // Click (no drag) on the page to drop a default text box near the top.
+    const box = await page.locator(pageImageSel(1)).boundingBox();
+    const scale = box.width / 595;
+    await page.mouse.click(box.x + 120 * scale, box.y + (842 - 700) * scale);
+
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-title')).toHaveText('Add text');
+    await page.fill('#edit-text', 'STAMPED CAPTION');
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text added');
+
+    // The new text is really in the document (and the original still there).
+    await page.click('#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 675, width: 320, height: 45 });
+    await expect(page.locator('#edit-text')).toHaveValue(/STAMPED CAPTION/);
+    await page.close();
+  });
+
+  test('draw: freehand strokes are baked onto the page in the chosen colour', async () => {
+    const file = fixture('draw.pdf', [[{ text: 'canvas', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await page.click('#tool-draw');
+    await expect(page.locator('#panel-draw')).toBeVisible();
+    // Use a pure-green pen so we can detect it unambiguously.
+    await page.fill('#draw-color', '#00ff00');
+    await page.fill('#draw-width', '8');
+
+    // Draw a stroke straight across the middle of the page (display coordinates).
+    const box = await page.locator(pageImageSel(1)).boundingBox();
+    const midY = box.y + box.height * 0.5;
+    await page.mouse.move(box.x + box.width * 0.2, midY);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.4, midY, { steps: 6 });
+    await page.mouse.move(box.x + box.width * 0.7, midY, { steps: 6 });
+    await page.mouse.up();
+
+    await page.click('#draw-apply');
+    await expect(page.locator('#status')).toContainText('stroke');
+
+    // A green pixel is now baked into the rendered page along the stroke.
+    const green = await page.evaluate(async () => {
+      const img = document.querySelector('.page[data-page="1"] .page-image');
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] < 120 && data[i + 1] > 150 && data[i + 2] < 120) return true;
+      }
+      return false;
+    });
+    expect(green).toBe(true);
+    await page.close();
+  });
+
   test('undo / redo: a change can be undone and then redone', async () => {
     const file = fixture('undoredo.pdf', [[{ text: 'Keep me', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);

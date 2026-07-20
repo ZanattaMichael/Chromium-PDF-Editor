@@ -22,8 +22,15 @@ const state = {
   regions: [],          // pending redaction regions {page,x,y,width,height} (PDF space)
   pendingEditRegion: null,
   pendingSignRegion: null,
+  textMode: 'edit',     // 'edit' (replace existing) or 'add' (stamp new) for the text panel
   signatures: [],
+  drawColor: '#e53935',
+  drawWidth: 2.5,
 };
+
+// Freehand strokes captured for the draw tool, in CSS pixels per page: Map(pageNum -> [stroke]),
+// each stroke an array of {x,y}. Converted to PDF user space when applied.
+const inkByPage = new Map();
 
 // Rendered pages are cached in memory so navigating back and forth is instant instead of
 // re-rendering (and re-uploading the whole document) every time. Entries are keyed by the
@@ -38,6 +45,7 @@ function setWorkingPdf(bytes, base64) {
   state.pdfB64 = base64 ?? bytesToBase64(bytes);
   state.version++;
   renderCache.clear();
+  inkByPage.clear();  // uncommitted freehand strokes belong to the old document
   prefetchToken++; // cancel any in-flight prefetch for the previous document
 }
 
@@ -339,6 +347,7 @@ function setZoom(z) {
   state.zoom = clamped;
   const anchor = state.page;
   buildPages();
+  redrawInk(); // overlays were rebuilt; repaint any in-progress strokes at the new scale
   renderPageEl(anchor);
   goToPage(anchor, 'auto'); // jump, not smooth, so the same page stays put
   updateChrome();
@@ -452,8 +461,8 @@ function updateNav() {
 
 function updateChrome() {
   const loaded = !!state.pdf;
-  for (const id of ['btn-save', 'btn-sidebar', 'tool-edit', 'tool-redact', 'tool-sign',
-    'btn-rotate-left', 'btn-rotate-right',
+  for (const id of ['btn-save', 'btn-sidebar', 'tool-text', 'tool-draw', 'tool-edit',
+    'tool-redact', 'tool-sign', 'btn-rotate-left', 'btn-rotate-right',
     'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
     $(id).disabled = !loaded;
@@ -529,7 +538,51 @@ function renderRedactList() {
   $('redact-clear').disabled = !any;
 }
 
-// Drag-to-draw for edit/redact/sign tools. Delegated on the page column so a drag is
+// --------------------------------------------------------- freehand drawing
+
+/** Returns (creating if needed) the SVG layer that previews strokes on a page. */
+function inkLayer(pe) {
+  let svg = pe.overlay.querySelector('.ink-layer');
+  if (!svg) {
+    svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'ink-layer');
+    pe.overlay.appendChild(svg);
+  }
+  return svg;
+}
+
+/** CSS pixels per PDF point on a page (for sizing the live stroke preview). */
+function pxPerPoint(pageNum, img) {
+  const p = pageSize(pageNum);
+  const swap = p.rotation === 90 || p.rotation === 270;
+  return img.clientWidth / (swap ? p.height : p.width);
+}
+
+let inkDrag = null; // { pe, pageNum, points: [{x,y}], poly }
+
+/** Renders every captured stroke for a page (used after re-layout / zoom). */
+function redrawInk() {
+  for (const pe of pageEls) {
+    const strokes = inkByPage.get(Number(pe.wrap.dataset.page));
+    const svg = pe.overlay.querySelector('.ink-layer');
+    if (svg) svg.innerHTML = '';
+    if (!strokes || strokes.length === 0) continue;
+    const layer = inkLayer(pe);
+    const w = state.drawWidth * pxPerPoint(Number(pe.wrap.dataset.page), pe.img);
+    for (const stroke of strokes) addPolyline(layer, stroke, w);
+  }
+}
+
+function addPolyline(svg, points, widthPx) {
+  const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  poly.setAttribute('points', points.map((pt) => `${pt.x},${pt.y}`).join(' '));
+  poly.setAttribute('stroke', state.drawColor);
+  poly.setAttribute('stroke-width', String(widthPx));
+  svg.appendChild(poly);
+  return poly;
+}
+
+// Drag-to-draw for edit/redact/sign/text tools. Delegated on the page column so a drag is
 // attributed to whichever page it started on.
 let drag = null;
 
@@ -540,18 +593,34 @@ pagesEl.addEventListener('pointerdown', (e) => {
   const pe = pageEls.find((p) => p.overlay === overlay);
   if (!pe) return;
   const rect = overlay.getBoundingClientRect();
+
+  if (state.tool === 'draw') {
+    const pageNum = Number(pe.wrap.dataset.page);
+    const point = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const poly = addPolyline(inkLayer(pe), [point], state.drawWidth * pxPerPoint(pageNum, pe.img));
+    inkDrag = { pe, pageNum, points: [point], poly };
+    overlay.setPointerCapture(e.pointerId);
+    return;
+  }
+
   drag = { pe, pageNum: Number(pe.wrap.dataset.page), x0: e.clientX - rect.left, y0: e.clientY - rect.top, div: null };
   overlay.setPointerCapture(e.pointerId);
 });
 
 pagesEl.addEventListener('pointermove', (e) => {
+  if (inkDrag) {
+    const rect = inkDrag.pe.overlay.getBoundingClientRect();
+    inkDrag.points.push({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    inkDrag.poly.setAttribute('points', inkDrag.points.map((pt) => `${pt.x},${pt.y}`).join(' '));
+    return;
+  }
   if (!drag) return;
   const rect = drag.pe.overlay.getBoundingClientRect();
   const x1 = e.clientX - rect.left;
   const y1 = e.clientY - rect.top;
   if (!drag.div) {
     drag.div = document.createElement('div');
-    drag.div.className = `region ${state.tool === 'redact' ? '' : state.tool === 'edit' ? 'edit' : 'sign'}`;
+    drag.div.className = `region ${state.tool === 'redact' ? '' : state.tool === 'sign' ? 'sign' : 'edit'}`;
     drag.pe.overlay.appendChild(drag.div);
   }
   const left = Math.min(drag.x0, x1);
@@ -561,6 +630,15 @@ pagesEl.addEventListener('pointermove', (e) => {
 });
 
 pagesEl.addEventListener('pointerup', async (e) => {
+  if (inkDrag) {
+    if (inkDrag.points.length > 0) {
+      const list = inkByPage.get(inkDrag.pageNum) ?? [];
+      list.push(inkDrag.points);
+      inkByPage.set(inkDrag.pageNum, list);
+    }
+    inkDrag = null;
+    return;
+  }
   if (!drag) return;
   const { pe, pageNum, x0, y0, div } = drag;
   const rect = pe.overlay.getBoundingClientRect();
@@ -568,7 +646,17 @@ pagesEl.addEventListener('pointerup', async (e) => {
   const y1 = e.clientY - rect.top;
   drag = null;
   if (div) div.remove();
-  if (Math.abs(x1 - x0) < 4 || Math.abs(y1 - y0) < 4) return;
+
+  const tiny = Math.abs(x1 - x0) < 4 || Math.abs(y1 - y0) < 4;
+
+  // The text tool accepts a plain click: drop a default-sized text box at the point.
+  if (state.tool === 'text' && tiny) {
+    const at = cssToPdf(pageNum, pe.img, x0, y0);
+    const h = 26;
+    beginAddText({ page: pageNum, x: at.x, y: at.y - h, width: 240, height: h });
+    return;
+  }
+  if (tiny) return;
 
   const a = cssToPdf(pageNum, pe.img, Math.min(x0, x1), Math.max(y0, y1)); // bottom-left
   const b = cssToPdf(pageNum, pe.img, Math.max(x0, x1), Math.min(y0, y1)); // top-right
@@ -580,6 +668,8 @@ pagesEl.addEventListener('pointerup', async (e) => {
   if (state.tool === 'redact') {
     state.regions.push(region);
     drawRegions();
+  } else if (state.tool === 'text') {
+    beginAddText(region);
   } else if (state.tool === 'edit') {
     state.pendingEditRegion = region;
     drawRegions();
@@ -608,12 +698,14 @@ function hidePanels() {
 }
 
 function setTool(tool) {
+  if (state.tool === 'draw' && tool !== 'draw') clearDrawing(); // drop uncommitted strokes
   state.tool = tool;
   for (const button of document.querySelectorAll('.tool')) button.classList.remove('active');
   $(`tool-${tool}`).classList.add('active');
   for (const pe of pageEls) pe.overlay.classList.toggle('tool-active', tool !== 'select');
   if (tool === 'redact') showPanel('panel-redact');
-  else if (tool === 'select') hidePanels();
+  else if (tool === 'draw') showPanel('panel-draw');
+  else hidePanels(); // select/text/edit/sign: panel appears once a box is drawn
 }
 
 // ---------------------------------------------------------------- dialogs
@@ -765,6 +857,9 @@ async function beginTextEdit(region) {
       pdf: state.pdfB64, region, pdfPassword: state.password,
     });
     setStatus('');
+    state.textMode = 'edit';
+    $('edit-title').textContent = 'Edit text';
+    $('edit-hint').textContent = 'Text found in the selected region:';
     $('edit-text').value = found.text;
     $('edit-size').value = Number(found.fontSize).toFixed(1);
     // Pre-fill the font controls with what was detected in the region.
@@ -780,12 +875,31 @@ async function beginTextEdit(region) {
   }
 }
 
+/** Opens the text panel in "add" mode for stamping brand-new text into a region. */
+function beginAddText(region) {
+  state.textMode = 'add';
+  state.pendingEditRegion = region;
+  $('edit-title').textContent = 'Add text';
+  $('edit-hint').textContent = 'Type the text to place on the page:';
+  $('edit-text').value = '';
+  // Default the size to roughly the box height so a dragged box sets the type size.
+  $('edit-size').value = Math.max(8, Math.min(72, Math.round(region.height))).toFixed(1);
+  $('edit-font').value = 'helvetica';
+  setStyleToggle('edit-bold', false);
+  setStyleToggle('edit-italic', false);
+  $('edit-color').value = '#000000';
+  showPanel('panel-edit');
+  $('edit-text').focus();
+}
+
 async function applyTextEdit() {
   const region = state.pendingEditRegion;
   if (!region) return;
+  const adding = state.textMode === 'add';
+  if (adding && !$('edit-text').value.trim()) { toast('Type some text first.'); return; }
   try {
-    setStatus('Replacing text…', true);
-    const result = await host.call('replace-region-text', {
+    setStatus(adding ? 'Adding text…' : 'Replacing text…', true);
+    const result = await host.call(adding ? 'add-text' : 'replace-region-text', {
       pdf: state.pdfB64,
       region,
       text: $('edit-text').value,
@@ -797,9 +911,50 @@ async function applyTextEdit() {
       pdfPassword: state.password,
     });
     hidePanels();
-    await applyResult(result.pdf, 'Text replaced.');
+    if (adding) setTool('text');
+    await applyResult(result.pdf, adding ? 'Text added.' : 'Text replaced.');
   } catch (e) {
     fail(e);
+  }
+}
+
+// ----------------------------------------------------------- draw (ink) tool
+
+/** Converts captured CSS strokes for a page to PDF-space strokes and stamps them in. */
+async function applyDrawing() {
+  const pages = [...inkByPage.entries()].filter(([, s]) => s.length > 0);
+  if (pages.length === 0) { toast('Draw something first.'); return; }
+  try {
+    setStatus('Applying drawing…', true);
+    let pdfB64 = state.pdfB64;
+    let total = 0;
+    for (const [pageNum, strokes] of pages) {
+      const pe = pageEls[pageNum - 1];
+      const pdfStrokes = strokes.map((stroke) =>
+        stroke.map((pt) => {
+          const p = cssToPdf(pageNum, pe.img, pt.x, pt.y);
+          return { x: p.x, y: p.y };
+        }));
+      const result = await host.call('add-drawing', {
+        pdf: pdfB64, page: pageNum, strokes: pdfStrokes,
+        color: state.drawColor, width: state.drawWidth, pdfPassword: state.password,
+      });
+      pdfB64 = result.pdf;      // chain each page's strokes onto the growing document
+      total += strokes.length;
+    }
+    clearDrawing();
+    await applyResult(pdfB64, `Added ${total} stroke${total === 1 ? '' : 's'}.`);
+    setTool('draw');
+  } catch (e) {
+    fail(e);
+  }
+}
+
+function clearDrawing() {
+  inkByPage.clear();
+  for (const pe of pageEls) {
+    const svg = pe.overlay.querySelector('.ink-layer');
+    if (svg) svg.remove();
   }
 }
 
@@ -1160,9 +1315,19 @@ function wire() {
   });
 
   $('tool-select').addEventListener('click', () => setTool('select'));
+  $('tool-text').addEventListener('click', () => setTool('text'));
+  $('tool-draw').addEventListener('click', () => setTool('draw'));
   $('tool-edit').addEventListener('click', () => setTool('edit'));
   $('tool-redact').addEventListener('click', () => setTool('redact'));
   $('tool-sign').addEventListener('click', () => setTool('sign'));
+
+  $('draw-color').addEventListener('input', () => { state.drawColor = $('draw-color').value; redrawInk(); });
+  $('draw-width').addEventListener('input', () => {
+    state.drawWidth = parseFloat($('draw-width').value) || 2.5; redrawInk();
+  });
+  $('draw-apply').addEventListener('click', applyDrawing);
+  $('draw-clear').addEventListener('click', clearDrawing);
+  $('draw-cancel').addEventListener('click', () => setTool('select'));
 
   $('btn-find').addEventListener('click', findReplace);
   $('btn-merge').addEventListener('click', mergeFiles);

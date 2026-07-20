@@ -47,6 +47,8 @@ public sealed class MessageProcessor
         "render" => Render(p),
         "redact" => Redact(p),
         "rotate" => RotateAction(p),
+        "add-text" => AddTextAction(p),
+        "add-drawing" => AddDrawingAction(p),
         "get-region-text" => GetRegionText(p),
         "replace-region-text" => ReplaceRegionText(p),
         "find-text" => FindTextAction(p),
@@ -97,6 +99,31 @@ public sealed class MessageProcessor
         var pages = (p["pages"]?.AsArray().Select(n => n!.GetValue<int>()) ?? Enumerable.Empty<int>()).ToList();
         int degrees = p["degrees"]?.GetValue<int>() ?? 90;
         var result = PageTools.Rotate(Pdf(p), pages, degrees, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object AddTextAction(JsonObject p)
+    {
+        var result = TextTools.AddText(Pdf(p), Region(p["region"]!.AsObject()),
+            p["text"]?.GetValue<string>() ?? "",
+            p["fontSize"]?.GetValue<float>() ?? 14f,
+            p["fontFamily"]?.GetValue<string>(),
+            p["bold"]?.GetValue<bool>() ?? false,
+            p["italic"]?.GetValue<bool>() ?? false,
+            p["color"]?.GetValue<string>(),
+            Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object AddDrawingAction(JsonObject p)
+    {
+        int page = p["page"]!.GetValue<int>();
+        var strokes = (p["strokes"]?.AsArray() ?? new JsonArray())
+            .Select(s => (IReadOnlyList<(float X, float Y)>)s!.AsArray()
+                .Select(pt => (pt!["x"]!.GetValue<float>(), pt["y"]!.GetValue<float>())).ToList())
+            .ToList();
+        var result = InkTools.AddInk(Pdf(p), page, strokes,
+            p["color"]?.GetValue<string>(), p["width"]?.GetValue<float>() ?? 2f, Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 

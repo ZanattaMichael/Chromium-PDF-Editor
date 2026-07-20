@@ -52,6 +52,19 @@ public static class TextTools
         return new EditResult(stamped, removed.Warnings);
     }
 
+    /// <summary>
+    /// Adds new text on top of the page inside <paramref name="region"/> (wrapped to its width),
+    /// without touching any existing content. Used by the "add text anywhere" tool.
+    /// </summary>
+    public static EditResult AddText(byte[] pdf, RectRegion region, string text, float fontSize,
+        string? fontFamily = null, bool bold = false, bool italic = false,
+        string? colorHex = null, string? password = null)
+    {
+        var stamped = StampText(pdf, region, text, fontSize, password,
+            fontName: ResolveFont(fontFamily, bold, italic), color: ParseColor(colorHex));
+        return EditResult.Of(stamped);
+    }
+
     /// <summary>Maps a family name (helvetica/times/courier) + style to a standard-14 PDF font.</summary>
     internal static string ResolveFont(string? family, bool bold, bool italic)
     {
@@ -91,7 +104,7 @@ public static class TextTools
         return (family, bold, italic);
     }
 
-    private static iText.Kernel.Colors.Color? ParseColor(string? hex)
+    internal static iText.Kernel.Colors.Color? ParseColor(string? hex)
     {
         if (string.IsNullOrWhiteSpace(hex)) return null;
         string h = hex.Trim().TrimStart('#');

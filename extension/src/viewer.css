@@ -47,14 +47,70 @@ button {
 
 button:hover:not(:disabled) { background: #55555f; }
 button:disabled { opacity: 0.45; cursor: default; }
-button.tool.active { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
+button.tool.active,
+#btn-sidebar.active { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
 button.danger { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.danger:hover:not(:disabled) { background: #ef5443; }
 
-#page-label, #zoom-label { min-width: 64px; text-align: center; color: var(--muted); }
+#zoom-label { min-width: 48px; text-align: center; color: var(--muted); }
+
+#page-counter { color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
+#page-input {
+  width: 40px;
+  margin: 0;
+  padding: 3px 4px;
+  text-align: center;
+  background: #26262b;
+  color: var(--text);
+  border: 1px solid #55555e;
+  border-radius: 4px;
+  font: inherit;
+}
+#page-input:disabled { opacity: 0.45; }
+#page-total { min-width: 18px; text-align: left; }
 
 /* -------------------------------------------------------------- workspace */
 #workspace { flex: 1; display: flex; min-height: 0; }
+
+/* ------------------------------------------------------- thumbnail sidebar */
+#thumbnails {
+  width: 172px;
+  flex: none;
+  overflow-y: auto;
+  background: var(--surface);
+  border-right: 1px solid #222;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#thumbnails[hidden] { display: none; }
+
+.thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 4px;
+  border: 2px solid transparent;
+}
+.thumb:hover { background: var(--surface-2); }
+.thumb.current { border-color: var(--accent-2); background: var(--surface-2); }
+.thumb img {
+  width: 100%;
+  display: block;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+.thumb .thumb-num { font-size: 11px; color: var(--muted); }
+.thumb-skeleton {
+  width: 100%;
+  aspect-ratio: 1 / 1.414;
+  background: #33333a;
+  border-radius: 2px;
+}
 
 #scroll-area { flex: 1; overflow: auto; display: flex; justify-content: center; padding: 16px; }
 

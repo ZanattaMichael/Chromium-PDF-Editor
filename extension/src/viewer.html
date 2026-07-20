@@ -8,17 +8,26 @@
 <body>
   <header id="toolbar">
     <div class="group">
+      <button id="btn-sidebar" title="Toggle the page thumbnails sidebar" disabled>☰</button>
       <button id="btn-open" title="Open a PDF file">📂 Open</button>
       <button id="btn-save" title="Save the edited PDF" disabled>💾 Save</button>
-      <button id="btn-undo" title="Undo last applied change" disabled>↩ Undo</button>
+    </div>
+    <div class="group">
+      <button id="btn-undo" title="Undo last change" disabled>↩ Undo</button>
+      <button id="btn-redo" title="Redo" disabled>↪ Redo</button>
     </div>
     <div class="group" id="tools">
       <button id="tool-select" class="tool active" title="Pan / select">🖐</button>
-      <button id="tool-edit" class="tool" title="Edit text: drag a box around the text to change" disabled>✏ Edit text</button>
+      <button id="tool-text" class="tool" title="Add text: click anywhere to type" disabled>🅣 Text</button>
+      <button id="tool-draw" class="tool" title="Draw: freehand anywhere on the page" disabled>✒ Draw</button>
+      <button id="tool-edit" class="tool" title="Edit text: drag a box around the text to change" disabled>✏ Edit</button>
       <button id="tool-redact" class="tool" title="Redact: drag boxes over content to black out" disabled>⬛ Redact</button>
       <button id="tool-sign" class="tool" title="Place a signature: drag where it should go" disabled>🖋 Sign</button>
     </div>
     <div class="group">
+      <button id="btn-rotate-left" title="Rotate current page 90° counter-clockwise" disabled>⟲</button>
+      <button id="btn-rotate-right" title="Rotate current page 90° clockwise" disabled>⟳</button>
+      <button id="btn-forms" title="Fill form fields" disabled>🗒 Forms</button>
       <button id="btn-find" title="Find &amp; replace text" disabled>🔍 Replace</button>
       <button id="btn-merge" title="Append other PDFs to this one" disabled>➕ Merge</button>
       <button id="btn-protect" title="Password-protect (AES-256)" disabled>🔒 Protect</button>
@@ -26,7 +35,10 @@
     </div>
     <div class="group" id="nav">
       <button id="btn-prev" title="Previous page" disabled>◀</button>
-      <span id="page-label">– / –</span>
+      <span id="page-counter">
+        <input id="page-input" type="text" inputmode="numeric" value="–" disabled
+          title="Type a page number and press Enter" /> / <span id="page-total">–</span>
+      </span>
       <button id="btn-next" title="Next page" disabled>▶</button>
       <button id="btn-zoom-out" title="Zoom out" disabled>−</button>
       <span id="zoom-label">100%</span>
@@ -35,6 +47,7 @@
   </header>
 
   <main id="workspace">
+    <aside id="thumbnails" hidden></aside>
     <div id="scroll-area">
       <div id="pages"></div>
       <div id="empty-state">

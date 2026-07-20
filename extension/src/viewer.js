@@ -16,6 +16,8 @@ const state = {
   dpi: 144,
   fileName: 'document.pdf',
   history: [],          // undo stack of previous byte states (cap 10)
+  future: [],           // redo stack of states undone (cleared on any new edit)
+  sidebarOpen: false,   // page-thumbnail sidebar visibility
   tool: 'select',
   regions: [],          // pending redaction regions {page,x,y,width,height} (PDF space)
   pendingEditRegion: null,
@@ -133,6 +135,7 @@ async function loadDocument(bytes, fileName, { pushHistory = false, password } =
   if (pushHistory && state.pdf) {
     state.history.push({ pdf: state.pdf, pdfB64: state.pdfB64, info: state.info, password: state.password });
     if (state.history.length > 10) state.history.shift();
+    state.future = []; // a fresh edit invalidates any redo history
   }
   const pdfB64 = bytesToBase64(bytes);
   let info;
@@ -317,6 +320,7 @@ async function renderPageEl(pageNum) {
 /** Rebuilds the page column for the current document and renders the visible page now. */
 async function showDocument() {
   buildPages();
+  buildThumbnails();  // no-op unless the sidebar is open; keyed off the new document version
   await renderPageEl(state.page); // render the landing page eagerly rather than waiting on the observer
   prefetchAround(state.page, currentDpi());
 }
@@ -340,23 +344,123 @@ function setZoom(z) {
   updateChrome();
 }
 
+/** Parses the editable page box and jumps there. */
+function jumpToTypedPage() {
+  const n = parseInt($('page-input').value, 10);
+  if (Number.isFinite(n)) goToPage(n, 'auto');
+  $('page-input').value = String(state.page); // normalise (clamp / reject junk)
+  $('page-input').blur();
+}
+
+// --------------------------------------------------------- thumbnail sidebar
+
+const THUMB_DPI = 26;              // small, fixed resolution for the page rail
+let thumbEls = [];                 // one { wrap, img, renderedKey } per page
+let thumbObserver = null;          // renders thumbnails lazily as they scroll into view
+
+function toggleSidebar(force) {
+  state.sidebarOpen = force ?? !state.sidebarOpen;
+  $('thumbnails').hidden = !state.sidebarOpen;
+  $('btn-sidebar').classList.toggle('active', state.sidebarOpen);
+  if (state.sidebarOpen) buildThumbnails();
+}
+
+/** (Re)builds the thumbnail rail for the current document. */
+function buildThumbnails() {
+  if (!state.sidebarOpen || !state.info) return;
+  thumbObserver?.disconnect();
+  const rail = $('thumbnails');
+  rail.innerHTML = '';
+  thumbEls = [];
+  for (let n = 1; n <= state.info.pageCount; n++) {
+    const wrap = document.createElement('div');
+    wrap.className = 'thumb';
+    wrap.dataset.page = String(n);
+    const img = document.createElement('img');
+    img.alt = `Page ${n}`;
+    const skeleton = document.createElement('div');
+    skeleton.className = 'thumb-skeleton';
+    const num = document.createElement('span');
+    num.className = 'thumb-num';
+    num.textContent = String(n);
+    wrap.append(skeleton, num);
+    wrap.addEventListener('click', () => goToPage(n, 'smooth'));
+    rail.appendChild(wrap);
+    thumbEls.push({ wrap, img, skeleton, renderedKey: null });
+  }
+  thumbObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) renderThumb(Number(e.target.dataset.page));
+  }, { root: rail, rootMargin: '300px 0px' });
+  for (const t of thumbEls) thumbObserver.observe(t.wrap);
+  markCurrentThumb();
+}
+
+async function renderThumb(pageNum) {
+  const t = thumbEls[pageNum - 1];
+  if (!t) return;
+  const key = cacheKey(pageNum, THUMB_DPI);
+  if (t.renderedKey === key) return;
+  try {
+    const png = await renderToCache(pageNum, THUMB_DPI);
+    if (!t.wrap.isConnected) return;
+    t.img.src = `data:image/png;base64,${png}`;
+    if (t.skeleton.parentNode) t.skeleton.replaceWith(t.img);
+    t.renderedKey = key;
+  } catch {
+    /* leave the skeleton; it retries when it next scrolls into view */
+  }
+}
+
+/** Highlights the thumbnail for the current page and scrolls it into view. */
+function markCurrentThumb() {
+  if (!state.sidebarOpen) return;
+  thumbEls.forEach((t, i) => {
+    const isCurrent = i + 1 === state.page;
+    t.wrap.classList.toggle('current', isCurrent);
+    if (isCurrent) t.wrap.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+// ----------------------------------------------------------------- rotate
+
+async function rotateCurrentPage(degrees) {
+  if (!state.pdf) return;
+  try {
+    setStatus(`Rotating page ${state.page}…`, true);
+    const result = await host.call('rotate', {
+      pdf: state.pdfB64, pages: [state.page], degrees, pdfPassword: state.password,
+    });
+    const keepPage = state.page;
+    await applyResult(result.pdf, `Rotated page ${keepPage}.`);
+    goToPage(keepPage, 'auto');
+  } catch (e) {
+    fail(e);
+  }
+}
+
 /** Updates just the page counter / nav buttons — cheap enough to call while scrolling. */
 function updateNav() {
   if (!state.pdf) return;
-  $('page-label').textContent = `${state.page} / ${state.info.pageCount}`;
+  // Don't clobber what the user is typing into the page box while it has focus.
+  if (document.activeElement !== $('page-input')) $('page-input').value = String(state.page);
+  $('page-total').textContent = String(state.info.pageCount);
   $('btn-prev').disabled = state.page <= 1;
   $('btn-next').disabled = state.page >= state.info.pageCount;
   $('zoom-label').textContent = `${Math.round(state.zoom * 100)}%`;
+  markCurrentThumb();
 }
 
 function updateChrome() {
   const loaded = !!state.pdf;
-  for (const id of ['btn-save', 'tool-edit', 'tool-redact', 'tool-sign',
+  for (const id of ['btn-save', 'btn-sidebar', 'tool-edit', 'tool-redact', 'tool-sign',
+    'btn-rotate-left', 'btn-rotate-right',
     'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
     $(id).disabled = !loaded;
   }
+  $('page-input').disabled = !loaded;
   $('btn-undo').disabled = state.history.length === 0;
+  $('btn-redo').disabled = state.future.length === 0;
   if (loaded) {
     updateNav();
     document.title = `${state.fileName} — PDF Editor`;
@@ -924,6 +1028,7 @@ async function findReplace() {
 async function openFromBytes(bytes, name) {
   try {
     state.history = [];
+    state.future = [];
     state.password = null;
     state.regions = [];
     await loadDocument(bytes, name);
@@ -1001,18 +1106,37 @@ async function save() {
   toast('Saving via downloads…');
 }
 
+/** Snapshot of the current working document, for the undo/redo stacks. */
+function snapshot() {
+  return { pdf: state.pdf, pdfB64: state.pdfB64, info: state.info, password: state.password };
+}
+
+/** Restores a previously captured snapshot and re-renders. */
+async function restore(snap, message) {
+  setWorkingPdf(snap.pdf, snap.pdfB64);
+  state.info = snap.info;
+  state.password = snap.password;
+  state.page = Math.min(state.page, state.info.pageCount);
+  state.regions = state.regions.filter((r) => r.page <= state.info.pageCount);
+  await refreshSignatures();
+  await showDocument();
+  updateChrome();
+  toast(message);
+}
+
 function undo() {
   const previous = state.history.pop();
   if (!previous) return;
-  setWorkingPdf(previous.pdf, previous.pdfB64);
-  state.info = previous.info;
-  state.password = previous.password;
-  state.page = Math.min(state.page, state.info.pageCount);
-  refreshSignatures().then(async () => {
-    await showDocument();
-    updateChrome();
-    toast('Undid last change.');
-  });
+  state.future.push(snapshot());       // remember where we were so Redo can return
+  restore(previous, 'Undid last change.');
+}
+
+function redo() {
+  const next = state.future.pop();
+  if (!next) return;
+  state.history.push(snapshot());
+  if (state.history.length > 10) state.history.shift();
+  restore(next, 'Redid change.');
 }
 
 // ------------------------------------------------------------------ wiring
@@ -1022,6 +1146,18 @@ function wire() {
   $('btn-open-empty').addEventListener('click', openFilePicker);
   $('btn-save').addEventListener('click', save);
   $('btn-undo').addEventListener('click', undo);
+  $('btn-redo').addEventListener('click', redo);
+  $('btn-sidebar').addEventListener('click', () => toggleSidebar());
+
+  $('btn-rotate-left').addEventListener('click', () => rotateCurrentPage(-90));
+  $('btn-rotate-right').addEventListener('click', () => rotateCurrentPage(90));
+
+  $('page-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); jumpToTypedPage(); }
+  });
+  $('page-input').addEventListener('blur', () => {
+    $('page-input').value = String(state.page); // discard an unsubmitted edit
+  });
 
   $('tool-select').addEventListener('click', () => setTool('select'));
   $('tool-edit').addEventListener('click', () => setTool('edit'));

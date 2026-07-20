@@ -46,6 +46,7 @@ public sealed class MessageProcessor
         "info" => Info(p),
         "render" => Render(p),
         "redact" => Redact(p),
+        "rotate" => RotateAction(p),
         "get-region-text" => GetRegionText(p),
         "replace-region-text" => ReplaceRegionText(p),
         "find-text" => FindTextAction(p),
@@ -88,6 +89,14 @@ public sealed class MessageProcessor
     private static object Redact(JsonObject p)
     {
         var result = Redactor.Redact(Pdf(p), Regions(p["regions"]!.AsArray()), Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object RotateAction(JsonObject p)
+    {
+        var pages = (p["pages"]?.AsArray().Select(n => n!.GetValue<int>()) ?? Enumerable.Empty<int>()).ToList();
+        int degrees = p["degrees"]?.GetValue<int>() ?? 90;
+        var result = PageTools.Rotate(Pdf(p), pages, degrees, Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 

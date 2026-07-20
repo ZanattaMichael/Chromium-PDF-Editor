@@ -98,7 +98,8 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
   test('opens a PDF and renders the first page', async () => {
     const file = fixture('render.pdf', [[{ text: 'Hello Playwright', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
-    await expect(page.locator('#page-label')).toHaveText('1 / 1');
+    await expect(page.locator('#page-input')).toHaveValue('1');
+    await expect(page.locator('#page-total')).toHaveText('1');
     // The rendered page is white paper, not a blank/black failure.
     expect(await pixelAt(page, 300, 400)).toEqual([255, 255, 255, 255]);
     await page.close();
@@ -244,21 +245,109 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(file);
 
     await expect(page.locator('.page')).toHaveCount(3); // every page laid out in the column
-    await expect(page.locator('#page-label')).toHaveText('1 / 3');
+    await expect(page.locator('#page-input')).toHaveValue('1');
+    await expect(page.locator('#page-total')).toHaveText('3');
     await expect(page.locator('#btn-prev')).toBeDisabled();
 
     // Paging forward scrolls the next page into view; the counter follows what's visible,
     // and that page renders lazily once it's near the viewport.
     await page.click('#btn-next');
-    await expect(page.locator('#page-label')).toHaveText('2 / 3');
+    await expect(page.locator('#page-input')).toHaveValue('2');
     await expect(page.locator(pageImageSel(2))).toHaveAttribute('src', /data:image\/png/);
 
     await page.click('#btn-next');
-    await expect(page.locator('#page-label')).toHaveText('3 / 3');
+    await expect(page.locator('#page-input')).toHaveValue('3');
     await expect(page.locator('#btn-next')).toBeDisabled();
 
     await page.click('#btn-prev');
-    await expect(page.locator('#page-label')).toHaveText('2 / 3');
+    await expect(page.locator('#page-input')).toHaveValue('2');
+    await page.close();
+  });
+
+  test('editable page counter: typing a number jumps to that page', async () => {
+    const file = fixture('jump.pdf', [
+      [{ text: 'One', x: 72, y: 700 }],
+      [{ text: 'Two', x: 72, y: 700 }],
+      [{ text: 'Three', x: 72, y: 700 }],
+    ]);
+    const page = await openViewerWith(file);
+
+    await page.fill('#page-input', '3');
+    await page.press('#page-input', 'Enter');
+    await expect(page.locator('#page-input')).toHaveValue('3');
+    await expect(page.locator('#btn-next')).toBeDisabled();
+
+    // Out-of-range input is clamped/rejected rather than navigating off the end.
+    await page.fill('#page-input', '99');
+    await page.press('#page-input', 'Enter');
+    await expect(page.locator('#page-input')).toHaveValue('3');
+    await page.close();
+  });
+
+  test('thumbnail sidebar: toggles, lists every page, and navigates on click', async () => {
+    const file = fixture('thumbs.pdf', [
+      [{ text: 'Alpha', x: 72, y: 700 }],
+      [{ text: 'Beta', x: 72, y: 700 }],
+      [{ text: 'Gamma', x: 72, y: 700 }],
+    ]);
+    const page = await openViewerWith(file);
+
+    await expect(page.locator('#thumbnails')).toBeHidden();
+    await page.click('#btn-sidebar');
+    await expect(page.locator('#thumbnails')).toBeVisible();
+    await expect(page.locator('#thumbnails .thumb')).toHaveCount(3);
+    // The first thumbnail renders an image, and page 1 is marked current.
+    await expect(page.locator('#thumbnails .thumb[data-page="1"] img')).toHaveAttribute('src', /data:image\/png/);
+    await expect(page.locator('#thumbnails .thumb[data-page="1"]')).toHaveClass(/current/);
+
+    // Clicking a thumbnail navigates to that page.
+    await page.click('#thumbnails .thumb[data-page="3"]');
+    await expect(page.locator('#page-input')).toHaveValue('3');
+    await expect(page.locator('#thumbnails .thumb[data-page="3"]')).toHaveClass(/current/);
+
+    await page.click('#btn-sidebar');
+    await expect(page.locator('#thumbnails')).toBeHidden();
+    await page.close();
+  });
+
+  test('rotate: turns the current page a quarter turn (portrait -> landscape)', async () => {
+    const file = fixture('rotate.pdf', [[{ text: 'Portrait', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    const portrait = await page.locator('.page[data-page="1"]').boundingBox();
+    expect(portrait.height).toBeGreaterThan(portrait.width); // A4 starts portrait
+
+    await page.click('#btn-rotate-right');
+    await expect(page.locator('#status')).toContainText('Rotated page 1');
+
+    // After a 90° turn the laid-out page is landscape (width/height swapped).
+    await expect.poll(async () => {
+      const b = await page.locator('.page[data-page="1"]').boundingBox();
+      return b.width > b.height;
+    }).toBe(true);
+    await page.close();
+  });
+
+  test('undo / redo: a change can be undone and then redone', async () => {
+    const file = fixture('undoredo.pdf', [[{ text: 'Keep me', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await expect(page.locator('#btn-undo')).toBeDisabled();
+    await expect(page.locator('#btn-redo')).toBeDisabled();
+
+    // Make a change (find & replace), then undo and redo it.
+    await page.click('#btn-find');
+    await fillDialog(page, ['Keep me', 'Changed'], 'Replace all');
+    await expect(page.locator('#status')).toContainText('Replaced 1 occurrence');
+    await expect(page.locator('#btn-undo')).toBeEnabled();
+
+    await page.click('#btn-undo');
+    await expect(page.locator('#status')).toContainText('Undid last change');
+    await expect(page.locator('#btn-redo')).toBeEnabled();
+
+    await page.click('#btn-redo');
+    await expect(page.locator('#status')).toContainText('Redid change');
+    await expect(page.locator('#btn-redo')).toBeDisabled();
     await page.close();
   });
 
@@ -276,7 +365,8 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.evaluate(() =>
       document.querySelector('.page[data-page="2"]').scrollIntoView({ block: 'start', behavior: 'instant' }));
     await expect(page.locator(pageImageSel(2))).toHaveAttribute('src', /data:image\/png/);
-    await expect(page.locator('#page-label')).toHaveText('2 / 2');
+    await expect(page.locator('#page-input')).toHaveValue('2');
+    await expect(page.locator('#page-total')).toHaveText('2');
 
     // Draw on page 2's own overlay, in that page's A4 user-space (near its top).
     const box = await page.locator(pageImageSel(2)).boundingBox();
@@ -470,7 +560,8 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.click('#btn-merge');
     await (await chooser).setFiles(two);
     await expect(page.locator('#status')).toContainText('Merged 1 document');
-    await expect(page.locator('#page-label')).toHaveText('1 / 3');
+    await expect(page.locator('#page-input')).toHaveValue('1');
+    await expect(page.locator('#page-total')).toHaveText('3');
     await page.close();
   });
 

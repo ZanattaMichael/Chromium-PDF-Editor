@@ -27,7 +27,10 @@ const state = {
   drawColor: '#e53935',
   drawWidth: 2.5,
   safety: null,         // { hasActiveContent, javaScriptCount, urlCount, samples }
-  keepActiveContent: false, // false = strip JS/URLs on save until the user opts in
+  keepActiveContent: false, // false = strip JavaScript on save until the user opts in
+  keepLinks: false,     // false = strip link URLs on save until the user enables them
+  links: [],            // extracted { page, url }
+  urlVerdicts: [],      // [{ page, url, level, category, source, detail }] once scanned
 };
 
 // Freehand strokes captured for the draw tool, in CSS pixels per page: Map(pageNum -> [stroke]),
@@ -476,7 +479,7 @@ function updateNav() {
 function updateChrome() {
   const loaded = !!state.pdf;
   for (const id of ['btn-save', 'btn-sidebar', 'tool-text', 'tool-draw', 'tool-edit',
-    'tool-redact', 'tool-sign', 'btn-rotate-left', 'btn-rotate-right', 'btn-forms',
+    'tool-redact', 'tool-sign', 'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-links',
     'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
     $(id).disabled = !loaded;
@@ -496,13 +499,20 @@ function updateChrome() {
     badge.textContent = '🔒 encrypted';
     badgesEl.appendChild(badge);
   }
-  if (loaded && state.safety?.hasActiveContent) {
+  if (loaded && state.safety?.javaScriptCount > 0) {
     const badge = document.createElement('span');
     badge.className = 'badge warn';
-    badge.title = 'This document contains active content — click for details';
-    const kept = state.keepActiveContent;
-    badge.textContent = `⚠ active content ${kept ? 'kept' : 'disabled'}`;
+    badge.title = 'This document contains embedded JavaScript — click for details';
+    badge.textContent = `⚠ JavaScript ${state.keepActiveContent ? 'kept' : 'disabled'}`;
     badge.addEventListener('click', showSafetyDialog);
+    badgesEl.appendChild(badge);
+  }
+  if (loaded && state.safety?.urlCount > 0) {
+    const badge = document.createElement('span');
+    badge.className = 'badge warn';
+    badge.title = 'This document contains links — click to review';
+    badge.textContent = `🔗 links ${state.keepLinks ? 'enabled' : 'disabled'}`;
+    badge.addEventListener('click', openLinks);
     badgesEl.appendChild(badge);
   }
   for (const s of state.signatures) {
@@ -1210,6 +1220,8 @@ async function openFromBytes(bytes, name) {
     state.password = null;
     state.regions = [];
     state.keepActiveContent = false; // re-arm the strip-on-save default for each new document
+    state.keepLinks = false;
+    state.urlVerdicts = [];
     await loadDocument(bytes, name);
     toast(`Opened ${name}.`);
   } catch (e) {
@@ -1263,15 +1275,13 @@ async function openFromUrl(url) {
 /** Explains detected active content and lets the user keep it (default: strip on save). */
 function showSafetyDialog() {
   const s = state.safety;
-  if (!s) return;
-  const parts = [];
-  if (s.javaScriptCount) parts.push(`${s.javaScriptCount} embedded JavaScript action${s.javaScriptCount === 1 ? '' : 's'}`);
-  if (s.urlCount) parts.push(`${s.urlCount} link/URL or external action${s.urlCount === 1 ? '' : 's'}`);
-  modal.innerHTML = '<h2>⚠ Active content</h2>';
+  if (!s?.javaScriptCount) return;
+  modal.innerHTML = '<h2>⚠ Embedded JavaScript</h2>';
   const p = document.createElement('p');
   p.className = 'muted';
-  p.textContent = `This document contains ${parts.join(' and ')}. These can run scripts or open ` +
-    'external locations when the file is opened in another PDF viewer. They are ' +
+  p.textContent = `This document contains ${s.javaScriptCount} embedded JavaScript ` +
+    `action${s.javaScriptCount === 1 ? '' : 's'}, which can run when the file is opened in ` +
+    'another PDF viewer. It is ' +
     (state.keepActiveContent ? 'currently kept.' : 'disabled and will be removed when you save.');
   modal.appendChild(p);
   if (s.samples?.length) {
@@ -1370,13 +1380,106 @@ async function applyForms() {
   }
 }
 
+// ---------------------------------------------------------------- links / URLs
+
+async function openLinks() {
+  try {
+    setStatus('Finding links…', true);
+    const result = await host.call('list-urls', { pdf: state.pdfB64, pdfPassword: state.password });
+    setStatus('');
+    state.links = result.links ?? [];
+    $('links-enable').checked = state.keepLinks;
+    showPanel('panel-links');
+    if (state.keepLinks && state.urlVerdicts.length === 0) await scanLinks();
+    else renderLinks();
+  } catch (e) {
+    fail(e);
+  }
+}
+
+function renderLinks() {
+  const list = $('links-list');
+  list.innerHTML = '';
+  const has = state.links.length > 0;
+  $('links-empty').hidden = has;
+  $('links-enable-row').hidden = !has;
+  $('links-hint').hidden = !has || state.keepLinks;
+  $('links-rescan').hidden = !has || !state.keepLinks;
+
+  const verdictFor = (l) => state.urlVerdicts.find((v) => v.url === l.url && v.page === l.page);
+  for (const link of state.links) {
+    const li = document.createElement('li');
+    if (!state.keepLinks) li.className = 'link-disabled';
+    const row = document.createElement('div');
+    row.className = 'link-row';
+    const verdict = state.keepLinks ? verdictFor(link) : null;
+
+    const dot = document.createElement('span');
+    dot.className = `link-dot ${verdict ? verdict.level : 'unknown'}`;
+    const body = document.createElement('div');
+    body.className = 'link-url';
+    // Show the URL as inert text unless links are enabled; never auto-navigate.
+    if (state.keepLinks) {
+      const a = document.createElement('a');
+      a.href = link.url;
+      a.target = '_blank';
+      a.rel = 'noreferrer nofollow';
+      a.textContent = link.url;
+      body.appendChild(a);
+    } else {
+      body.textContent = link.url;
+    }
+    const meta = document.createElement('div');
+    meta.className = 'link-meta';
+    meta.textContent = `page ${link.page}` +
+      (verdict ? ` · ${verdict.level.toUpperCase()} · ${verdict.category}` +
+        (verdict.source === 'cloudflare' ? ' (Cloudflare)' : '') : '');
+    body.appendChild(meta);
+    if (verdict?.detail) { body.title = verdict.detail; }
+    row.append(dot, body);
+    li.appendChild(row);
+    list.appendChild(li);
+  }
+}
+
+async function scanLinks() {
+  if (state.links.length === 0) { renderLinks(); return; }
+  const creds = await chrome.storage.local.get({ cfAccountId: '', cfApiToken: '' });
+  const usingCf = !!(creds.cfAccountId && creds.cfApiToken);
+  try {
+    setStatus(usingCf ? 'Scanning links with Cloudflare…' : 'Rating links…', true);
+    const result = await host.call('scan-urls', {
+      pdf: state.pdfB64, pdfPassword: state.password,
+      cfAccountId: creds.cfAccountId, cfApiToken: creds.cfApiToken,
+    });
+    state.urlVerdicts = result.verdicts ?? [];
+    setStatus('');
+    renderLinks();
+    if (!usingCf) toast('Rated links offline. Add a Cloudflare token in Options for live scanning.');
+  } catch (e) {
+    fail(e);
+    renderLinks();
+  }
+}
+
+async function toggleLinks() {
+  state.keepLinks = $('links-enable').checked;
+  if (state.keepLinks && state.urlVerdicts.length === 0) await scanLinks();
+  else renderLinks();
+  updateChrome();
+}
+
 async function save() {
   let bytes = state.pdf;
-  // Strip embedded JavaScript / URL actions unless the user explicitly chose to keep them.
-  if (state.safety?.hasActiveContent && !state.keepActiveContent) {
+  const stripJs = state.safety?.javaScriptCount > 0 && !state.keepActiveContent;
+  const stripUrls = state.safety?.urlCount > 0 && !state.keepLinks;
+  // Strip embedded JavaScript and/or link URLs unless the user chose to keep them.
+  if (stripJs || stripUrls) {
     try {
       setStatus('Removing active content…', true);
-      const stripped = await host.call('strip-active', { pdf: state.pdfB64, pdfPassword: state.password });
+      const stripped = await host.call('strip-active', {
+        pdf: state.pdfB64, javaScript: stripJs, urls: stripUrls, pdfPassword: state.password,
+      });
       bytes = base64ToBytes(stripped.pdf);
       setStatus('');
     } catch (e) {
@@ -1482,6 +1585,11 @@ function wire() {
   $('btn-forms').addEventListener('click', openForms);
   $('forms-apply').addEventListener('click', applyForms);
   $('forms-cancel').addEventListener('click', () => hidePanels());
+
+  $('btn-links').addEventListener('click', openLinks);
+  $('links-enable').addEventListener('change', toggleLinks);
+  $('links-rescan').addEventListener('click', scanLinks);
+  $('links-close').addEventListener('click', () => hidePanels());
 
   $('btn-find').addEventListener('click', findReplace);
   $('btn-merge').addEventListener('click', mergeFiles);

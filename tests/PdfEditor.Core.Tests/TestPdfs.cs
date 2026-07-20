@@ -346,6 +346,20 @@ public static class TestPdfs
         return output.ToArray();
     }
 
+    /// <summary>A single-page document with a link annotation pointing at the given URL.</summary>
+    public static byte[] WithLinkTo(string url)
+    {
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            var link = new PdfLinkAnnotation(new Rectangle(72, 700, 200, 20));
+            link.SetAction(PdfAction.CreateURI(url));
+            page.AddAnnotation(link);
+        }
+        return output.ToArray();
+    }
+
     /// <summary>A page with a link annotation covering the given rectangle.</summary>
     public static byte[] WithLinkAnnotation(float x, float y, float width, float height)
     {

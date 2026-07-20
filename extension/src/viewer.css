@@ -237,6 +237,19 @@ select {
   cursor: pointer;
 }
 
+#links-list { list-style: none; padding: 0; margin: 8px 0; max-height: 44vh; overflow-y: auto; }
+#links-list li { padding: 6px 4px; border-bottom: 1px solid #4a4a52; font-size: 12px; }
+.link-row { display: flex; align-items: flex-start; gap: 6px; }
+.link-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 3px; flex: none; background: #777; }
+.link-dot.green { background: #2f9e44; }
+.link-dot.yellow { background: #e0a800; }
+.link-dot.red { background: #e5484d; }
+.link-dot.unknown { background: #777; }
+.link-url { flex: 1; word-break: break-all; }
+.link-url a { color: var(--accent-2); }
+.link-meta { color: var(--muted); font-size: 11px; }
+.link-disabled .link-url { color: var(--muted); }
+
 #forms-list { max-height: 46vh; overflow-y: auto; }
 .form-field { margin: 8px 0; }
 .form-field > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; word-break: break-word; }

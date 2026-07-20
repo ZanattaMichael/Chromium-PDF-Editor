@@ -28,6 +28,7 @@
       <button id="btn-rotate-left" title="Rotate current page 90° counter-clockwise" disabled>⟲</button>
       <button id="btn-rotate-right" title="Rotate current page 90° clockwise" disabled>⟳</button>
       <button id="btn-forms" title="Fill form fields" disabled>🗒 Forms</button>
+      <button id="btn-links" title="Review links / URLs" disabled>🔗 Links</button>
       <button id="btn-find" title="Find &amp; replace text" disabled>🔍 Replace</button>
       <button id="btn-merge" title="Append other PDFs to this one" disabled>➕ Merge</button>
       <button id="btn-protect" title="Password-protect (AES-256)" disabled>🔒 Protect</button>
@@ -72,6 +73,22 @@
           <button id="redact-preview" disabled>👁 Preview</button>
           <button id="redact-apply" class="danger" disabled>Apply redaction</button>
           <button id="redact-clear" disabled>Clear</button>
+        </div>
+      </div>
+
+      <div id="panel-links" class="panel-section" hidden>
+        <h2>Links</h2>
+        <p class="muted" id="links-empty" hidden>This document contains no links.</p>
+        <label id="links-enable-row" hidden>
+          <input id="links-enable" type="checkbox" style="width:auto;margin-right:6px" />
+          Enable links (keep them when saving)
+        </label>
+        <p class="muted" id="links-hint" hidden>Links are disabled. Enable them to keep them on
+          save and rate each with the Cloudflare URL Scanner.</p>
+        <ul id="links-list"></ul>
+        <div class="actions">
+          <button id="links-rescan" hidden>Re-scan</button>
+          <button id="links-close">Close</button>
         </div>
       </div>
 

@@ -53,6 +53,8 @@ public sealed class MessageProcessor
         "fill-form" => FillFormAction(p),
         "scan-safety" => ScanSafetyAction(p),
         "strip-active" => StripActiveAction(p),
+        "list-urls" => ListUrlsAction(p),
+        "scan-urls" => ScanUrlsAction(p),
         "get-region-text" => GetRegionText(p),
         "replace-region-text" => ReplaceRegionText(p),
         "find-text" => FindTextAction(p),
@@ -166,8 +168,36 @@ public sealed class MessageProcessor
 
     private static object StripActiveAction(JsonObject p)
     {
-        var result = PdfSafety.StripActive(Pdf(p), Password(p));
+        // Default both true (strip everything) when the flags are omitted.
+        bool js = p["javaScript"]?.GetValue<bool>() ?? true;
+        bool urls = p["urls"]?.GetValue<bool>() ?? true;
+        var result = PdfSafety.StripActive(Pdf(p), js, urls, Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object ListUrlsAction(JsonObject p)
+    {
+        var links = UrlTools.ExtractLinks(Pdf(p), Password(p));
+        return new { links = links.Select(l => new { page = l.Page, url = l.Url }) };
+    }
+
+    private static object ScanUrlsAction(JsonObject p)
+    {
+        var links = UrlTools.ExtractLinks(Pdf(p), Password(p));
+        var creds = new CloudflareCredentials(
+            p["cfAccountId"]?.GetValue<string>() ?? "",
+            p["cfApiToken"]?.GetValue<string>() ?? "");
+        var verdicts = CloudflareUrlScanner
+            .ScanAsync(links, creds.IsUsable ? creds : null).GetAwaiter().GetResult();
+        return new
+        {
+            usedCloudflare = creds.IsUsable,
+            verdicts = verdicts.Select(v => new
+            {
+                page = v.Page, url = v.Url, level = v.Level,
+                category = v.Category, source = v.Source, detail = v.Detail
+            })
+        };
     }
 
     private static object GetRegionText(JsonObject p)

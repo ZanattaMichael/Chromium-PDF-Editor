@@ -45,40 +45,49 @@ public static class PdfSafety
 
     /// <summary>Removes all embedded JavaScript and outward-reaching actions (internal links kept).</summary>
     public static EditResult StripActive(byte[] pdf, string? password = null)
+        => StripActive(pdf, javaScript: true, urls: true, password);
+
+    /// <summary>
+    /// Selectively removes active content: embedded JavaScript when <paramref name="javaScript"/>
+    /// is set, and outward-reaching URL/launch/submit actions when <paramref name="urls"/> is set.
+    /// Internal (same-document) links are always preserved.
+    /// </summary>
+    public static EditResult StripActive(byte[] pdf, bool javaScript, bool urls, string? password = null)
     {
         using var output = new MemoryStream();
         using (var doc = PdfIo.Open(pdf, output, password))
         {
             var catalog = doc.GetCatalog().GetPdfObject();
-            catalog.GetAsDictionary(PdfName.Names)?.Remove(PdfName.JavaScript);
-            RemoveIfActive(catalog, PdfName.OpenAction);
-            catalog.Remove(PdfName.AA);
+            if (javaScript)
+            {
+                catalog.GetAsDictionary(PdfName.Names)?.Remove(PdfName.JavaScript);
+                catalog.Remove(PdfName.AA); // document additional actions are JavaScript triggers
+            }
+            RemoveActionIf(catalog, PdfName.OpenAction, javaScript, urls);
 
             for (int i = 1; i <= doc.GetNumberOfPages(); i++)
             {
                 var page = doc.GetPage(i);
-                page.GetPdfObject().Remove(PdfName.AA);
+                if (javaScript) page.GetPdfObject().Remove(PdfName.AA);
                 foreach (var annot in page.GetAnnotations())
                 {
                     var ad = annot.GetPdfObject();
-                    RemoveIfActive(ad, PdfName.A);
-                    ad.Remove(PdfName.AA);
+                    RemoveActionIf(ad, PdfName.A, javaScript, urls);
+                    if (javaScript) ad.Remove(PdfName.AA);
                 }
             }
         }
         return EditResult.Of(output.ToArray());
     }
 
-    private static bool IsActive(PdfDictionary action)
+    private static void RemoveActionIf(PdfDictionary owner, PdfName key, bool js, bool urls)
     {
-        var s = action.GetAsName(PdfName.S);
-        if (s == null) return false;
-        return s.Equals(PdfName.JavaScript) || UrlActions.Any(s.Equals);
-    }
-
-    private static void RemoveIfActive(PdfDictionary owner, PdfName key)
-    {
-        if (owner.Get(key) is PdfDictionary a && IsActive(a)) owner.Remove(key);
+        if (owner.Get(key) is not PdfDictionary a) return;
+        var s = a.GetAsName(PdfName.S);
+        if (s == null) return;
+        bool isJs = s.Equals(PdfName.JavaScript);
+        bool isUrl = UrlActions.Any(s.Equals);
+        if ((isJs && js) || (isUrl && urls)) owner.Remove(key);
     }
 
     private static void Classify(PdfObject? obj, ref int js, ref int url, List<string> samples)

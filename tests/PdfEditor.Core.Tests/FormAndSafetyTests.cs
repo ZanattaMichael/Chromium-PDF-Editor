@@ -123,4 +123,24 @@ public class PdfSafetyTests
         // Document still opens and renders (no exception, valid PDF).
         Assert.Equal(1, PdfInspector.GetInfo(result.Pdf).PageCount);
     }
+
+    [Fact]
+    public void StripActive_UrlsOnly_KeepsJavaScript()
+    {
+        byte[] pdf = TestPdfs.WithOpenActionJavaScript();
+
+        var result = PdfSafety.StripActive(pdf, javaScript: false, urls: true);
+
+        Assert.True(PdfSafety.Scan(result.Pdf).HasJavaScript); // JS left intact
+    }
+
+    [Fact]
+    public void StripActive_JavaScriptOnly_KeepsUrlLinks()
+    {
+        byte[] pdf = TestPdfs.WithLinkTo("https://example.com");
+
+        var result = PdfSafety.StripActive(pdf, javaScript: true, urls: false);
+
+        Assert.True(PdfSafety.Scan(result.Pdf).HasUrlActions); // link left intact
+    }
 }

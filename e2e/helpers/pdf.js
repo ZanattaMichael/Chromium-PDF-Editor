@@ -130,4 +130,17 @@ function buildJavaScriptPdf(script = "app.alert('hello from the pdf');") {
   ]);
 }
 
-module.exports = { buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf };
+/** A single-page document with a link annotation pointing at the given URL. */
+function buildLinkPdf(url = 'https://github.com/example/repo') {
+  return assemble([
+    `<< /Type /Catalog /Pages 2 0 R >>`,
+    `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Annots [4 0 R] >>`,
+    `<< /Type /Annot /Subtype /Link /Rect [72 700 272 720] /Border [0 0 1] ` +
+      `/A << /S /URI /URI (${url}) >> >>`,
+  ]);
+}
+
+module.exports = {
+  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf, buildLinkPdf,
+};

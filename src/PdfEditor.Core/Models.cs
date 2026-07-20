@@ -61,3 +61,16 @@ public sealed record SafetyReport(int JavaScriptCount, int UrlCount, IReadOnlyLi
     public bool HasUrlActions => UrlCount > 0;
     public bool HasActiveContent => HasJavaScript || HasUrlActions;
 }
+
+/// <summary>A link URL found in the document, with the page it appears on.</summary>
+public sealed record PdfLink(int Page, string Url);
+
+/// <summary>
+/// A safety assessment for one URL. <paramref name="Level"/> is the traffic-light rating
+/// (<c>green</c>/<c>yellow</c>/<c>red</c>/<c>unknown</c>), <paramref name="Category"/> a short
+/// reason (e.g. <c>known-site</c>, <c>code-hosting</c>, <c>file-hosting</c>, <c>malicious</c>),
+/// and <paramref name="Source"/> whether the verdict came from the local <c>heuristic</c> or
+/// the <c>cloudflare</c> URL Scanner.
+/// </summary>
+public sealed record UrlVerdict(int Page, string Url, string Level, string Category,
+    string Source, string? Detail = null);

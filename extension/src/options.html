@@ -23,6 +23,22 @@
     (Adobe sites are always left alone)
   </label>
 
+  <h2>Cloudflare URL Scanner (optional)</h2>
+  <p>
+    Links in a PDF are disabled by default. When you enable them in the editor, each URL can be
+    checked with the <a href="https://developers.cloudflare.com/radar/investigate/url-scanner/" target="_blank" rel="noreferrer">Cloudflare URL Scanner</a>
+    and rated 🟢/🟡/🔴. Leave these blank to use the offline rating only.
+  </p>
+  <label style="flex-direction:column;align-items:stretch">
+    Account ID
+    <input type="text" id="cf-account" placeholder="Cloudflare account ID" style="padding:6px" />
+  </label>
+  <label style="flex-direction:column;align-items:stretch">
+    API token <span style="color:#888">(needs the “URL Scanner” permission)</span>
+    <input type="password" id="cf-token" placeholder="API token" style="padding:6px" />
+  </label>
+  <p><button id="cf-save">Save Cloudflare settings</button> <span id="cf-status"></span></p>
+
   <h2>Native host</h2>
   <p>
     Document processing runs in a local native host (C#/.NET). Status:

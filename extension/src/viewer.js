@@ -5,6 +5,11 @@ import { HostClient, bytesToBase64, base64ToBytes } from './host-client.js';
 
 const host = new HostClient();
 
+// URL/link scanning (the 🔗 Links panel + Cloudflare rating) is disabled for now. The backend
+// (list-urls/scan-urls, UrlClassifier, CloudflareUrlScanner) stays in place; flip this to re-enable
+// the button, the links badge, and stripping link URLs on save.
+const URL_SCANNING_ENABLED = false;
+
 const state = {
   pdf: null,            // Uint8Array — current working document
   pdfB64: null,         // base64 of pdf, recomputed once per version (not per request)
@@ -479,7 +484,7 @@ function updateNav() {
 function updateChrome() {
   const loaded = !!state.pdf;
   for (const id of ['btn-save', 'btn-sidebar', 'tool-text', 'tool-draw', 'tool-edit',
-    'tool-redact', 'tool-sign', 'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-links',
+    'tool-redact', 'tool-sign', 'btn-rotate-left', 'btn-rotate-right', 'btn-forms',
     'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
     $(id).disabled = !loaded;
@@ -507,7 +512,7 @@ function updateChrome() {
     badge.addEventListener('click', showSafetyDialog);
     badgesEl.appendChild(badge);
   }
-  if (loaded && state.safety?.urlCount > 0) {
+  if (loaded && URL_SCANNING_ENABLED && state.safety?.urlCount > 0) {
     const badge = document.createElement('span');
     badge.className = 'badge warn';
     badge.title = 'This document contains links — click to review';
@@ -1472,7 +1477,8 @@ async function toggleLinks() {
 async function save() {
   let bytes = state.pdf;
   const stripJs = state.safety?.javaScriptCount > 0 && !state.keepActiveContent;
-  const stripUrls = state.safety?.urlCount > 0 && !state.keepLinks;
+  // URL scanning is off for now: leave link URLs untouched on save.
+  const stripUrls = URL_SCANNING_ENABLED && state.safety?.urlCount > 0 && !state.keepLinks;
   // Strip embedded JavaScript and/or link URLs unless the user chose to keep them.
   if (stripJs || stripUrls) {
     try {
@@ -1586,6 +1592,7 @@ function wire() {
   $('forms-apply').addEventListener('click', applyForms);
   $('forms-cancel').addEventListener('click', () => hidePanels());
 
+  $('btn-links').hidden = !URL_SCANNING_ENABLED; // URL scanning disabled for now
   $('btn-links').addEventListener('click', openLinks);
   $('links-enable').addEventListener('change', toggleLinks);
   $('links-rescan').addEventListener('click', scanLinks);

@@ -433,26 +433,15 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
-  test('links: URLs are listed and disabled by default, then rated when enabled', async () => {
+  test('links: URL scanning is disabled — no Links button or badge', async () => {
+    // The URL/link scanning feature is turned off for now (URL_SCANNING_ENABLED = false):
+    // the backend stays, but the UI is hidden and link URLs are left untouched on save.
     const file = path.join(fixtureDir, 'links.pdf');
     fs.writeFileSync(file, buildLinkPdf('https://github.com/example/repo'));
     const page = await openViewerWith(file);
 
-    // A "links disabled" badge appears; opening the panel lists the URL, disabled.
-    await expect(page.locator('#badges .badge', { hasText: 'links disabled' })).toBeVisible();
-    await page.click('#btn-links');
-    await expect(page.locator('#panel-links')).toBeVisible();
-    const item = page.locator('#links-list li');
-    await expect(item).toHaveCount(1);
-    await expect(item).toContainText('github.com/example/repo');
-    await expect(item).toHaveClass(/link-disabled/);
-
-    // Enabling scans (offline heuristic here) and rates the code-hosting URL yellow.
-    await page.check('#links-enable');
-    await expect(page.locator('#links-list .link-dot.yellow')).toBeVisible();
-    await expect(item).toContainText(/YELLOW/);
-    await expect(item).toContainText(/code-hosting/);
-    await expect(page.locator('#badges .badge', { hasText: 'links enabled' })).toBeVisible();
+    await expect(page.locator('#btn-links')).toBeHidden();
+    await expect(page.locator('#badges .badge', { hasText: 'links' })).toHaveCount(0);
     await page.close();
   });
 

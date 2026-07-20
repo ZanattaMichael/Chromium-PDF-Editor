@@ -76,3 +76,32 @@ jobs:
           path: dist/pdf-editor-extension-*.zip
           if-no-files-found: error
           retention-days: 7
+
+  test-bundles:
+    # Builds the all-in-one bundle (browser extension + self-contained native host +
+    # install scripts) for every desktop platform and uploads each as a downloadable
+    # artifact, so any push/PR can be installed and tested end-to-end without a local
+    # .NET SDK. Grab the one for your OS from this run's "Artifacts" section, unzip it,
+    # load extension/ unpacked, and run the bundled install script (see INSTALL.md).
+    # The four platforms build in parallel, so wall-clock time stays close to one build.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, linux-x64, osx-x64, osx-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build all-in-one bundle (${{ matrix.rid }})
+        run: ./scripts/package-bundle.sh "${{ matrix.rid }}" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdf-editor-bundle-${{ matrix.rid }}
+          path: dist/pdf-editor-bundle-${{ matrix.rid }}.zip
+          if-no-files-found: error
+          retention-days: 14

@@ -112,4 +112,81 @@ public class CloudflareMergeTests
             v => { Assert.Equal("yellow", v.Level); Assert.Equal("heuristic", v.Source); },
             v => { Assert.Equal("green", v.Level); Assert.Equal("heuristic", v.Source); });
     }
+
+    // A scripted Cloudflare endpoint: the scan POST returns a uuid, then the result GET returns
+    // "not ready" a set number of times before yielding a verdict with the given malicious flag.
+    private sealed class FakeCloudflare : HttpMessageHandler
+    {
+        private readonly bool _malicious;
+        private readonly int _notReadyTimes;
+        private int _polls;
+        public int Submits { get; private set; }
+
+        public FakeCloudflare(bool malicious, int notReadyTimes = 0)
+        {
+            _malicious = malicious;
+            _notReadyTimes = notReadyTimes;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                Submits++;
+                return Task.FromResult(Json(System.Net.HttpStatusCode.OK, """{"uuid":"abc-123"}"""));
+            }
+            if (_polls++ < _notReadyTimes)
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.NotFound));
+            string flag = _malicious ? "true" : "false";
+            return Task.FromResult(Json(System.Net.HttpStatusCode.OK,
+                "{\"verdicts\":{\"overall\":{\"malicious\":" + flag + "}}}"));
+        }
+
+        private static HttpResponseMessage Json(System.Net.HttpStatusCode code, string body) =>
+            new(code) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
+    }
+
+    private static readonly CloudflareCredentials Creds = new("acct", "token");
+
+    [Fact]
+    public async Task ScanAsync_Cloudflare_MaliciousVerdict_ForcesRed()
+    {
+        var links = new[] { new PdfLink(1, "https://google.com") }; // heuristic green
+        using var http = new HttpClient(new FakeCloudflare(malicious: true));
+
+        var verdicts = await CloudflareUrlScanner.ScanAsync(links, Creds, http, TimeSpan.Zero);
+
+        var v = Assert.Single(verdicts);
+        Assert.Equal("red", v.Level);
+        Assert.Equal("cloudflare", v.Source);
+    }
+
+    [Fact]
+    public async Task ScanAsync_Cloudflare_PollsUntilReady_ThenReturnsClean()
+    {
+        var links = new[] { new PdfLink(1, "https://github.com/x") };
+        using var http = new HttpClient(new FakeCloudflare(malicious: false, notReadyTimes: 2));
+
+        var verdicts = await CloudflareUrlScanner.ScanAsync(links, Creds, http, TimeSpan.Zero);
+
+        var v = Assert.Single(verdicts);
+        Assert.Equal("yellow", v.Level); // heuristic level kept
+        Assert.Equal("cloudflare", v.Source);
+    }
+
+    [Fact]
+    public async Task ScanAsync_Cloudflare_DeduplicatesRepeatedUrls()
+    {
+        var links = new[]
+        {
+            new PdfLink(1, "https://dup.example"), new PdfLink(2, "https://dup.example"),
+        };
+        var handler = new FakeCloudflare(malicious: true);
+        using var http = new HttpClient(handler);
+
+        var verdicts = await CloudflareUrlScanner.ScanAsync(links, Creds, http, TimeSpan.Zero);
+
+        Assert.Equal(2, verdicts.Count);
+        Assert.Equal(1, handler.Submits); // the identical URL is only submitted once
+    }
 }

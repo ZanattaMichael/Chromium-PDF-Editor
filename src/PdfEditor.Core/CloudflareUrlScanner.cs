@@ -25,8 +25,9 @@ public static class CloudflareUrlScanner
     /// <summary>Rates every link, using Cloudflare when <paramref name="creds"/> is usable.</summary>
     public static async Task<IReadOnlyList<UrlVerdict>> ScanAsync(
         IReadOnlyList<PdfLink> links, CloudflareCredentials? creds,
-        HttpClient? http = null, CancellationToken ct = default)
+        HttpClient? http = null, TimeSpan? pollDelay = null, CancellationToken ct = default)
     {
+        var delay = pollDelay ?? TimeSpan.FromSeconds(2);
         var results = new List<UrlVerdict>();
         bool useCloudflare = creds is { IsUsable: true };
         HttpClient? client = useCloudflare ? (http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(30) }) : null;
@@ -41,7 +42,7 @@ public static class CloudflareUrlScanner
             {
                 if (!scanned.TryGetValue(link.Url, out malicious))
                 {
-                    malicious = await TryVerdictAsync(client!, creds!, link.Url, ct);
+                    malicious = await TryVerdictAsync(client!, creds!, link.Url, delay, ct);
                     scanned[link.Url] = malicious;
                 }
             }
@@ -67,7 +68,7 @@ public static class CloudflareUrlScanner
 
     /// <summary>Submits a scan and polls for its verdict; returns null on any failure/timeout.</summary>
     private static async Task<bool?> TryVerdictAsync(HttpClient client, CloudflareCredentials creds,
-        string url, CancellationToken ct)
+        string url, TimeSpan pollDelay, CancellationToken ct)
     {
         try
         {
@@ -85,7 +86,7 @@ public static class CloudflareUrlScanner
             // The scan runs asynchronously; poll the result endpoint until it's ready.
             for (int attempt = 0; attempt < 12; attempt++)
             {
-                await Task.Delay(TimeSpan.FromSeconds(2), ct);
+                await Task.Delay(pollDelay, ct);
                 var res = new HttpRequestMessage(HttpMethod.Get,
                     $"{ApiBase}/accounts/{creds.AccountId}/urlscanner/v2/result/{uuid}");
                 res.Headers.Authorization = new AuthenticationHeaderValue("Bearer", creds.ApiToken);

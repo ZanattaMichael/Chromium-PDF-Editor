@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { launchExtension } = require('../helpers/harness');
-const { buildPdf, buildLeftoverCtmPdf } = require('../helpers/pdf');
+const { buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf } = require('../helpers/pdf');
 
 /** @type {Awaited<ReturnType<typeof launchExtension>>} */
 let ext;
@@ -388,6 +388,46 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
       return false;
     });
     expect(green).toBe(true);
+    await page.close();
+  });
+
+  test('forms: lists AcroForm fields, fills a value, and reads it back', async () => {
+    const file = path.join(fixtureDir, 'form.pdf');
+    fs.writeFileSync(file, buildFormPdf('fullName', ''));
+    const page = await openViewerWith(file);
+
+    await page.click('#btn-forms');
+    await expect(page.locator('#panel-forms')).toBeVisible();
+    const field = page.locator('#forms-list [data-field="fullName"]');
+    await expect(field).toHaveCount(1);
+
+    await field.fill('Alan Turing');
+    await page.click('#forms-apply');
+    await expect(page.locator('#status')).toContainText('Form filled');
+
+    // Re-opening the forms panel shows the value persisted into the document.
+    await page.click('#btn-forms');
+    await expect(page.locator('#forms-list [data-field="fullName"]')).toHaveValue('Alan Turing');
+    await page.close();
+  });
+
+  test('safety: JavaScript is detected, flagged, and stripped on save by default', async () => {
+    const file = path.join(fixtureDir, 'hasjs.pdf');
+    fs.writeFileSync(file, buildJavaScriptPdf("app.alert('x');"));
+    const page = await openViewerWith(file);
+
+    // The active-content badge appears and reads "disabled" by default.
+    const badge = page.locator('#badges .badge.warn');
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText('disabled');
+
+    // The details dialog lets the user opt in to keeping it.
+    await badge.click();
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('JavaScript');
+    await dialog.getByRole('button', { name: /Enable \(keep\)/ }).click();
+    await expect(badge).toContainText('kept');
     await page.close();
   });
 

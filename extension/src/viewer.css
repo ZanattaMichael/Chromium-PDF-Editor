@@ -237,6 +237,25 @@ select {
   cursor: pointer;
 }
 
+#forms-list { max-height: 46vh; overflow-y: auto; }
+.form-field { margin: 8px 0; }
+.form-field > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; word-break: break-word; }
+.form-field input[type="checkbox"] { width: auto; }
+
+.badge.warn { background: #7c3a10; color: #ffd9b0; cursor: pointer; }
+
+.safety-samples {
+  max-height: 30vh;
+  overflow: auto;
+  background: #26262b;
+  border: 1px solid #55555e;
+  border-radius: 4px;
+  padding: 8px;
+  font: 12px ui-monospace, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 
 .tabs { display: flex; gap: 4px; margin-bottom: 8px; }

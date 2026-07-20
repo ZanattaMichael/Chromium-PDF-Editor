@@ -49,6 +49,10 @@ public sealed class MessageProcessor
         "rotate" => RotateAction(p),
         "add-text" => AddTextAction(p),
         "add-drawing" => AddDrawingAction(p),
+        "form-fields" => FormFieldsAction(p),
+        "fill-form" => FillFormAction(p),
+        "scan-safety" => ScanSafetyAction(p),
+        "strip-active" => StripActiveAction(p),
         "get-region-text" => GetRegionText(p),
         "replace-region-text" => ReplaceRegionText(p),
         "find-text" => FindTextAction(p),
@@ -124,6 +128,45 @@ public sealed class MessageProcessor
             .ToList();
         var result = InkTools.AddInk(Pdf(p), page, strokes,
             p["color"]?.GetValue<string>(), p["width"]?.GetValue<float>() ?? 2f, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object FormFieldsAction(JsonObject p)
+    {
+        var fields = FormTools.ListFields(Pdf(p), Password(p));
+        return new
+        {
+            fields = fields.Select(f => new
+            {
+                name = f.Name, type = f.Type, value = f.Value, options = f.Options, readOnly = f.ReadOnly
+            })
+        };
+    }
+
+    private static object FillFormAction(JsonObject p)
+    {
+        var values = new Dictionary<string, string>();
+        if (p["values"]?.AsObject() is { } obj)
+            foreach (var kv in obj) values[kv.Key] = kv.Value?.GetValue<string>() ?? "";
+        var result = FormTools.FillFields(Pdf(p), values, p["flatten"]?.GetValue<bool>() ?? false, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object ScanSafetyAction(JsonObject p)
+    {
+        var report = PdfSafety.Scan(Pdf(p), Password(p));
+        return new
+        {
+            javaScriptCount = report.JavaScriptCount,
+            urlCount = report.UrlCount,
+            hasActiveContent = report.HasActiveContent,
+            samples = report.Samples
+        };
+    }
+
+    private static object StripActiveAction(JsonObject p)
+    {
+        var result = PdfSafety.StripActive(Pdf(p), Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 

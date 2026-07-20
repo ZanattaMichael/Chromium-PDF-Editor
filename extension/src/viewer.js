@@ -26,6 +26,8 @@ const state = {
   signatures: [],
   drawColor: '#e53935',
   drawWidth: 2.5,
+  safety: null,         // { hasActiveContent, javaScriptCount, urlCount, samples }
+  keepActiveContent: false, // false = strip JS/URLs on save until the user opts in
 };
 
 // Freehand strokes captured for the draw tool, in CSS pixels per page: Map(pageNum -> [stroke]),
@@ -166,6 +168,7 @@ async function loadDocument(bytes, fileName, { pushHistory = false, password } =
   state.page = Math.min(state.page, info.pageCount);
   state.regions = state.regions.filter((r) => r.page <= info.pageCount);
   await refreshSignatures();
+  await refreshSafety();
   await showDocument();
   updateChrome();
 }
@@ -183,6 +186,17 @@ async function refreshSignatures() {
     state.signatures = result.signatures ?? [];
   } catch {
     state.signatures = [];
+  }
+}
+
+/** Scans for embedded JavaScript / URL actions so the UI can flag (and, by default, strip) them. */
+async function refreshSafety() {
+  try {
+    state.safety = await host.call('scan-safety', {
+      pdf: state.pdfB64, pdfPassword: state.password,
+    });
+  } catch {
+    state.safety = null;
   }
 }
 
@@ -462,7 +476,7 @@ function updateNav() {
 function updateChrome() {
   const loaded = !!state.pdf;
   for (const id of ['btn-save', 'btn-sidebar', 'tool-text', 'tool-draw', 'tool-edit',
-    'tool-redact', 'tool-sign', 'btn-rotate-left', 'btn-rotate-right',
+    'tool-redact', 'tool-sign', 'btn-rotate-left', 'btn-rotate-right', 'btn-forms',
     'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
     $(id).disabled = !loaded;
@@ -480,6 +494,15 @@ function updateChrome() {
     const badge = document.createElement('span');
     badge.className = 'badge locked';
     badge.textContent = '🔒 encrypted';
+    badgesEl.appendChild(badge);
+  }
+  if (loaded && state.safety?.hasActiveContent) {
+    const badge = document.createElement('span');
+    badge.className = 'badge warn';
+    badge.title = 'This document contains active content — click for details';
+    const kept = state.keepActiveContent;
+    badge.textContent = `⚠ active content ${kept ? 'kept' : 'disabled'}`;
+    badge.addEventListener('click', showSafetyDialog);
     badgesEl.appendChild(badge);
   }
   for (const s of state.signatures) {
@@ -1186,6 +1209,7 @@ async function openFromBytes(bytes, name) {
     state.future = [];
     state.password = null;
     state.regions = [];
+    state.keepActiveContent = false; // re-arm the strip-on-save default for each new document
     await loadDocument(bytes, name);
     toast(`Opened ${name}.`);
   } catch (e) {
@@ -1234,9 +1258,134 @@ async function openFromUrl(url) {
   }
 }
 
+// ----------------------------------------------------- forms + JS/URL safety
+
+/** Explains detected active content and lets the user keep it (default: strip on save). */
+function showSafetyDialog() {
+  const s = state.safety;
+  if (!s) return;
+  const parts = [];
+  if (s.javaScriptCount) parts.push(`${s.javaScriptCount} embedded JavaScript action${s.javaScriptCount === 1 ? '' : 's'}`);
+  if (s.urlCount) parts.push(`${s.urlCount} link/URL or external action${s.urlCount === 1 ? '' : 's'}`);
+  modal.innerHTML = '<h2>⚠ Active content</h2>';
+  const p = document.createElement('p');
+  p.className = 'muted';
+  p.textContent = `This document contains ${parts.join(' and ')}. These can run scripts or open ` +
+    'external locations when the file is opened in another PDF viewer. They are ' +
+    (state.keepActiveContent ? 'currently kept.' : 'disabled and will be removed when you save.');
+  modal.appendChild(p);
+  if (s.samples?.length) {
+    const pre = document.createElement('pre');
+    pre.className = 'safety-samples';
+    pre.textContent = s.samples.join('\n'); // textContent — untrusted script/URL text is never executed
+    modal.appendChild(pre);
+  }
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const toggle = document.createElement('button');
+  toggle.className = state.keepActiveContent ? '' : 'danger';
+  toggle.textContent = state.keepActiveContent ? 'Disable & strip on save' : 'Enable (keep) active content';
+  const close = document.createElement('button');
+  close.textContent = 'Close';
+  actions.append(toggle, close);
+  modal.appendChild(actions);
+  modal.showModal();
+  toggle.addEventListener('click', () => {
+    state.keepActiveContent = !state.keepActiveContent;
+    modal.close();
+    updateChrome();
+    toast(state.keepActiveContent
+      ? 'Active content will be kept when you save.'
+      : 'Active content will be stripped when you save.');
+  });
+  close.addEventListener('click', () => modal.close());
+}
+
+async function openForms() {
+  try {
+    setStatus('Reading form fields…', true);
+    const result = await host.call('form-fields', { pdf: state.pdfB64, pdfPassword: state.password });
+    setStatus('');
+    const fields = result.fields ?? [];
+    const list = $('forms-list');
+    list.innerHTML = '';
+    $('forms-empty').hidden = fields.length > 0;
+    $('forms-flatten-row').hidden = fields.length === 0;
+    $('forms-apply').disabled = fields.length === 0;
+    for (const f of fields) {
+      const row = document.createElement('div');
+      row.className = 'form-field';
+      const label = document.createElement('span');
+      label.textContent = f.name; // textContent — field names come from the document
+      row.appendChild(label);
+      let input;
+      if (f.type === 'checkbox') {
+        input = document.createElement('input');
+        input.type = 'checkbox';
+        input.dataset.on = (f.options || []).find((o) => o && o !== 'Off') || 'Yes';
+        input.checked = !!f.value && f.value !== 'Off';
+      } else if (f.type === 'choice' && f.options?.length) {
+        input = document.createElement('select');
+        for (const o of f.options) {
+          const opt = document.createElement('option');
+          opt.value = o;
+          opt.textContent = o;
+          input.appendChild(opt);
+        }
+        input.value = f.value;
+      } else {
+        input = document.createElement('input');
+        input.type = 'text';
+        input.value = f.value ?? '';
+      }
+      input.dataset.field = f.name;
+      if (f.readOnly) input.disabled = true;
+      row.appendChild(input);
+      list.appendChild(row);
+    }
+    showPanel('panel-forms');
+  } catch (e) {
+    fail(e);
+  }
+}
+
+async function applyForms() {
+  const values = {};
+  for (const input of $('forms-list').querySelectorAll('[data-field]')) {
+    if (input.disabled) continue;
+    values[input.dataset.field] = input.type === 'checkbox'
+      ? (input.checked ? input.dataset.on : 'Off')
+      : input.value;
+  }
+  const flatten = $('forms-flatten').checked;
+  try {
+    setStatus('Filling form…', true);
+    const result = await host.call('fill-form', {
+      pdf: state.pdfB64, values, flatten, pdfPassword: state.password,
+    });
+    hidePanels();
+    await applyResult(result.pdf, flatten ? 'Form filled and flattened.' : 'Form filled.');
+  } catch (e) {
+    fail(e);
+  }
+}
+
 async function save() {
+  let bytes = state.pdf;
+  // Strip embedded JavaScript / URL actions unless the user explicitly chose to keep them.
+  if (state.safety?.hasActiveContent && !state.keepActiveContent) {
+    try {
+      setStatus('Removing active content…', true);
+      const stripped = await host.call('strip-active', { pdf: state.pdfB64, pdfPassword: state.password });
+      bytes = base64ToBytes(stripped.pdf);
+      setStatus('');
+    } catch (e) {
+      fail(e);
+      return;
+    }
+  }
   const suggested = state.fileName.replace(/\.pdf$/i, '') + '-edited.pdf';
-  const blob = new Blob([state.pdf], { type: 'application/pdf' });
+  const blob = new Blob([bytes], { type: 'application/pdf' });
   try {
     if (window.showSaveFilePicker) {
       const handle = await window.showSaveFilePicker({
@@ -1274,6 +1423,7 @@ async function restore(snap, message) {
   state.page = Math.min(state.page, state.info.pageCount);
   state.regions = state.regions.filter((r) => r.page <= state.info.pageCount);
   await refreshSignatures();
+  await refreshSafety();
   await showDocument();
   updateChrome();
   toast(message);
@@ -1328,6 +1478,10 @@ function wire() {
   $('draw-apply').addEventListener('click', applyDrawing);
   $('draw-clear').addEventListener('click', clearDrawing);
   $('draw-cancel').addEventListener('click', () => setTool('select'));
+
+  $('btn-forms').addEventListener('click', openForms);
+  $('forms-apply').addEventListener('click', applyForms);
+  $('forms-cancel').addEventListener('click', () => hidePanels());
 
   $('btn-find').addEventListener('click', findReplace);
   $('btn-merge').addEventListener('click', mergeFiles);

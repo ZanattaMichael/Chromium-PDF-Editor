@@ -42,3 +42,22 @@ public sealed record EditResult(byte[] Pdf, IReadOnlyList<string> Warnings)
 
 /// <summary>State of a digital signature found in a document.</summary>
 public sealed record SignatureInfo(string Name, string? SignerName, bool IntegrityValid, bool CoversWholeDocument);
+
+/// <summary>
+/// A fillable AcroForm field. <paramref name="Type"/> is one of text/checkbox/radio/choice/
+/// signature/button. <paramref name="Options"/> lists the allowed values for checkbox/radio/choice
+/// fields (empty otherwise).
+/// </summary>
+public sealed record FormField(string Name, string Type, string Value,
+    IReadOnlyList<string> Options, bool ReadOnly);
+
+/// <summary>
+/// Result of scanning a document for active content. <paramref name="Samples"/> holds a few
+/// human-readable examples (script snippets / URLs) for display — never executed.
+/// </summary>
+public sealed record SafetyReport(int JavaScriptCount, int UrlCount, IReadOnlyList<string> Samples)
+{
+    public bool HasJavaScript => JavaScriptCount > 0;
+    public bool HasUrlActions => UrlCount > 0;
+    public bool HasActiveContent => HasJavaScript || HasUrlActions;
+}

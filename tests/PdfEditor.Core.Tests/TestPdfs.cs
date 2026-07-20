@@ -1,4 +1,6 @@
 using System.Text;
+using iText.Forms;
+using iText.Forms.Fields;
 using iText.IO.Font.Constants;
 using iText.IO.Image;
 using iText.Kernel.Font;
@@ -312,6 +314,34 @@ public static class TestPdfs
                     stream.SetModified();
                 }
             }
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>A single-page document with a text form field.</summary>
+    public static byte[] WithTextField(string fieldName, string initialValue = "")
+    {
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            var form = PdfFormCreator.GetAcroForm(doc, true);
+            var field = new TextFormFieldBuilder(doc, fieldName)
+                .SetWidgetRectangle(new Rectangle(100, 600, 200, 24)).CreateText();
+            field.SetValue(initialValue);
+            form.AddField(field);
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>A single-page document carrying a document-level JavaScript open action.</summary>
+    public static byte[] WithOpenActionJavaScript(string script = "app.alert('hello');")
+    {
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            doc.GetCatalog().SetOpenAction(PdfAction.CreateJavaScript(script));
         }
         return output.ToArray();
     }

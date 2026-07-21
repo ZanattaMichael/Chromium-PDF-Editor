@@ -7,16 +7,28 @@
 </head>
 <body>
   <header id="toolbar">
-    <div class="group">
+    <!-- View -->
+    <div class="group" role="group" aria-label="View">
       <button id="btn-sidebar" title="Toggle the page thumbnails sidebar" disabled>☰</button>
+    </div>
+    <span class="sep" aria-hidden="true"></span>
+
+    <!-- File -->
+    <div class="group" role="group" aria-label="File">
       <button id="btn-open" title="Open a PDF file">📂 Open</button>
       <button id="btn-save" title="Save the edited PDF" disabled>💾 Save</button>
     </div>
-    <div class="group">
+    <span class="sep" aria-hidden="true"></span>
+
+    <!-- History -->
+    <div class="group" role="group" aria-label="History">
       <button id="btn-undo" title="Undo last change" disabled>↩ Undo</button>
-      <button id="btn-redo" title="Redo" disabled>↪ Redo</button>
+      <button id="btn-redo" title="Redo last undone change" disabled>↪ Redo</button>
     </div>
-    <div class="group" id="tools">
+    <span class="sep" aria-hidden="true"></span>
+
+    <!-- Tools -->
+    <div class="group" id="tools" role="group" aria-label="Tools">
       <button id="tool-select" class="tool active" title="Pan / select">🖐</button>
       <button id="tool-text" class="tool" title="Add text: click anywhere to type" disabled>🅣 Text</button>
       <button id="tool-draw" class="tool" title="Draw: freehand anywhere on the page" disabled>✒ Draw</button>
@@ -24,23 +36,39 @@
       <button id="tool-redact" class="tool" title="Redact: drag boxes over content to black out" disabled>⬛ Redact</button>
       <button id="tool-sign" class="tool" title="Place a signature: drag where it should go" disabled>🖋 Sign</button>
     </div>
-    <div class="group">
+    <span class="sep" aria-hidden="true"></span>
+
+    <!-- Pages -->
+    <div class="group" role="group" aria-label="Pages">
       <button id="btn-rotate-left" title="Rotate current page 90° counter-clockwise" disabled>⟲</button>
       <button id="btn-rotate-right" title="Rotate current page 90° clockwise" disabled>⟳</button>
-      <button id="btn-forms" title="Fill form fields" disabled>🗒 Forms</button>
-      <button id="btn-links" title="Review links / URLs" disabled>🔗 Links</button>
-      <button id="btn-find" title="Find &amp; replace text" disabled>🔍 Replace</button>
       <button id="btn-merge" title="Append other PDFs to this one" disabled>➕ Merge</button>
+    </div>
+    <span class="sep" aria-hidden="true"></span>
+
+    <!-- Content -->
+    <div class="group" role="group" aria-label="Content">
+      <button id="btn-forms" title="Fill form fields" disabled>🗒 Forms</button>
+      <button id="btn-find" title="Find &amp; replace text" disabled>🔍 Replace</button>
+      <button id="btn-links" title="Review links / URLs" disabled>🔗 Links</button>
+    </div>
+    <span class="sep" aria-hidden="true"></span>
+
+    <!-- Security -->
+    <div class="group" role="group" aria-label="Security">
       <button id="btn-protect" title="Password-protect (AES-256)" disabled>🔒 Protect</button>
       <button id="btn-digital" title="Digitally sign with a certificate" disabled>🪪 Certify</button>
     </div>
-    <div class="group" id="nav">
+
+    <!-- Navigation + zoom (pushed to the right) -->
+    <div class="group" id="nav" role="group" aria-label="Navigation">
       <button id="btn-prev" title="Previous page" disabled>◀</button>
       <span id="page-counter">
         <input id="page-input" type="text" inputmode="numeric" value="–" disabled
           title="Type a page number and press Enter" /> / <span id="page-total">–</span>
       </span>
       <button id="btn-next" title="Next page" disabled>▶</button>
+      <span class="sep" aria-hidden="true"></span>
       <button id="btn-zoom-out" title="Zoom out" disabled>−</button>
       <span id="zoom-label">100%</span>
       <button id="btn-zoom-in" title="Zoom in" disabled>＋</button>

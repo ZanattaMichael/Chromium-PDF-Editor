@@ -47,7 +47,17 @@ const inkByPage = new Map();
 // document version, so any edit invalidates the whole cache automatically.
 const renderCache = new Map(); // `${version}|${page}|${dpi}` -> png base64
 const MAX_CACHED_PAGES = 24;
+// Only pages within this many of the current one are rendered ahead of time. The host renders
+// serially, so a large radius keeps it endlessly busy on pages you may never look at, starving
+// the page you're actually on. Keep it small; the cache still holds far more once you visit them.
+const PREFETCH_RADIUS = 3;
 let prefetchToken = 0;
+let prefetchTimer = null;
+
+// Thumbnails live in their own small-image cache so opening the sidebar can't evict the
+// full-size page renders (they render at a different DPI and would otherwise thrash each other).
+const thumbCache = new Map(); // `${version}|${page}` -> png base64
+const MAX_CACHED_THUMBS = 400;
 
 /** Installs new working bytes: encode once, bump the version, drop now-stale renders. */
 function setWorkingPdf(bytes, base64) {
@@ -55,6 +65,7 @@ function setWorkingPdf(bytes, base64) {
   state.pdfB64 = base64 ?? bytesToBase64(bytes);
   state.version++;
   renderCache.clear();
+  thumbCache.clear();
   inkByPage.clear();  // uncommitted freehand strokes belong to the old document
   prefetchToken++; // cancel any in-flight prefetch for the previous document
 }
@@ -175,10 +186,13 @@ async function loadDocument(bytes, fileName, { pushHistory = false, password } =
   if (fileName) state.fileName = fileName;
   state.page = Math.min(state.page, info.pageCount);
   state.regions = state.regions.filter((r) => r.page <= info.pageCount);
-  await refreshSignatures();
-  await refreshSafety();
+  // Paint the document first; the signature/active-content scans (which walk the whole file) then
+  // run in the background and light up their badges a moment later rather than delaying first paint.
+  state.signatures = [];
+  state.safety = null;
   await showDocument();
   updateChrome();
+  Promise.all([refreshSignatures(), refreshSafety()]).then(updateChrome);
 }
 
 async function applyResult(base64Pdf, message) {
@@ -235,27 +249,35 @@ async function renderToCache(page, dpi) {
   return result.png;
 }
 
-/** Fills the cache for pages near `centerPage`, nearest first, in the background. */
+/**
+ * Fills the cache for a few pages either side of `centerPage`, nearest first, in the background.
+ * Debounced so rapid scrolling doesn't restart it on every page and flood the serial host; the
+ * radius is deliberately small so prefetch finishes quickly and leaves the host free for the page
+ * you're actually viewing.
+ */
 function prefetchAround(centerPage, dpi) {
-  const token = ++prefetchToken;
-  const total = state.info?.pageCount ?? 0;
-  const order = [];
-  for (let d = 1; d <= total && order.length < MAX_CACHED_PAGES - 1; d++) {
-    if (centerPage - d >= 1) order.push(centerPage - d);
-    if (centerPage + d <= total) order.push(centerPage + d);
-  }
-  (async () => {
-    for (const page of order) {
-      if (token !== prefetchToken) return; // navigation, zoom, or edit superseded us
-      if (renderCache.has(cacheKey(page, dpi))) continue;
-      try {
-        await renderToCache(page, dpi);
-      } catch {
-        /* a prefetch failure is never fatal — the page renders on demand instead */
-      }
-      await new Promise((r) => setTimeout(r, 0)); // yield so the UI stays responsive
+  clearTimeout(prefetchTimer);
+  prefetchTimer = setTimeout(() => {
+    const token = ++prefetchToken;
+    const total = state.info?.pageCount ?? 0;
+    const order = [];
+    for (let d = 1; d <= PREFETCH_RADIUS; d++) {
+      if (centerPage + d <= total) order.push(centerPage + d); // ahead first — the likely direction
+      if (centerPage - d >= 1) order.push(centerPage - d);
     }
-  })();
+    (async () => {
+      for (const page of order) {
+        if (token !== prefetchToken) return; // navigation, zoom, or edit superseded us
+        if (renderCache.has(cacheKey(page, dpi))) continue;
+        try {
+          await renderToCache(page, dpi);
+        } catch {
+          /* a prefetch failure is never fatal — the page renders on demand instead */
+        }
+        await new Promise((r) => setTimeout(r, 0)); // yield so the UI stays responsive
+      }
+    })();
+  }, 180);
 }
 
 function displaySize(pageNum) {
@@ -426,13 +448,32 @@ function buildThumbnails() {
   markCurrentThumb();
 }
 
+/** Renders one thumbnail (from its own cache), so it never evicts full-size page renders. */
+async function renderThumbToCache(page) {
+  const key = `${state.version}|${page}`;
+  const cached = thumbCache.get(key);
+  if (cached !== undefined) {
+    thumbCache.delete(key);
+    thumbCache.set(key, cached); // move to most-recently-used
+    return cached;
+  }
+  const result = await host.call('render', {
+    pdf: state.pdfB64, page, dpi: THUMB_DPI, pdfPassword: state.password,
+  });
+  thumbCache.set(key, result.png);
+  while (thumbCache.size > MAX_CACHED_THUMBS) {
+    thumbCache.delete(thumbCache.keys().next().value);
+  }
+  return result.png;
+}
+
 async function renderThumb(pageNum) {
   const t = thumbEls[pageNum - 1];
   if (!t) return;
-  const key = cacheKey(pageNum, THUMB_DPI);
+  const key = `${state.version}|${pageNum}`;
   if (t.renderedKey === key) return;
   try {
-    const png = await renderToCache(pageNum, THUMB_DPI);
+    const png = await renderThumbToCache(pageNum);
     if (!t.wrap.isConnected) return;
     t.img.src = `data:image/png;base64,${png}`;
     if (t.skeleton.parentNode) t.skeleton.replaceWith(t.img);
@@ -442,14 +483,18 @@ async function renderThumb(pageNum) {
   }
 }
 
-/** Highlights the thumbnail for the current page and scrolls it into view. */
+/** Highlights the thumbnail for the current page and scrolls it into view when needed. */
 function markCurrentThumb() {
   if (!state.sidebarOpen) return;
-  thumbEls.forEach((t, i) => {
-    const isCurrent = i + 1 === state.page;
-    t.wrap.classList.toggle('current', isCurrent);
-    if (isCurrent) t.wrap.scrollIntoView({ block: 'nearest' });
-  });
+  const current = thumbEls[state.page - 1];
+  for (const t of thumbEls) t.wrap.classList.remove('current');
+  if (!current) return;
+  current.wrap.classList.add('current');
+  // Only scroll the rail when the current thumbnail isn't already visible — scrolling it on
+  // every scroll tick would fight the user and thrash layout.
+  const rail = $('thumbnails').getBoundingClientRect();
+  const box = current.wrap.getBoundingClientRect();
+  if (box.top < rail.top || box.bottom > rail.bottom) current.wrap.scrollIntoView({ block: 'nearest' });
 }
 
 // ----------------------------------------------------------------- rotate
@@ -1531,10 +1576,11 @@ async function restore(snap, message) {
   state.password = snap.password;
   state.page = Math.min(state.page, state.info.pageCount);
   state.regions = state.regions.filter((r) => r.page <= state.info.pageCount);
-  await refreshSignatures();
-  await refreshSafety();
+  state.signatures = [];
+  state.safety = null;
   await showDocument();
   updateChrome();
+  Promise.all([refreshSignatures(), refreshSafety()]).then(updateChrome);
   toast(message);
 }
 

@@ -1635,41 +1635,49 @@ async function toggleLinks() {
   updateChrome();
 }
 
-// Resolution used to rasterise pages for printing — higher than the on-screen DPI so print output
-// stays crisp. Bounded by the host's render cap (600).
-const PRINT_DPI = 200;
-
 /**
- * Renders every page to a high-resolution image and prints them via the browser. Using our own
- * renderer (PDFium in the host) keeps printing self-contained and reliable — window.print() then
- * lays one page image per sheet. The images live in an off-screen #print-area only during printing.
+ * Hands the current document to the browser's own print flow so its print dialog — including the
+ * "Save as PDF" destination — prints the real, vector PDF. The PDF is loaded into an off-screen
+ * iframe whose print is triggered directly; if the browser won't print the embedded PDF
+ * programmatically (or never loads it), it's opened in a new tab so the user can print from the
+ * browser's built-in PDF viewer.
  */
-async function printDocument() {
+function printDocument() {
   if (!state.pdf) return;
-  const area = $('print-area');
-  try {
-    area.innerHTML = '';
-    const total = state.info.pageCount;
-    for (let p = 1; p <= total; p++) {
-      setStatus(`Preparing print… page ${p}/${total}`, true);
-      const result = await host.call('render', {
-        pdf: state.pdfB64, page: p, dpi: PRINT_DPI, pdfPassword: state.password,
-      });
-      const img = document.createElement('img');
-      img.src = `data:image/png;base64,${result.png}`;
-      await img.decode().catch(() => { /* print even if decode reports late */ });
-      area.appendChild(img);
+  const url = URL.createObjectURL(new Blob([state.pdf], { type: 'application/pdf' }));
+  let handled = false;
+
+  const frame = document.createElement('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;';
+
+  const cleanup = () => setTimeout(() => { URL.revokeObjectURL(url); frame.remove(); }, 60000);
+  const openInTab = () => {
+    if (handled) return;
+    handled = true;
+    window.open(url, '_blank', 'noopener');
+    toast('Opened the document in a new tab — use your browser to print or save as PDF.');
+    cleanup();
+  };
+
+  frame.addEventListener('load', () => {
+    if (handled) return;
+    handled = true;
+    try {
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+      toast('Opening the browser print dialog…');
+      cleanup();
+    } catch {
+      handled = false; // let the tab fallback take over
+      openInTab();
     }
-    setStatus('');
-    // Empty the print area once the print dialog is dismissed (registered before printing so it
-    // fires whether window.print() blocks or returns immediately).
-    window.addEventListener('afterprint', () => { area.innerHTML = ''; }, { once: true });
-    await new Promise((r) => setTimeout(r, 50)); // let the images lay out
-    window.print();
-  } catch (e) {
-    area.innerHTML = '';
-    fail(e);
-  }
+  });
+  // If the embedded PDF never loads (some browsers block plugin printing), fall back to a tab.
+  setTimeout(openInTab, 3000);
+
+  frame.src = url;
+  document.body.appendChild(frame);
 }
 
 async function save() {

@@ -704,24 +704,21 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
-  test('print: renders every page to an image and invokes the browser print', async () => {
-    const file = fixture('print.pdf', [
-      [{ text: 'Print page one', x: 72, y: 700 }],
-      [{ text: 'Print page two', x: 72, y: 700 }],
-    ]);
+  test('print: defers to the browser by loading the real PDF for printing', async () => {
+    const file = fixture('print.pdf', [[{ text: 'Print me', x: 72, y: 700 }]]);
     const page = await ext.context.newPage();
-    // The print dialog can't be driven headlessly, so record the call instead of opening it.
-    await page.addInitScript(() => { window.__printCalls = 0; window.print = () => { window.__printCalls++; }; });
+    // Record any new-tab fallback so the test never actually spawns a tab.
+    await page.addInitScript(() => { window.__opened = []; window.open = (u) => { window.__opened.push(u); return null; }; });
     await page.goto(ext.viewerUrl);
     const chooser = page.waitForEvent('filechooser');
     await page.click('#btn-open-empty');
     await (await chooser).setFiles(file);
     await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
 
+    // Printing hands the actual PDF to the browser via an off-screen blob iframe (vector print,
+    // with "Save as PDF" available in the browser's dialog).
     await page.click('#btn-print');
-    await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(1);
-    // One high-res image per page was staged in the (normally off-screen) print area.
-    await expect(page.locator('#print-area img')).toHaveCount(2);
+    await expect(page.locator('iframe[src^="blob:"]')).toHaveCount(1);
     await page.close();
   });
 

@@ -408,22 +408,3 @@ dialog h2 { margin-top: 0; font-size: 16px; }
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
-
-/* ------------------------------------------------------------------ print */
-/* Off-screen until printing; then it's the only thing that prints — one page image per sheet. */
-#print-area { display: none; }
-
-@media print {
-  /* Print with no browser margins so each page image fills the sheet. */
-  @page { margin: 0; }
-  body { display: block; background: #fff; }
-  body > *:not(#print-area) { display: none !important; }
-  #print-area { display: block; }
-  #print-area img {
-    display: block;
-    width: 100%;
-    break-after: page;
-    page-break-after: always;
-  }
-  #print-area img:last-child { break-after: auto; page-break-after: auto; }
-}

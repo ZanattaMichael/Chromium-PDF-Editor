@@ -1,12 +1,67 @@
 using iText.Forms;
 using iText.Forms.Fields;
+using iText.Forms.Fields.Properties;
+using iText.Kernel.Colors;
+using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
 
 namespace PdfEditor.Core;
 
-/// <summary>Reads and fills AcroForm (Adobe form) fields.</summary>
+/// <summary>Reads, fills, and inserts AcroForm (Adobe form) fields.</summary>
 public static class FormTools
 {
+    /// <summary>Inserts a fillable text field on the given page at the given rectangle.</summary>
+    public static EditResult AddTextField(byte[] pdf, int page, RectRegion rect, string? name = null,
+        string? value = null, string? password = null)
+    {
+        using var output = new MemoryStream();
+        using (var doc = PdfIo.Open(pdf, output, password))
+        {
+            if (page < 1 || page > doc.GetNumberOfPages())
+                throw new ArgumentOutOfRangeException(nameof(page), $"Page {page} does not exist.");
+            var form = PdfFormCreator.GetAcroForm(doc, true);
+            var field = new TextFormFieldBuilder(doc, UniqueName(form, name, "text"))
+                .SetWidgetRectangle(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))
+                .SetPage(page).CreateText();
+            field.SetValue(value ?? "");
+            field.GetFirstFormAnnotation().SetBorderColor(ColorConstants.GRAY);
+            form.AddField(field);
+        }
+        return EditResult.Of(output.ToArray());
+    }
+
+    /// <summary>Inserts a checkbox on the given page at the given rectangle.</summary>
+    public static EditResult AddCheckbox(byte[] pdf, int page, RectRegion rect, string? name = null,
+        bool isChecked = false, string? password = null)
+    {
+        using var output = new MemoryStream();
+        using (var doc = PdfIo.Open(pdf, output, password))
+        {
+            if (page < 1 || page > doc.GetNumberOfPages())
+                throw new ArgumentOutOfRangeException(nameof(page), $"Page {page} does not exist.");
+            var form = PdfFormCreator.GetAcroForm(doc, true);
+            var field = new CheckBoxFormFieldBuilder(doc, UniqueName(form, name, "check"))
+                .SetWidgetRectangle(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))
+                .SetPage(page).SetCheckType(CheckBoxType.CHECK).CreateCheckBox();
+            field.SetValue(isChecked ? "Yes" : "Off");
+            form.AddField(field);
+        }
+        return EditResult.Of(output.ToArray());
+    }
+
+    /// <summary>A field name that doesn't collide with an existing one.</summary>
+    private static string UniqueName(PdfAcroForm form, string? requested, string prefix)
+    {
+        var existing = form.GetAllFormFields().Keys;
+        string baseName = string.IsNullOrWhiteSpace(requested) ? prefix : requested.Trim();
+        if (!existing.Contains(baseName)) return baseName;
+        for (int i = 2; ; i++)
+        {
+            string candidate = $"{baseName}_{i}";
+            if (!existing.Contains(candidate)) return candidate;
+        }
+    }
+
     /// <summary>Lists every fillable field with its type, current value, and allowed options.</summary>
     public static IReadOnlyList<FormField> ListFields(byte[] pdf, string? password = null)
     {

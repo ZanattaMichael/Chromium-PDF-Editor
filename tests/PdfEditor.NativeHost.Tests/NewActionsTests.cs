@@ -72,6 +72,23 @@ public class NewActionsTests
     }
 
     [Fact]
+    public void AddFormField_InsertsField_ThenListShowsIt()
+    {
+        var added = Handle("add-form-field", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage()),
+            region = new { page = 1, x = 100, y = 500, width = 200, height = 24 },
+            fieldType = "text", name = "email", value = "x@y.com",
+        });
+        Assert.True(Ok(added));
+        string newPdf = Result(added)["pdf"]!.GetValue<string>();
+
+        var list = Handle("form-fields", new { pdf = newPdf });
+        var field = Assert.Single(Result(list)["fields"]!.AsArray());
+        Assert.Equal("email", field!["name"]!.GetValue<string>());
+    }
+
+    [Fact]
     public void ScanSafety_DetectsJavaScript_AndStripRemovesIt()
     {
         string pdf = TestPdf.Base64(TestPdf.WithJavaScript());

@@ -51,6 +51,7 @@ public sealed class MessageProcessor
         "add-drawing" => AddDrawingAction(p),
         "form-fields" => FormFieldsAction(p),
         "fill-form" => FillFormAction(p),
+        "add-form-field" => AddFormFieldAction(p),
         "scan-safety" => ScanSafetyAction(p),
         "strip-active" => StripActiveAction(p),
         "list-urls" => ListUrlsAction(p),
@@ -151,6 +152,18 @@ public sealed class MessageProcessor
         if (p["values"]?.AsObject() is { } obj)
             foreach (var kv in obj) values[kv.Key] = kv.Value?.GetValue<string>() ?? "";
         var result = FormTools.FillFields(Pdf(p), values, p["flatten"]?.GetValue<bool>() ?? false, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object AddFormFieldAction(JsonObject p)
+    {
+        var region = Region(p["region"]!.AsObject());
+        string type = p["fieldType"]?.GetValue<string>() ?? "text";
+        string? name = p["name"]?.GetValue<string>();
+        var result = type == "checkbox"
+            ? FormTools.AddCheckbox(Pdf(p), region.Page, region, name, password: Password(p))
+            : FormTools.AddTextField(Pdf(p), region.Page, region, name,
+                p["value"]?.GetValue<string>(), Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 

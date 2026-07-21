@@ -55,6 +55,51 @@ public class FormToolsTests
             new Dictionary<string, string> { ["doesNotExist"] = "x" });
         Assert.Equal("keep", Assert.Single(FormTools.ListFields(result.Pdf)).Value);
     }
+
+    [Fact]
+    public void AddTextField_InsertsAFillableTextField()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+
+        var result = FormTools.AddTextField(pdf, 1, new RectRegion(1, 100, 500, 200, 24), "email", "a@b.com");
+
+        var field = Assert.Single(FormTools.ListFields(result.Pdf));
+        Assert.Equal("email", field.Name);
+        Assert.Equal("text", field.Type);
+        Assert.Equal("a@b.com", field.Value);
+    }
+
+    [Fact]
+    public void AddCheckbox_InsertsACheckbox()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+
+        var result = FormTools.AddCheckbox(pdf, 1, new RectRegion(1, 100, 500, 16, 16), "agree");
+
+        var field = Assert.Single(FormTools.ListFields(result.Pdf));
+        Assert.Equal("agree", field.Name);
+        Assert.Equal("checkbox", field.Type);
+    }
+
+    [Fact]
+    public void AddTextField_AvoidsNameCollision()
+    {
+        byte[] pdf = TestPdfs.WithTextField("dupe", "one");
+
+        var result = FormTools.AddTextField(pdf, 1, new RectRegion(1, 100, 400, 200, 24), "dupe");
+
+        var names = FormTools.ListFields(result.Pdf).Select(f => f.Name).ToList();
+        Assert.Contains("dupe", names);
+        Assert.Contains("dupe_2", names); // the inserted one was renamed to avoid the clash
+    }
+
+    [Fact]
+    public void AddTextField_InvalidPage_Throws()
+    {
+        byte[] pdf = TestPdfs.WithText(("x", 72, 700, 12));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            FormTools.AddTextField(pdf, 9, new RectRegion(9, 0, 0, 10, 10), "n"));
+    }
 }
 
 public class PdfSafetyTests

@@ -413,6 +413,24 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('forms: insert a new text field by drawing a box', async () => {
+    const file = fixture('insertfield.pdf', [[{ text: 'blank form', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await page.click('#btn-forms');
+    await expect(page.locator('#panel-forms')).toBeVisible();
+    await page.selectOption('#field-type', 'text');
+    await page.fill('#field-name', 'signature_name');
+    await page.click('#field-place');
+    await expect(page.locator('#status')).toContainText('Drag a box');
+
+    await dragPdfRect(page, { x: 100, y: 600, width: 220, height: 24 });
+
+    // The forms panel reopens and lists the newly inserted field.
+    await expect(page.locator('#forms-list [data-field="signature_name"]')).toHaveCount(1);
+    await page.close();
+  });
+
   test('safety: JavaScript is detected, flagged, and stripped on save by default', async () => {
     const file = path.join(fixtureDir, 'hasjs.pdf');
     fs.writeFileSync(file, buildJavaScriptPdf("app.alert('x');"));

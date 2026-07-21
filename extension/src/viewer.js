@@ -27,6 +27,7 @@ const state = {
   regions: [],          // pending redaction regions {page,x,y,width,height} (PDF space)
   pendingEditRegion: null,
   pendingSignRegion: null,
+  pendingField: null,   // { fieldType, name } while placing a new form field
   textMode: 'edit',     // 'edit' (replace existing) or 'add' (stamp new) for the text panel
   signatures: [],
   drawColor: '#e53935',
@@ -751,6 +752,8 @@ pagesEl.addEventListener('pointerup', async (e) => {
   if (state.tool === 'redact') {
     state.regions.push(region);
     drawRegions();
+  } else if (state.tool === 'field') {
+    placeField(region);
   } else if (state.tool === 'text') {
     beginAddText(region);
   } else if (state.tool === 'edit') {
@@ -1430,6 +1433,35 @@ async function applyForms() {
   }
 }
 
+/** Enters "place a field" mode: the next box drawn on a page becomes a new form field. */
+function beginPlaceField() {
+  if (!state.pdf) return;
+  state.pendingField = { fieldType: $('field-type').value, name: $('field-name').value.trim() };
+  state.tool = 'field';
+  for (const b of document.querySelectorAll('.tool')) b.classList.remove('active');
+  for (const pe of pageEls) pe.overlay.classList.add('tool-active');
+  hidePanels();
+  toast('Drag a box where the field should go.');
+}
+
+async function placeField(region) {
+  const pf = state.pendingField;
+  if (!pf) return;
+  state.pendingField = null;
+  try {
+    setStatus('Adding field…', true);
+    const result = await host.call('add-form-field', {
+      pdf: state.pdfB64, region, fieldType: pf.fieldType,
+      name: pf.name || undefined, pdfPassword: state.password,
+    });
+    setTool('select');
+    await applyResult(result.pdf, `${pf.fieldType === 'checkbox' ? 'Checkbox' : 'Text field'} added.`);
+    openForms(); // show the updated field list (and let them add another)
+  } catch (e) {
+    fail(e);
+  }
+}
+
 // ---------------------------------------------------------------- links / URLs
 
 async function openLinks() {
@@ -1637,6 +1669,7 @@ function wire() {
   $('btn-forms').addEventListener('click', openForms);
   $('forms-apply').addEventListener('click', applyForms);
   $('forms-cancel').addEventListener('click', () => hidePanels());
+  $('field-place').addEventListener('click', beginPlaceField);
 
   $('btn-links').hidden = !URL_SCANNING_ENABLED; // URL scanning disabled for now
   $('btn-links').addEventListener('click', openLinks);

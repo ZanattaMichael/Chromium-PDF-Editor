@@ -125,6 +125,16 @@ public class NewActionsTests
     }
 
     [Fact]
+    public void PageText_ReturnsRunsWithPositions()
+    {
+        var r = Handle("page-text", new { pdf = TestPdf.Base64(TestPdf.OnePage("hello world")), page = 1 });
+        Assert.True(Ok(r));
+        var span = Assert.Single(Result(r)["spans"]!.AsArray());
+        Assert.Contains("hello", span!["text"]!.GetValue<string>());
+        Assert.True(span["width"]!.GetValue<double>() > 0);
+    }
+
+    [Fact]
     public void ListUrls_ReturnsTheLink()
     {
         var r = Handle("list-urls", new { pdf = TestPdf.Base64(TestPdf.WithLink("https://example.com/a")) });

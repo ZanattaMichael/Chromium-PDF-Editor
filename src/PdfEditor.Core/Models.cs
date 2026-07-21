@@ -14,6 +14,12 @@ public sealed record RectRegion(int Page, float X, float Y, float Width, float H
 public sealed record TextMatch(int Page, string Text, float X, float Y, float Width, float Height);
 
 /// <summary>
+/// A run of text on a page with its bounding box in PDF user space — used to build the viewer's
+/// invisible, selectable text layer so users can select and copy real text off the rendered image.
+/// </summary>
+public sealed record TextSpan(string Text, float X, float Y, float Width, float Height);
+
+/// <summary>
 /// Geometry of a single page, describing exactly the box that gets rendered so the viewer
 /// can map screen coordinates back to the document. <paramref name="X"/>/<paramref name="Y"/>
 /// are the lower-left corner of the (crop) box in PDF user space — non-zero when it does not

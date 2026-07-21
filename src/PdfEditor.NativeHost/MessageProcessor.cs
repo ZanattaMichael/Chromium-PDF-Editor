@@ -59,6 +59,7 @@ public sealed class MessageProcessor
         "get-region-text" => GetRegionText(p),
         "replace-region-text" => ReplaceRegionText(p),
         "find-text" => FindTextAction(p),
+        "page-text" => PageTextAction(p),
         "replace-all" => ReplaceAllAction(p),
         "merge" => MergeAction(p),
         "merge-files" => MergeFilesAction(p),
@@ -237,6 +238,15 @@ public sealed class MessageProcessor
             p["color"]?.GetValue<string>(),
             Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object PageTextAction(JsonObject p)
+    {
+        var spans = TextTools.GetTextSpans(Pdf(p), p["page"]!.GetValue<int>(), Password(p));
+        return new
+        {
+            spans = spans.Select(s => new { text = s.Text, x = s.X, y = s.Y, width = s.Width, height = s.Height })
+        };
     }
 
     private static object FindTextAction(JsonObject p)

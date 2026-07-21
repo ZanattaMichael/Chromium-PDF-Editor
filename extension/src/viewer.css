@@ -150,6 +150,27 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
 .overlay { position: absolute; inset: 0; }
 .overlay.tool-active { cursor: crosshair; }
 
+/* Invisible, selectable text laid over the rendered page so real text can be selected/copied.
+   Only interactive in select mode; when a drawing tool is active the overlay captures instead. */
+.text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+}
+.text-layer span {
+  position: absolute;
+  white-space: pre;
+  color: transparent;
+  transform-origin: left top;
+  cursor: text;
+}
+#pages.select-mode .text-layer { pointer-events: auto; user-select: text; }
+#pages.select-mode .overlay { pointer-events: none; }
+::selection { background: rgba(79, 142, 247, 0.4); }
+
 /* Live freehand-drawing preview; the overlay above it captures the pointer. */
 .ink-layer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 .ink-layer polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }

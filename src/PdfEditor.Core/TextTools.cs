@@ -193,6 +193,41 @@ public static class TextTools
         return output.ToArray();
     }
 
+    /// <summary>
+    /// Returns each run of text on a page with its bounding box in PDF user space. Used to build
+    /// the viewer's selectable text layer. Runs (not individual glyphs) keep the layer light.
+    /// </summary>
+    public static IReadOnlyList<TextSpan> GetTextSpans(byte[] pdf, int page, string? password = null)
+    {
+        using var doc = PdfIo.OpenReadOnly(pdf, password);
+        if (page < 1 || page > doc.GetNumberOfPages()) return Array.Empty<TextSpan>();
+        var spans = new List<TextSpan>();
+        new PdfCanvasProcessor(new SpanListener(spans)).ProcessPageContent(doc.GetPage(page));
+        return spans;
+    }
+
+    private sealed class SpanListener : IEventListener
+    {
+        private readonly List<TextSpan> _spans;
+        public SpanListener(List<TextSpan> spans) => _spans = spans;
+
+        public void EventOccurred(IEventData data, EventType type)
+        {
+            if (data is not TextRenderInfo t) return;
+            string text = t.GetText();
+            if (string.IsNullOrWhiteSpace(text)) return;
+            var asc = t.GetAscentLine();
+            var desc = t.GetDescentLine();
+            float x0 = desc.GetStartPoint().Get(0), x1 = desc.GetEndPoint().Get(0);
+            float yBottom = desc.GetStartPoint().Get(1), yTop = asc.GetStartPoint().Get(1);
+            float minX = Math.Min(x0, x1), maxX = Math.Max(x0, x1);
+            if (maxX <= minX || yTop <= yBottom) return; // skip zero-area / vertical runs
+            _spans.Add(new TextSpan(text, minX, yBottom, maxX - minX, yTop - yBottom));
+        }
+
+        public ICollection<EventType>? GetSupportedEvents() => null;
+    }
+
     // ------------------------------------------------------------ extraction
 
     private sealed record Chunk(string Text, Rectangle BBox, float FontHeight, string FontName);

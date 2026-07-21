@@ -129,6 +129,30 @@ public class TextToolsTests
     }
 
     [Fact]
+    public void GetTextSpans_ReturnsRuns_WithPositions()
+    {
+        byte[] pdf = TestPdfs.WithText(("Selectable Text Here", 72, 700, 14));
+
+        var spans = TextTools.GetTextSpans(pdf, 1);
+
+        var span = Assert.Single(spans);
+        Assert.Contains("Selectable", span.Text);
+        Assert.True(span.Width > 0 && span.Height > 0);
+        // Roughly where it was drawn (baseline near y=700).
+        Assert.InRange(span.X, 60, 90);
+        Assert.InRange(span.Y, 690, 705);
+    }
+
+    [Fact]
+    public void GetTextSpans_EmptyPage_ReturnsEmpty()
+    {
+        using var ms = new MemoryStream();
+        using (var doc = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(ms)))
+            doc.AddNewPage();
+        Assert.Empty(TextTools.GetTextSpans(ms.ToArray(), 1));
+    }
+
+    [Fact]
     public void FindText_LocatesPhraseOnCorrectPage()
     {
         byte[] pdf = TestPdfs.MultiPage(3, "Chapter");

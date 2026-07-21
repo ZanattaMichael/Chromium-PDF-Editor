@@ -619,6 +619,27 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('text layer: real text can be selected/copied and right-clicked to edit', async () => {
+    const file = fixture('selecttext.pdf', [[{ text: 'Selectable Sentence Here', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    // The invisible selectable text layer builds over the rendered page.
+    const span = page.locator('.page[data-page="1"] .text-layer span', { hasText: 'Selectable' });
+    await expect(span).toHaveCount(1);
+
+    // Selecting it yields the real text (so Ctrl/Cmd+C copies actual characters, not an image).
+    await span.click({ clickCount: 3 });
+    const selected = await page.evaluate(() => window.getSelection().toString());
+    expect(selected).toContain('Selectable');
+
+    // Right-clicking a word opens the edit panel pre-filled with that run's text (edit in place).
+    await span.click({ button: 'right' });
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-title')).toHaveText('Edit text');
+    await expect(page.locator('#edit-text')).toHaveValue(/Selectable Sentence Here/);
+    await page.close();
+  });
+
   test('text edit: reads existing text, replaces it in place', async () => {
     const file = fixture('edit.pdf', [[{ text: 'Amount Due: $500', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);

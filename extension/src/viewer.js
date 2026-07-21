@@ -60,6 +60,9 @@ let prefetchTimer = null;
 const thumbCache = new Map(); // `${version}|${page}` -> png base64
 const MAX_CACHED_THUMBS = 400;
 
+// Per-page text runs (bboxes in PDF space) for the selectable text layer.
+const spanCache = new Map(); // `${version}|${page}` -> [{ text, x, y, width, height }]
+
 /** Installs new working bytes: encode once, bump the version, drop now-stale renders. */
 function setWorkingPdf(bytes, base64) {
   state.pdf = bytes;
@@ -67,6 +70,7 @@ function setWorkingPdf(bytes, base64) {
   state.version++;
   renderCache.clear();
   thumbCache.clear();
+  spanCache.clear();
   inkByPage.clear();  // uncommitted freehand strokes belong to the old document
   prefetchToken++; // cancel any in-flight prefetch for the previous document
 }
@@ -343,6 +347,7 @@ function buildPages() {
   }, { root: scrollArea, threshold: [0, 0.25, 0.5, 0.75, 1] });
 
   for (const pe of pageEls) { nearObserver.observe(pe.wrap); visObserver.observe(pe.wrap); }
+  pagesEl.classList.toggle('select-mode', state.tool === 'select');
   drawRegions();
 }
 
@@ -358,6 +363,7 @@ async function renderPageEl(pageNum) {
   if (cached !== undefined) {
     pe.img.src = `data:image/png;base64,${cached}`;
     pe.renderedKey = key;
+    ensureTextLayer(pe, pageNum);
     return;
   }
   try {
@@ -365,8 +371,56 @@ async function renderPageEl(pageNum) {
     if (cacheKey(pageNum, currentDpi()) !== key || !pe.wrap.isConnected) return;
     pe.img.src = `data:image/png;base64,${png}`;
     pe.renderedKey = key;
+    ensureTextLayer(pe, pageNum);
   } catch {
     /* leave the placeholder blank; it renders again when it next scrolls into view */
+  }
+}
+
+// ------------------------------------------------------ selectable text layer
+
+/** Fetches (and caches) the page's text runs and lays an invisible selectable layer over it. */
+async function ensureTextLayer(pe, pageNum) {
+  const key = `${state.version}|${pageNum}`;
+  let spans = spanCache.get(key);
+  if (spans === undefined) {
+    try {
+      const result = await host.call('page-text', {
+        pdf: state.pdfB64, page: pageNum, pdfPassword: state.password,
+      });
+      spans = result.spans ?? [];
+      spanCache.set(key, spans);
+    } catch {
+      return; // selection is a nicety; never block rendering on it
+    }
+  }
+  if (!pe.wrap.isConnected || pe.textKey === key) return;
+  buildTextLayer(pe, pageNum, spans);
+  pe.textKey = key;
+}
+
+function buildTextLayer(pe, pageNum, spans) {
+  pe.wrap.querySelector('.text-layer')?.remove();
+  if (spans.length === 0) return;
+  const layer = document.createElement('div');
+  layer.className = 'text-layer';
+  for (const s of spans) {
+    const css = pdfRectToCss(pageNum, pe.img, s);
+    if (css.width <= 0 || css.height <= 0) continue;
+    const el = document.createElement('span');
+    el.textContent = s.text;
+    el.style.cssText = `left:${css.left}px;top:${css.top}px;font-size:${css.height}px;`;
+    el.dataset.w = css.width;
+    // Absolute PDF-space box, so a right-click can edit exactly this run in place.
+    el.dataset.region = JSON.stringify({ page: pageNum, x: s.x, y: s.y, width: s.width, height: s.height });
+    layer.appendChild(el);
+  }
+  pe.wrap.insertBefore(layer, pe.overlay);
+  // One measure/adjust pass: stretch each run horizontally to match its rendered width.
+  for (const el of layer.children) {
+    const natural = el.offsetWidth;
+    const target = Number(el.dataset.w);
+    if (natural > 0) el.style.transform = `scaleX(${(target / natural).toFixed(4)})`;
   }
 }
 
@@ -767,6 +821,19 @@ pagesEl.addEventListener('pointerup', async (e) => {
   }
 });
 
+// Right-click a word (in select mode) to edit that run of text in place.
+pagesEl.addEventListener('contextmenu', (e) => {
+  if (state.tool !== 'select' || !state.pdf) return;
+  const span = e.target.closest('.text-layer span');
+  if (!span?.dataset.region) return;
+  e.preventDefault();
+  const r = JSON.parse(span.dataset.region);
+  const pad = 1; // capture the whole run comfortably
+  const region = { page: r.page, x: r.x - pad, y: r.y - pad, width: r.width + 2 * pad, height: r.height + 2 * pad };
+  state.pendingEditRegion = region;
+  beginTextEdit(region);
+});
+
 // ----------------------------------------------------------------- panels
 
 function showPanel(id) {
@@ -789,6 +856,8 @@ function setTool(tool) {
   for (const button of document.querySelectorAll('.tool')) button.classList.remove('active');
   $(`tool-${tool}`).classList.add('active');
   for (const pe of pageEls) pe.overlay.classList.toggle('tool-active', tool !== 'select');
+  // In select mode the text layer is interactive (select/copy); tools capture the overlay instead.
+  pagesEl.classList.toggle('select-mode', tool === 'select');
   if (tool === 'redact') showPanel('panel-redact');
   else if (tool === 'draw') showPanel('panel-draw');
   else hidePanels(); // select/text/edit/sign: panel appears once a box is drawn
@@ -1454,6 +1523,7 @@ function beginPlaceField() {
   state.tool = 'field';
   for (const b of document.querySelectorAll('.tool')) b.classList.remove('active');
   for (const pe of pageEls) pe.overlay.classList.add('tool-active');
+  pagesEl.classList.remove('select-mode'); // let the overlay capture the placement drag
   hidePanels();
   toast('Drag a box where the field should go.');
 }

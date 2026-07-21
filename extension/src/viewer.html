@@ -17,6 +17,7 @@
     <div class="group" role="group" aria-label="File">
       <button id="btn-open" title="Open a PDF file">📂 Open</button>
       <button id="btn-save" title="Save the edited PDF" disabled>💾 Save</button>
+      <button id="btn-print" title="Print the document" disabled>🖨 Print</button>
     </div>
     <span class="sep" aria-hidden="true"></span>
 
@@ -215,6 +216,9 @@
       <span id="busy-text"></span>
     </div>
   </div>
+
+  <!-- Filled with one full-resolution image per page only while printing. -->
+  <div id="print-area" aria-hidden="true"></div>
 
   <dialog id="modal"></dialog>
   <input id="file-input" type="file" accept="application/pdf" hidden />

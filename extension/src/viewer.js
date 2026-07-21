@@ -583,7 +583,7 @@ function updateNav() {
 
 function updateChrome() {
   const loaded = !!state.pdf;
-  for (const id of ['btn-save', 'btn-sidebar', 'tool-text', 'tool-draw', 'tool-edit',
+  for (const id of ['btn-save', 'btn-print', 'btn-sidebar', 'tool-text', 'tool-draw', 'tool-edit',
     'tool-redact', 'tool-sign', 'btn-rotate-left', 'btn-rotate-right', 'btn-forms',
     'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
@@ -1635,6 +1635,43 @@ async function toggleLinks() {
   updateChrome();
 }
 
+// Resolution used to rasterise pages for printing — higher than the on-screen DPI so print output
+// stays crisp. Bounded by the host's render cap (600).
+const PRINT_DPI = 200;
+
+/**
+ * Renders every page to a high-resolution image and prints them via the browser. Using our own
+ * renderer (PDFium in the host) keeps printing self-contained and reliable — window.print() then
+ * lays one page image per sheet. The images live in an off-screen #print-area only during printing.
+ */
+async function printDocument() {
+  if (!state.pdf) return;
+  const area = $('print-area');
+  try {
+    area.innerHTML = '';
+    const total = state.info.pageCount;
+    for (let p = 1; p <= total; p++) {
+      setStatus(`Preparing print… page ${p}/${total}`, true);
+      const result = await host.call('render', {
+        pdf: state.pdfB64, page: p, dpi: PRINT_DPI, pdfPassword: state.password,
+      });
+      const img = document.createElement('img');
+      img.src = `data:image/png;base64,${result.png}`;
+      await img.decode().catch(() => { /* print even if decode reports late */ });
+      area.appendChild(img);
+    }
+    setStatus('');
+    // Empty the print area once the print dialog is dismissed (registered before printing so it
+    // fires whether window.print() blocks or returns immediately).
+    window.addEventListener('afterprint', () => { area.innerHTML = ''; }, { once: true });
+    await new Promise((r) => setTimeout(r, 50)); // let the images lay out
+    window.print();
+  } catch (e) {
+    area.innerHTML = '';
+    fail(e);
+  }
+}
+
 async function save() {
   let bytes = state.pdf;
   const stripJs = state.safety?.javaScriptCount > 0 && !state.keepActiveContent;
@@ -1721,6 +1758,7 @@ function wire() {
   $('btn-open').addEventListener('click', openFilePicker);
   $('btn-open-empty').addEventListener('click', openFilePicker);
   $('btn-save').addEventListener('click', save);
+  $('btn-print').addEventListener('click', printDocument);
   $('btn-undo').addEventListener('click', undo);
   $('btn-redo').addEventListener('click', redo);
   $('btn-sidebar').addEventListener('click', () => toggleSidebar());

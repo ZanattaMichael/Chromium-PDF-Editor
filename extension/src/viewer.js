@@ -1188,6 +1188,15 @@ async function digitallySign() {
 
 // ------------------------------------------------------ merge and protect
 
+/** Classifies a picked file as a pdf, image, or Word doc by type/extension. */
+function mergeKind(file) {
+  const name = (file.name || '').toLowerCase();
+  if (file.type.startsWith('image/') || /\.(png|jpe?g|gif|bmp|tiff?|webp)$/.test(name)) return 'image';
+  if (/\.docx?$/.test(name) ||
+      file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'docx';
+  return 'pdf';
+}
+
 async function mergeFiles() {
   $('merge-input').onchange = async () => {
     const files = [...$('merge-input').files];
@@ -1195,12 +1204,17 @@ async function mergeFiles() {
     if (files.length === 0) return;
     try {
       setStatus(`Merging ${files.length} file${files.length === 1 ? '' : 's'}…`, true);
-      const pdfs = [state.pdfB64];
+      // The current document first, then each picked file tagged with its kind so the host can
+      // convert images and Word documents to PDF pages before concatenating.
+      const payload = [{ data: state.pdfB64, kind: 'pdf' }];
       for (const file of files) {
-        pdfs.push(bytesToBase64(new Uint8Array(await file.arrayBuffer())));
+        payload.push({
+          data: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
+          kind: mergeKind(file),
+        });
       }
-      const result = await host.call('merge', { pdfs });
-      await applyResult(result.pdf, `Merged ${files.length} document${files.length === 1 ? '' : 's'} in.`);
+      const result = await host.call('merge-files', { files: payload });
+      await applyResult(result.pdf, `Merged ${files.length} file${files.length === 1 ? '' : 's'} in.`);
     } catch (e) {
       fail(e);
     }

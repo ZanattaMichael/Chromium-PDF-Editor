@@ -683,6 +683,24 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('merge appends an image as a new page', async () => {
+    const base = fixture('merge-img-base.pdf', [[{ text: 'Base page', x: 72, y: 700 }]]);
+    // A minimal 1x1 PNG written to disk for the merge picker.
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64');
+    const imgFile = path.join(fixtureDir, 'stamp.png');
+    fs.writeFileSync(imgFile, png);
+    const page = await openViewerWith(base);
+
+    const chooser = page.waitForEvent('filechooser');
+    await page.click('#btn-merge');
+    await (await chooser).setFiles(imgFile);
+    await expect(page.locator('#status')).toContainText('Merged 1 file');
+    await expect(page.locator('#page-total')).toHaveText('2'); // image became a second page
+    await page.close();
+  });
+
   test('merge appends another document', async () => {
     const one = fixture('merge-base.pdf', [[{ text: 'Base page', x: 72, y: 700 }]]);
     const two = fixture('merge-extra.pdf', [
@@ -694,7 +712,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const chooser = page.waitForEvent('filechooser');
     await page.click('#btn-merge');
     await (await chooser).setFiles(two);
-    await expect(page.locator('#status')).toContainText('Merged 1 document');
+    await expect(page.locator('#status')).toContainText('Merged 1 file');
     await expect(page.locator('#page-input')).toHaveValue('1');
     await expect(page.locator('#page-total')).toHaveText('3');
     await page.close();

@@ -61,6 +61,7 @@ public sealed class MessageProcessor
         "find-text" => FindTextAction(p),
         "replace-all" => ReplaceAllAction(p),
         "merge" => MergeAction(p),
+        "merge-files" => MergeFilesAction(p),
         "encrypt" => EncryptAction(p),
         "decrypt" => DecryptAction(p),
         "sign-image" => SignImage(p),
@@ -263,6 +264,18 @@ public sealed class MessageProcessor
         var pdfs = p["pdfs"]!.AsArray().Select(n => Convert.FromBase64String(n!.GetValue<string>())).ToList();
         var passwords = p["passwords"]?.AsArray().Select(n => n?.GetValue<string>()).ToList();
         return new { pdf = Convert.ToBase64String(Merger.Merge(pdfs, passwords)) };
+    }
+
+    private static object MergeFilesAction(JsonObject p)
+    {
+        // Each entry is { data: base64, kind: "pdf"|"image"|"docx" }; non-PDFs are converted first.
+        var pdfs = p["files"]!.AsArray().Select(n =>
+        {
+            var o = n!.AsObject();
+            byte[] data = Convert.FromBase64String(o["data"]!.GetValue<string>());
+            return DocumentImport.ToPdf(data, o["kind"]?.GetValue<string>() ?? "pdf");
+        }).ToList();
+        return new { pdf = Convert.ToBase64String(Merger.Merge(pdfs)) };
     }
 
     private static object EncryptAction(JsonObject p) => new

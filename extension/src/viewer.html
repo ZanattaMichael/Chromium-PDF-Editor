@@ -42,7 +42,7 @@
     <div class="group" role="group" aria-label="Pages">
       <button id="btn-rotate-left" title="Rotate current page 90° counter-clockwise" disabled>⟲</button>
       <button id="btn-rotate-right" title="Rotate current page 90° clockwise" disabled>⟳</button>
-      <button id="btn-merge" title="Append other PDFs to this one" disabled>➕ Merge</button>
+      <button id="btn-merge" title="Append PDFs, images, or Word documents" disabled>➕ Merge</button>
     </div>
     <span class="sep" aria-hidden="true"></span>
 
@@ -218,7 +218,8 @@
 
   <dialog id="modal"></dialog>
   <input id="file-input" type="file" accept="application/pdf" hidden />
-  <input id="merge-input" type="file" accept="application/pdf" multiple hidden />
+  <input id="merge-input" type="file" multiple hidden
+    accept="application/pdf,.pdf,image/png,image/jpeg,image/*,.docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
   <input id="pfx-input" type="file" accept=".p12,.pfx" hidden />
 
   <script type="module" src="viewer.js"></script>

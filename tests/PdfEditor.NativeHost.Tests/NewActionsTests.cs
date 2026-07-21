@@ -102,6 +102,28 @@ public class NewActionsTests
         Assert.NotNull(Result(stripped)["pdf"]);
     }
 
+    // A minimal valid 1x1 PNG.
+    private const string OnePixelPng =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+    [Fact]
+    public void MergeFiles_AppendsAConvertedImage_AsAPage()
+    {
+        var r = Handle("merge-files", new
+        {
+            files = new object[]
+            {
+                new { data = TestPdf.Base64(TestPdf.OnePage()), kind = "pdf" },
+                new { data = OnePixelPng, kind = "image" },
+            },
+        });
+        Assert.True(Ok(r));
+        string merged = Result(r)["pdf"]!.GetValue<string>();
+
+        var info = Handle("info", new { pdf = merged });
+        Assert.Equal(2, Result(info)["pageCount"]!.GetValue<int>());
+    }
+
     [Fact]
     public void ListUrls_ReturnsTheLink()
     {

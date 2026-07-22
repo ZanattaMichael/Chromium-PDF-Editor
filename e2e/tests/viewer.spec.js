@@ -941,6 +941,35 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('compare versions: summarises added and removed words', async () => {
+    const current = fixture('compare-new.pdf', [[{ text: 'Amount Due 750 dollars', x: 72, y: 700 }]]);
+    const older = fixture('compare-old.pdf', [[{ text: 'Amount Due 500 dollars', x: 72, y: 700 }]]);
+    const page = await openViewerWith(current);
+
+    const chooser = page.waitForEvent('filechooser');
+    await ui(page, '#btn-compare');
+    await (await chooser).setFiles(older);
+
+    await expect(page.locator('#panel-compare')).toBeVisible();
+    await expect(page.locator('#compare-summary')).toContainText('1 page');
+    // The changed page lists 750 as added and 500 as removed.
+    await expect(page.locator('#compare-list .w-add', { hasText: '750' })).toHaveCount(1);
+    await expect(page.locator('#compare-list .w-del', { hasText: '500' })).toHaveCount(1);
+    await page.close();
+  });
+
+  test('compare versions: identical documents report no differences', async () => {
+    const same = fixture('compare-same.pdf', [[{ text: 'Unchanged content here', x: 72, y: 700 }]]);
+    const page = await openViewerWith(same);
+
+    const chooser = page.waitForEvent('filechooser');
+    await ui(page, '#btn-compare');
+    await (await chooser).setFiles(same);
+
+    await expect(page.locator('#compare-summary')).toContainText('no text differences');
+    await page.close();
+  });
+
   test('remove hidden info: detects and strips a document script', async () => {
     const file = fixture('sanitize.pdf', [[{ text: 'shareable', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);

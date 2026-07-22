@@ -378,6 +378,22 @@ select {
 
 .badge.warn { background: #7c3a10; color: #ffd9b0; cursor: pointer; }
 
+/* ------------------------------------------------------- document comparison */
+.compare-summary { margin: 8px 0; font-size: 13px; }
+.compare-summary .stat { display: inline-block; margin-right: 12px; }
+.compare-summary .added { color: #6bcB77; }
+.compare-summary .removed { color: #ef6b6b; }
+.compare-page { display: block; cursor: default; }
+.compare-page .organize-label { flex-direction: column; }
+.compare-words { font-size: 12px; word-break: break-word; }
+.compare-words .w-add {
+  background: rgba(47, 158, 68, 0.28); color: #d7f5dd; border-radius: 3px; padding: 0 3px; margin: 0 2px 2px 0; display: inline-block;
+}
+.compare-words .w-del {
+  background: rgba(229, 72, 77, 0.28); color: #ffd7d9; border-radius: 3px; padding: 0 3px; margin: 0 2px 2px 0; display: inline-block; text-decoration: line-through;
+}
+.compare-page-num { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
 /* ---------------------------------------------------- rudimentary code editor */
 textarea.code-editor {
   font: 12.5px/1.5 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;

@@ -609,7 +609,7 @@ function updateChrome() {
     'tool-highlight', 'tool-edit', 'tool-redact', 'tool-sign',
     'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-organize', 'btn-js', 'btn-sanitize',
     'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
-    'menu-read-trigger', 'menu-edit-trigger',
+    'menu-read-trigger', 'menu-edit-trigger', 'btn-compare',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
     $(id).disabled = !loaded;
   }
@@ -1897,6 +1897,89 @@ async function removeScript(name) {
   }
 }
 
+// --------------------------------------------------------- document comparison
+
+/** Opens the comparison panel and prompts for the other version to diff against. */
+function openCompare() {
+  if (!state.pdf) return;
+  $('compare-summary').innerHTML = '';
+  $('compare-list').innerHTML = '';
+  showPanel('panel-compare');
+  pickCompareFile();
+}
+
+function pickCompareFile() {
+  $('compare-input').onchange = async () => {
+    const file = $('compare-input').files[0];
+    $('compare-input').value = '';
+    if (!file) return;
+    try {
+      setStatus('Comparing…', true);
+      const other = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
+      const report = await host.call('compare', {
+        pdf: state.pdfB64, other, pdfPassword: state.password,
+      });
+      setStatus('');
+      renderCompare(report, file.name);
+    } catch (e) {
+      fail(e);
+    }
+  };
+  $('compare-input').click();
+}
+
+function renderCompare(report, otherName) {
+  const summary = $('compare-summary');
+  summary.innerHTML = '';
+  const line = document.createElement('div');
+  // otherName comes from the file the user picked — set as text, never HTML.
+  line.append(`vs ${otherName}: `);
+  if (report.identical) {
+    line.append('no text differences.');
+  } else {
+    const added = document.createElement('span');
+    added.className = 'stat added';
+    added.textContent = `+${report.addedWords} added`;
+    const removed = document.createElement('span');
+    removed.className = 'stat removed';
+    removed.textContent = `−${report.removedWords} removed`;
+    const pages = document.createElement('span');
+    pages.className = 'stat';
+    pages.textContent = `${report.changedPages} page${report.changedPages === 1 ? '' : 's'} changed`;
+    line.append(added, removed, pages);
+  }
+  summary.appendChild(line);
+
+  const list = $('compare-list');
+  list.innerHTML = '';
+  for (const pg of report.pages ?? []) {
+    const li = document.createElement('li');
+    li.className = 'organize-item compare-page';
+    const label = document.createElement('div');
+    label.className = 'organize-label';
+    const num = document.createElement('span');
+    num.className = 'compare-page-num';
+    num.textContent = `Page ${pg.page}`;
+    const words = document.createElement('div');
+    words.className = 'compare-words';
+    for (const w of pg.removed ?? []) {
+      const s = document.createElement('span');
+      s.className = 'w-del';
+      s.textContent = w; // document text — never HTML
+      words.appendChild(s);
+    }
+    for (const w of pg.added ?? []) {
+      const s = document.createElement('span');
+      s.className = 'w-add';
+      s.textContent = w;
+      words.appendChild(s);
+    }
+    label.append(num, words);
+    li.appendChild(label);
+    list.appendChild(li);
+  }
+}
+
 // ----------------------------------------------------- remove hidden information
 
 // The categories the sanitizer can strip, in display order: [optionKey, label].
@@ -2253,6 +2336,10 @@ function wire() {
   $('btn-sanitize').addEventListener('click', openSanitize);
   $('sanitize-apply').addEventListener('click', applySanitize);
   $('sanitize-cancel').addEventListener('click', () => hidePanels());
+
+  $('btn-compare').addEventListener('click', openCompare);
+  $('compare-pick').addEventListener('click', pickCompareFile);
+  $('compare-close').addEventListener('click', () => hidePanels());
 
   $('btn-links').hidden = !URL_SCANNING_ENABLED; // URL scanning disabled for now
   $('btn-links').addEventListener('click', openLinks);

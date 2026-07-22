@@ -26,6 +26,7 @@
       <div class="menu-panel" role="menu">
         <button id="btn-find" class="menu-item" role="menuitem">🔍 Find &amp; replace</button>
         <button id="btn-forms" class="menu-item" role="menuitem">🗒 Fill &amp; build forms</button>
+        <button id="btn-compare" class="menu-item" role="menuitem" title="Compare with another version">🔀 Compare versions…</button>
         <button id="btn-links" class="menu-item" role="menuitem">🔗 Review links</button>
       </div>
     </div>
@@ -159,6 +160,18 @@
         </div>
       </div>
 
+      <div id="panel-compare" class="panel-section" hidden>
+        <h2>Compare versions</h2>
+        <p class="muted">Differences between the document you pick (the earlier version) and the one
+          open now. Comparison is text-based.</p>
+        <div id="compare-summary" class="compare-summary"></div>
+        <ul id="compare-list" class="reorder-list"></ul>
+        <div class="actions">
+          <button id="compare-pick">Pick a file to compare…</button>
+          <button id="compare-close">Close</button>
+        </div>
+      </div>
+
       <div id="panel-sanitize" class="panel-section" hidden>
         <h2>Remove hidden information</h2>
         <p class="muted">Documents often carry data that never shows on the page — author names,
@@ -288,6 +301,7 @@
   <input id="merge-input" type="file" multiple hidden
     accept="application/pdf,.pdf,image/png,image/jpeg,image/*,.docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
   <input id="pfx-input" type="file" accept=".p12,.pfx" hidden />
+  <input id="compare-input" type="file" accept="application/pdf,.pdf" hidden />
 
   <script type="module" src="viewer.js"></script>
 </body>

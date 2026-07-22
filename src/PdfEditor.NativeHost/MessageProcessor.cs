@@ -62,6 +62,7 @@ public sealed class MessageProcessor
         "remove-script" => RemoveScriptAction(p),
         "inspect-hidden" => InspectHiddenAction(p),
         "sanitize" => SanitizeAction(p),
+        "compare" => CompareAction(p),
         "list-urls" => ListUrlsAction(p),
         "scan-urls" => ScanUrlsAction(p),
         "get-region-text" => GetRegionText(p),
@@ -254,6 +255,28 @@ public sealed class MessageProcessor
         var result = JavaScriptTool.RemoveScript(Pdf(p),
             p["name"]?.GetValue<string>() ?? "", Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object CompareAction(JsonObject p)
+    {
+        // 'other' is the previous/other version to diff against; the loaded document is the newer.
+        byte[] other = Convert.FromBase64String(p["other"]?.GetValue<string>()
+            ?? throw new InvalidDataException("Missing 'other' document."));
+        string? otherPassword = p["otherPassword"]?.GetValue<string>();
+        var report = DocComparer.Compare(other, Pdf(p), otherPassword, Password(p));
+        return new
+        {
+            pagesOld = report.PagesOld,
+            pagesNew = report.PagesNew,
+            changedPages = report.ChangedPages,
+            addedWords = report.AddedWords,
+            removedWords = report.RemovedWords,
+            identical = report.Identical,
+            pages = report.Pages.Where(pg => pg.Changed).Select(pg => new
+            {
+                page = pg.Page, added = pg.Added, removed = pg.Removed
+            })
+        };
     }
 
     private static object InspectHiddenAction(JsonObject p)

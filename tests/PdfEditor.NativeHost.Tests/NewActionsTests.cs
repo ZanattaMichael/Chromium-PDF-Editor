@@ -244,6 +244,34 @@ public class NewActionsTests
     }
 
     [Fact]
+    public void Compare_ReportsAddedAndRemovedWords()
+    {
+        string oldPdf = TestPdf.Base64(TestPdf.OnePage("amount due 500"));
+        string newPdf = TestPdf.Base64(TestPdf.OnePage("amount due 750"));
+
+        // 'other' is the previous version; the loaded 'pdf' is the newer one.
+        var r = Handle("compare", new { pdf = newPdf, other = oldPdf });
+        Assert.True(Ok(r));
+        Assert.False(Result(r)["identical"]!.GetValue<bool>());
+        Assert.Equal(1, Result(r)["changedPages"]!.GetValue<int>());
+
+        var pageDiff = Assert.Single(Result(r)["pages"]!.AsArray());
+        var added = pageDiff!["added"]!.AsArray().Select(n => n!.GetValue<string>()).ToList();
+        var removed = pageDiff["removed"]!.AsArray().Select(n => n!.GetValue<string>()).ToList();
+        Assert.Contains("750", added);
+        Assert.Contains("500", removed);
+    }
+
+    [Fact]
+    public void Compare_IdenticalDocuments_ReportsIdentical()
+    {
+        string pdf = TestPdf.Base64(TestPdf.OnePage("unchanged text"));
+        var r = Handle("compare", new { pdf, other = pdf });
+        Assert.True(Ok(r));
+        Assert.True(Result(r)["identical"]!.GetValue<bool>());
+    }
+
+    [Fact]
     public void ScanSafety_DetectsJavaScript_AndStripRemovesIt()
     {
         string pdf = TestPdf.Base64(TestPdf.WithJavaScript());

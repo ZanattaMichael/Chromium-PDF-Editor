@@ -92,6 +92,23 @@ public sealed record SanitizeOptions(
     bool Annotations = true, bool Bookmarks = true, bool HiddenLayers = true);
 
 /// <summary>
+/// The text difference on one page between two document versions. <paramref name="Added"/> are the
+/// words present in the newer version but not the older; <paramref name="Removed"/> the reverse.
+/// </summary>
+public sealed record PageDiff(int Page, IReadOnlyList<string> Added, IReadOnlyList<string> Removed)
+{
+    public bool Changed => Added.Count > 0 || Removed.Count > 0;
+}
+
+/// <summary>A summary of the text differences between two versions of a document.</summary>
+public sealed record ComparisonReport(
+    int PagesOld, int PagesNew, int ChangedPages, int AddedWords, int RemovedWords,
+    IReadOnlyList<PageDiff> Pages)
+{
+    public bool Identical => ChangedPages == 0 && PagesOld == PagesNew;
+}
+
+/// <summary>
 /// A safety assessment for one URL. <paramref name="Level"/> is the traffic-light rating
 /// (<c>green</c>/<c>yellow</c>/<c>red</c>/<c>unknown</c>), <paramref name="Category"/> a short
 /// reason (e.g. <c>known-site</c>, <c>code-hosting</c>, <c>file-hosting</c>, <c>malicious</c>),

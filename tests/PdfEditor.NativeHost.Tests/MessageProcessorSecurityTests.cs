@@ -227,6 +227,20 @@ public class MessageProcessorSecurityTests
     }
 
     [Fact]
+    public void Compare_MissingOtherDocument_ReturnsError_NotCrash()
+    {
+        Assert.False(Ok(HandleOne(Request("compare", new { pdf = Convert.ToBase64String(TestPdf.OnePage()) }))));
+    }
+
+    [Fact]
+    public void Compare_GarbageOtherDocument_ReturnsError_NotCrash()
+    {
+        string good = Convert.ToBase64String(TestPdf.OnePage());
+        string garbage = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes("not a pdf"));
+        Assert.False(Ok(HandleOne(Request("compare", new { pdf = good, other = garbage }))));
+    }
+
+    [Fact]
     public void AddScript_HostileScriptSource_IsStoredAsInertData_NeverEmittedRaw()
     {
         // The script body is attacker-controlled text. The host stores and returns it as a JSON

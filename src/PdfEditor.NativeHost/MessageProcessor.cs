@@ -60,6 +60,8 @@ public sealed class MessageProcessor
         "list-scripts" => ListScriptsAction(p),
         "add-script" => AddScriptAction(p),
         "remove-script" => RemoveScriptAction(p),
+        "inspect-hidden" => InspectHiddenAction(p),
+        "sanitize" => SanitizeAction(p),
         "list-urls" => ListUrlsAction(p),
         "scan-urls" => ScanUrlsAction(p),
         "get-region-text" => GetRegionText(p),
@@ -251,6 +253,35 @@ public sealed class MessageProcessor
     {
         var result = JavaScriptTool.RemoveScript(Pdf(p),
             p["name"]?.GetValue<string>() ?? "", Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object InspectHiddenAction(JsonObject p)
+    {
+        var r = Sanitizer.Inspect(Pdf(p), Password(p));
+        return new
+        {
+            metadataFields = r.MetadataFields,
+            attachments = r.Attachments,
+            scriptsAndActions = r.ScriptsAndActions,
+            annotations = r.Annotations,
+            bookmarks = r.Bookmarks,
+            hiddenLayers = r.HiddenLayers,
+            hasAny = r.HasAny
+        };
+    }
+
+    private static object SanitizeAction(JsonObject p)
+    {
+        bool Opt(string key) => p[key]?.GetValue<bool>() ?? true; // default: remove everything
+        var options = new SanitizeOptions(
+            Metadata: Opt("metadata"),
+            Attachments: Opt("attachments"),
+            ScriptsAndActions: Opt("scriptsAndActions"),
+            Annotations: Opt("annotations"),
+            Bookmarks: Opt("bookmarks"),
+            HiddenLayers: Opt("hiddenLayers"));
+        var result = Sanitizer.Sanitize(Pdf(p), options, Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 

@@ -75,6 +75,23 @@ public sealed record PdfLink(int Page, string Url);
 public sealed record PdfScript(string Name, string Script);
 
 /// <summary>
+/// A tally of "hidden information" a document carries that a user may want to strip before
+/// sharing. Each number is how many items of that category were found.
+/// </summary>
+public sealed record HiddenDataReport(
+    int MetadataFields, int Attachments, int ScriptsAndActions,
+    int Annotations, int Bookmarks, int HiddenLayers)
+{
+    public bool HasAny =>
+        MetadataFields + Attachments + ScriptsAndActions + Annotations + Bookmarks + HiddenLayers > 0;
+}
+
+/// <summary>Which categories of hidden information to remove. Everything defaults to on.</summary>
+public sealed record SanitizeOptions(
+    bool Metadata = true, bool Attachments = true, bool ScriptsAndActions = true,
+    bool Annotations = true, bool Bookmarks = true, bool HiddenLayers = true);
+
+/// <summary>
 /// A safety assessment for one URL. <paramref name="Level"/> is the traffic-light rating
 /// (<c>green</c>/<c>yellow</c>/<c>red</c>/<c>unknown</c>), <paramref name="Category"/> a short
 /// reason (e.g. <c>known-site</c>, <c>code-hosting</c>, <c>file-hosting</c>, <c>malicious</c>),

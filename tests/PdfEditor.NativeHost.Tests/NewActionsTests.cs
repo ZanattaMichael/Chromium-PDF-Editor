@@ -205,6 +205,45 @@ public class NewActionsTests
     }
 
     [Fact]
+    public void InspectHidden_ThenSanitize_RemovesTheHiddenData()
+    {
+        // A doc with a document-level script is the hidden data we can build with TestPdf here.
+        string withJs = Result(Handle("add-script", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage()), name = "s", script = "app.alert(1);",
+        }))["pdf"]!.GetValue<string>();
+
+        var inspect = Handle("inspect-hidden", new { pdf = withJs });
+        Assert.True(Ok(inspect));
+        Assert.True(Result(inspect)["hasAny"]!.GetValue<bool>());
+        Assert.True(Result(inspect)["scriptsAndActions"]!.GetValue<int>() > 0);
+
+        var sanitized = Handle("sanitize", new { pdf = withJs });
+        Assert.True(Ok(sanitized));
+
+        var after = Handle("inspect-hidden", new { pdf = Result(sanitized)["pdf"]!.GetValue<string>() });
+        Assert.Equal(0, Result(after)["scriptsAndActions"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void Sanitize_SelectiveOptions_KeepScriptsWhenNotAsked()
+    {
+        string withJs = Result(Handle("add-script", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage()), name = "s", script = "app.alert(1);",
+        }))["pdf"]!.GetValue<string>();
+
+        // Only strip metadata; scripts must survive.
+        var sanitized = Handle("sanitize", new
+        {
+            pdf = withJs, metadata = true, attachments = false, scriptsAndActions = false,
+            annotations = false, bookmarks = false, hiddenLayers = false,
+        });
+        var after = Handle("inspect-hidden", new { pdf = Result(sanitized)["pdf"]!.GetValue<string>() });
+        Assert.True(Result(after)["scriptsAndActions"]!.GetValue<int>() > 0);
+    }
+
+    [Fact]
     public void ScanSafety_DetectsJavaScript_AndStripRemovesIt()
     {
         string pdf = TestPdf.Base64(TestPdf.WithJavaScript());

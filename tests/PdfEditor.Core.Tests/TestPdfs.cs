@@ -318,6 +318,49 @@ public static class TestPdfs
         return output.ToArray();
     }
 
+    /// <summary>
+    /// A document loaded with several kinds of "hidden information": Info metadata, an embedded
+    /// file attachment, a document-level JavaScript, a comment (Text) annotation, a bookmark, and
+    /// an optional-content layer — for exercising the sanitiser.
+    /// </summary>
+    public static byte[] WithHiddenData()
+    {
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+            new PdfCanvas(page).BeginText().SetFontAndSize(font, 12)
+                .MoveText(72, 750).ShowText("Visible content").EndText();
+
+            // Metadata (author/title/custom key).
+            doc.GetDocumentInfo().SetAuthor("Jane Author").SetTitle("Internal Draft")
+                .SetMoreInfo("Department", "Legal");
+
+            // Embedded file attachment.
+            var attachment = iText.Kernel.Pdf.Filespec.PdfFileSpec.CreateEmbeddedFileSpec(
+                doc, System.Text.Encoding.UTF8.GetBytes("secret spreadsheet"),
+                "hidden data", "data.txt", null, null);
+            doc.AddFileAttachment("data.txt", attachment);
+
+            // Document-level JavaScript.
+            doc.GetCatalog().GetNameTree(PdfName.JavaScript)
+                .AddEntry("track", iText.Kernel.Pdf.Action.PdfAction.CreateJavaScript("app.alert(1);").GetPdfObject());
+
+            // A comment (sticky-note) annotation.
+            var note = new iText.Kernel.Pdf.Annot.PdfTextAnnotation(new Rectangle(200, 700, 20, 20));
+            note.SetContents("reviewer's private note");
+            page.AddAnnotation(note);
+
+            // A bookmark / outline entry.
+            doc.GetOutlines(true).AddOutline("Confidential section");
+
+            // An optional-content layer (OCG).
+            _ = new iText.Kernel.Pdf.Layer.PdfLayer("Watermark layer", doc);
+        }
+        return output.ToArray();
+    }
+
     /// <summary>A single-page document with a text form field.</summary>
     public static byte[] WithTextField(string fieldName, string initialValue = "")
     {

@@ -941,6 +941,43 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('remove hidden info: detects and strips a document script', async () => {
+    const file = fixture('sanitize.pdf', [[{ text: 'shareable', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    // Seed some hidden data: add a document-level script.
+    await ui(page, '#btn-js');
+    await page.fill('#js-name', 'tracker');
+    await page.fill('#js-source', "app.alert('phone home');");
+    await page.click('#js-add');
+    await expect(page.locator('#js-list .organize-label', { hasText: 'tracker' })).toHaveCount(1);
+
+    // Open the sanitiser: it should report the script and pre-check that category.
+    await ui(page, '#btn-sanitize');
+    await expect(page.locator('#panel-sanitize')).toBeVisible();
+    const scriptRow = page.locator('#sanitize-items [data-opt="scriptsAndActions"]');
+    await expect(scriptRow).toBeChecked();
+    await expect(page.locator('#sanitize-items')).toContainText('JavaScript & actions — 1 found');
+
+    await page.click('#sanitize-apply');
+    await expect(page.locator('#status')).toContainText('Hidden information removed');
+
+    // Re-opening the JavaScript panel shows the script is gone.
+    await ui(page, '#btn-js');
+    await expect(page.locator('#js-list .organize-item')).toHaveCount(0);
+    await page.close();
+  });
+
+  test('remove hidden info: reports a clean document', async () => {
+    const file = fixture('clean.pdf', [[{ text: 'nothing hidden', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-sanitize');
+    await expect(page.locator('#sanitize-clean')).toBeVisible();
+    await expect(page.locator('#sanitize-apply')).toBeDisabled();
+    await page.close();
+  });
+
   test('password protection encrypts the document', async () => {
     const file = fixture('protect.pdf', [[{ text: 'classified', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);

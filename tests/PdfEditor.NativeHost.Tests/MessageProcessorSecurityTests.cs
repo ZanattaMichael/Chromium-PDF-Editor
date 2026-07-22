@@ -209,6 +209,23 @@ public class MessageProcessorSecurityTests
         Assert.False(Ok(HandleOne(Request("list-scripts", new { pdf = garbage }))));
     }
 
+    [Theory]
+    [InlineData("inspect-hidden")]
+    [InlineData("sanitize")]
+    public void HiddenDataActions_OnGarbageBytes_ReturnError_NotCrash(string action)
+    {
+        string garbage = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes("not a pdf at all"));
+        Assert.False(Ok(HandleOne(Request(action, new { pdf = garbage }))));
+    }
+
+    [Theory]
+    [InlineData("inspect-hidden")]
+    [InlineData("sanitize")]
+    public void HiddenDataActions_EmptyPayload_ReturnError_NotCrash(string action)
+    {
+        Assert.False(Ok(HandleOne(Request(action, new { }))));
+    }
+
     [Fact]
     public void AddScript_HostileScriptSource_IsStoredAsInertData_NeverEmittedRaw()
     {

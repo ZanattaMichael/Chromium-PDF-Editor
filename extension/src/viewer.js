@@ -39,6 +39,7 @@ const state = {
   links: [],            // extracted { page, url }
   urlVerdicts: [],      // [{ page, url, level, category, source, detail }] once scanned
   scripts: [],          // document-level JavaScript { name, script } once listed
+  hidden: null,         // hidden-data report { metadataFields, attachments, ... } once inspected
 };
 
 // Freehand strokes captured for the draw tool, in CSS pixels per page: Map(pageNum -> [stroke]),
@@ -606,7 +607,7 @@ function updateChrome() {
   const loaded = !!state.pdf;
   for (const id of ['btn-save', 'btn-print', 'btn-sidebar', 'tool-text', 'tool-draw',
     'tool-highlight', 'tool-edit', 'tool-redact', 'tool-sign',
-    'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-organize', 'btn-js',
+    'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-organize', 'btn-js', 'btn-sanitize',
     'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
     'menu-read-trigger', 'menu-edit-trigger',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
@@ -1896,6 +1897,72 @@ async function removeScript(name) {
   }
 }
 
+// ----------------------------------------------------- remove hidden information
+
+// The categories the sanitizer can strip, in display order: [optionKey, label].
+const HIDDEN_CATEGORIES = [
+  ['metadataFields', 'metadata', 'Document metadata (author, software, dates)'],
+  ['attachments', 'attachments', 'Embedded file attachments'],
+  ['scriptsAndActions', 'scriptsAndActions', 'JavaScript & actions'],
+  ['annotations', 'annotations', 'Comments & markup annotations'],
+  ['bookmarks', 'bookmarks', 'Bookmarks / outline'],
+  ['hiddenLayers', 'hiddenLayers', 'Hidden layers'],
+];
+
+/** Opens the sanitiser: inspects the document and lists each category of hidden data found. */
+async function openSanitize() {
+  if (!state.pdf) return;
+  showPanel('panel-sanitize');
+  try {
+    setStatus('Scanning for hidden data…', true);
+    state.hidden = await host.call('inspect-hidden', { pdf: state.pdfB64, pdfPassword: state.password });
+    setStatus('');
+    renderSanitizeItems();
+  } catch (e) {
+    fail(e);
+  }
+}
+
+function renderSanitizeItems() {
+  const box = $('sanitize-items');
+  box.innerHTML = '';
+  const h = state.hidden ?? {};
+  $('sanitize-clean').hidden = !!h.hasAny;
+  $('sanitize-apply').disabled = !h.hasAny;
+  for (const [countKey, optKey, label] of HIDDEN_CATEGORIES) {
+    const count = h[countKey] ?? 0;
+    const row = document.createElement('label');
+    row.className = 'form-field';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.dataset.opt = optKey;
+    cb.checked = count > 0;
+    cb.disabled = count === 0; // nothing of this kind to remove
+    const text = document.createElement('span');
+    text.textContent = count > 0 ? `${label} — ${count} found` : `${label} — none`;
+    row.append(cb, text);
+    box.appendChild(row);
+  }
+}
+
+async function applySanitize() {
+  const options = {};
+  for (const cb of $('sanitize-items').querySelectorAll('[data-opt]')) {
+    options[cb.dataset.opt] = cb.checked && !cb.disabled;
+  }
+  if (!Object.values(options).some(Boolean)) { toast('Nothing selected to remove.'); return; }
+  try {
+    setStatus('Removing hidden information…', true);
+    const result = await host.call('sanitize', {
+      pdf: state.pdfB64, ...options, pdfPassword: state.password,
+    });
+    hidePanels();
+    await applyResult(result.pdf, 'Hidden information removed.');
+  } catch (e) {
+    fail(e);
+  }
+}
+
 /** Lets Tab indent inside a code editor instead of moving focus out of it. */
 function enableCodeEditorTab(textarea) {
   textarea.addEventListener('keydown', (e) => {
@@ -2182,6 +2249,10 @@ function wire() {
   });
   $('js-close').addEventListener('click', () => hidePanels());
   enableCodeEditorTab($('js-source'));
+
+  $('btn-sanitize').addEventListener('click', openSanitize);
+  $('sanitize-apply').addEventListener('click', applySanitize);
+  $('sanitize-cancel').addEventListener('click', () => hidePanels());
 
   $('btn-links').hidden = !URL_SCANNING_ENABLED; // URL scanning disabled for now
   $('btn-links').addEventListener('click', openLinks);

@@ -51,6 +51,7 @@
         <div class="menu-sep" aria-hidden="true"></div>
         <div class="menu-label">Advanced</div>
         <button id="btn-js" class="menu-item" role="menuitem" title="Add interactive JavaScript to the document">⚙ JavaScript…</button>
+        <button id="btn-sanitize" class="menu-item" role="menuitem" title="Remove hidden data before sharing">🧹 Remove hidden info…</button>
         <div class="menu-sep" aria-hidden="true"></div>
         <div class="menu-label">Secure</div>
         <button id="btn-protect" class="menu-item" role="menuitem" title="Password-protect (AES-256)">🔒 Protect</button>
@@ -155,6 +156,19 @@
         </label>
         <div class="actions">
           <button id="field-place">Place on page…</button>
+        </div>
+      </div>
+
+      <div id="panel-sanitize" class="panel-section" hidden>
+        <h2>Remove hidden information</h2>
+        <p class="muted">Documents often carry data that never shows on the page — author names,
+          software and timestamps, embedded files, scripts, comments, bookmarks and layers. Choose
+          what to strip before sharing.</p>
+        <div id="sanitize-items"></div>
+        <p class="muted" id="sanitize-clean" hidden>✓ No hidden information was found in this document.</p>
+        <div class="actions">
+          <button id="sanitize-apply" class="danger">Remove selected</button>
+          <button id="sanitize-cancel">Close</button>
         </div>
       </div>
 

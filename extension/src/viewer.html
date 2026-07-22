@@ -33,6 +33,7 @@
       <button id="tool-select" class="tool active" title="Pan / select">🖐</button>
       <button id="tool-text" class="tool" title="Add text: click anywhere to type" disabled>🅣 Text</button>
       <button id="tool-draw" class="tool" title="Draw: freehand anywhere on the page" disabled>✒ Draw</button>
+      <button id="tool-highlight" class="tool" title="Highlight: drag across text to highlight it" disabled>🖍 Highlight</button>
       <button id="tool-edit" class="tool" title="Edit text: drag a box around the text to change" disabled>✏ Edit</button>
       <button id="tool-redact" class="tool" title="Redact: drag boxes over content to black out" disabled>⬛ Redact</button>
       <button id="tool-sign" class="tool" title="Place a signature: drag where it should go" disabled>🖋 Sign</button>
@@ -144,6 +145,17 @@
         <label>Name <input id="field-name" type="text" placeholder="e.g. fullName" /></label>
         <div class="actions">
           <button id="field-place">Place on page…</button>
+        </div>
+      </div>
+
+      <div id="panel-highlight" class="panel-section" hidden>
+        <h2>Highlight</h2>
+        <p class="muted">Drag across text to highlight it. The text stays readable underneath.</p>
+        <div id="edit-style">
+          <label class="color-field" title="Highlight colour">Colour <input id="highlight-color" type="color" value="#ffeb3b" /></label>
+        </div>
+        <div class="actions">
+          <button id="highlight-done">Done</button>
         </div>
       </div>
 

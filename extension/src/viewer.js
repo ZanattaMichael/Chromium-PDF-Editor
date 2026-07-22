@@ -32,6 +32,7 @@ const state = {
   signatures: [],
   drawColor: '#e53935',
   drawWidth: 2.5,
+  highlightColor: '#ffeb3b',
   safety: null,         // { hasActiveContent, javaScriptCount, urlCount, samples }
   keepActiveContent: false, // false = strip JavaScript on save until the user opts in
   keepLinks: false,     // false = strip link URLs on save until the user enables them
@@ -583,8 +584,9 @@ function updateNav() {
 
 function updateChrome() {
   const loaded = !!state.pdf;
-  for (const id of ['btn-save', 'btn-print', 'btn-sidebar', 'tool-text', 'tool-draw', 'tool-edit',
-    'tool-redact', 'tool-sign', 'btn-rotate-left', 'btn-rotate-right', 'btn-forms',
+  for (const id of ['btn-save', 'btn-print', 'btn-sidebar', 'tool-text', 'tool-draw',
+    'tool-highlight', 'tool-edit', 'tool-redact', 'tool-sign',
+    'btn-rotate-left', 'btn-rotate-right', 'btn-forms',
     'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
     $(id).disabled = !loaded;
@@ -758,7 +760,9 @@ pagesEl.addEventListener('pointermove', (e) => {
   const y1 = e.clientY - rect.top;
   if (!drag.div) {
     drag.div = document.createElement('div');
-    drag.div.className = `region ${state.tool === 'redact' ? '' : state.tool === 'sign' ? 'sign' : 'edit'}`;
+    drag.div.className = `region ${
+      state.tool === 'redact' ? '' : state.tool === 'sign' ? 'sign'
+        : state.tool === 'highlight' ? 'highlight' : 'edit'}`;
     drag.pe.overlay.appendChild(drag.div);
   }
   const left = Math.min(drag.x0, x1);
@@ -792,6 +796,15 @@ pagesEl.addEventListener('pointerup', async (e) => {
     const at = cssToPdf(pageNum, pe.img, x0, y0);
     const h = 26;
     beginAddText({ page: pageNum, x: at.x, y: at.y - h, width: 240, height: h });
+    return;
+  }
+  // A highlight swipe is naturally thin (dragging along a line of text), so it only needs enough
+  // horizontal travel — the tiny check below (which wants a 2-D box) would otherwise reject it.
+  if (state.tool === 'highlight') {
+    if (Math.abs(x1 - x0) < 6) return;
+    const a = cssToPdf(pageNum, pe.img, Math.min(x0, x1), Math.max(y0, y1));
+    const b = cssToPdf(pageNum, pe.img, Math.max(x0, x1), Math.min(y0, y1));
+    applyHighlight({ page: pageNum, x: a.x, y: a.y, width: b.x - a.x, height: Math.max(b.y - a.y, 1) });
     return;
   }
   if (tiny) return;
@@ -860,6 +873,7 @@ function setTool(tool) {
   pagesEl.classList.toggle('select-mode', tool === 'select');
   if (tool === 'redact') showPanel('panel-redact');
   else if (tool === 'draw') showPanel('panel-draw');
+  else if (tool === 'highlight') showPanel('panel-highlight');
   else hidePanels(); // select/text/edit/sign: panel appears once a box is drawn
 }
 
@@ -1068,6 +1082,34 @@ async function applyTextEdit() {
     hidePanels();
     if (adding) setTool('text');
     await applyResult(result.pdf, adding ? 'Text added.' : 'Text replaced.');
+  } catch (e) {
+    fail(e);
+  }
+}
+
+// ------------------------------------------------------------- highlighter
+
+function rectsIntersect(a, b) {
+  return a.x < b.x + b.width && b.x < a.x + a.width &&
+         a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+/** Highlights the text runs a dragged box covers (or the box itself if the page has no text). */
+async function applyHighlight(region) {
+  const spans = spanCache.get(`${state.version}|${region.page}`) ?? [];
+  const covered = spans.filter((s) => rectsIntersect(s, region))
+    .map((s) => ({ x: s.x, y: s.y, width: s.width, height: s.height }));
+  const rects = covered.length > 0
+    ? covered
+    : [{ x: region.x, y: region.y, width: region.width, height: region.height }];
+  try {
+    setStatus('Highlighting…', true);
+    const result = await host.call('add-highlight', {
+      pdf: state.pdfB64, page: region.page, rects,
+      color: state.highlightColor, pdfPassword: state.password,
+    });
+    await applyResult(result.pdf, `Highlighted ${rects.length} ${rects.length === 1 ? 'run' : 'runs'}.`);
+    setTool('highlight'); // stay in highlight mode for repeated marking
   } catch (e) {
     fail(e);
   }
@@ -1784,9 +1826,13 @@ function wire() {
   $('tool-select').addEventListener('click', () => setTool('select'));
   $('tool-text').addEventListener('click', () => setTool('text'));
   $('tool-draw').addEventListener('click', () => setTool('draw'));
+  $('tool-highlight').addEventListener('click', () => setTool('highlight'));
   $('tool-edit').addEventListener('click', () => setTool('edit'));
   $('tool-redact').addEventListener('click', () => setTool('redact'));
   $('tool-sign').addEventListener('click', () => setTool('sign'));
+
+  $('highlight-color').addEventListener('input', () => { state.highlightColor = $('highlight-color').value; });
+  $('highlight-done').addEventListener('click', () => setTool('select'));
 
   $('draw-color').addEventListener('input', () => { state.drawColor = $('draw-color').value; redrawInk(); });
   $('draw-width').addEventListener('input', () => {

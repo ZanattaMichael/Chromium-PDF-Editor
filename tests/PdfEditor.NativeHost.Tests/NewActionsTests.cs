@@ -57,6 +57,20 @@ public class NewActionsTests
     }
 
     [Fact]
+    public void AddHighlight_ReturnsPdf()
+    {
+        var r = Handle("add-highlight", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage()),
+            page = 1,
+            rects = new[] { new { x = 60, y = 690, width = 200, height = 18 } },
+            color = "#ffeb3b",
+        });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+    }
+
+    [Fact]
     public void FormFields_ListsField_ThenFillPersistsIt()
     {
         string pdf = TestPdf.Base64(TestPdf.WithField("who", "before"));

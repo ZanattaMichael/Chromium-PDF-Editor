@@ -640,6 +640,49 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('highlight: dragging across text marks it, keeping the text readable', async () => {
+    const file = fixture('highlight.pdf', [[{ text: 'HIGHLIGHT THIS LINE', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    // Let the text layer (span cache) build so the highlight snaps to the text run.
+    await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
+
+    await page.click('#tool-highlight');
+    // Swipe horizontally across the text line.
+    const box = await page.locator(pageImageSel(1)).boundingBox();
+    const scale = box.width / 595;
+    const cy = box.y + (842 - 707) * scale;
+    await page.mouse.move(box.x + 60 * scale, cy);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 300 * scale, cy, { steps: 8 });
+    await page.mouse.up();
+    await expect(page.locator('#status')).toContainText('Highlighted');
+
+    // Scan the highlighted line band for a yellow pixel (paper under the highlight) and a dark
+    // one (the text is still legible through the multiply blend).
+    const scan = await page.evaluate(async () => {
+      const img = document.querySelector('.page[data-page="1"] .page-image');
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const scale = img.naturalWidth / 595;
+      let yellow = false, dark = false;
+      // The line sits around PDF y≈697..711 (text drawn at baseline 700).
+      for (let py = 697; py <= 711; py++) {
+        for (let px = 74; px <= 235; px++) {
+          const d = ctx.getImageData(Math.round(px * scale), Math.round((842 - py) * scale), 1, 1).data;
+          if (d[0] > 200 && d[1] > 180 && d[2] < 140) yellow = true;
+          if (d[0] < 120 && d[1] < 120 && d[2] < 120) dark = true;
+        }
+      }
+      return { yellow, dark };
+    });
+    expect(scan.yellow).toBe(true);
+    expect(scan.dark).toBe(true);
+    await page.close();
+  });
+
   test('text edit: reads existing text, replaces it in place', async () => {
     const file = fixture('edit.pdf', [[{ text: 'Amount Due: $500', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);

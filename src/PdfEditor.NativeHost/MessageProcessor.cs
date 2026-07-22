@@ -49,6 +49,7 @@ public sealed class MessageProcessor
         "rotate" => RotateAction(p),
         "add-text" => AddTextAction(p),
         "add-drawing" => AddDrawingAction(p),
+        "add-highlight" => AddHighlightAction(p),
         "form-fields" => FormFieldsAction(p),
         "fill-form" => FillFormAction(p),
         "add-form-field" => AddFormFieldAction(p),
@@ -133,6 +134,20 @@ public sealed class MessageProcessor
             .ToList();
         var result = InkTools.AddInk(Pdf(p), page, strokes,
             p["color"]?.GetValue<string>(), p["width"]?.GetValue<float>() ?? 2f, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object AddHighlightAction(JsonObject p)
+    {
+        int page = p["page"]!.GetValue<int>();
+        var rects = p["rects"]!.AsArray().Select(n =>
+        {
+            var o = n!.AsObject();
+            return new RectRegion(page, o["x"]!.GetValue<float>(), o["y"]!.GetValue<float>(),
+                o["width"]!.GetValue<float>(), o["height"]!.GetValue<float>());
+        }).ToList();
+        var result = HighlightTool.AddHighlight(Pdf(p), page, rects,
+            p["color"]?.GetValue<string>(), Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 

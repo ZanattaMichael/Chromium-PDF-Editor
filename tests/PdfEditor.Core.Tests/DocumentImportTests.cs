@@ -46,16 +46,28 @@ public class DocumentImportTests
     }
 
     [Fact]
-    public void ImageToPdf_ProducesAOnePagePdf_SizedToTheImage()
+    public void ImageToPdf_ProducesAStandardA4Page_InTheImageOrientation()
     {
-        byte[] png = Png(200, 120);
+        byte[] png = Png(200, 120); // wider than tall -> landscape A4
 
         byte[] pdf = DocumentImport.ImageToPdf(png);
 
         var info = PdfInspector.GetInfo(pdf);
         Assert.Equal(1, info.PageCount);
-        Assert.Equal(200, info.Pages[0].Width, 1.0);
-        Assert.Equal(120, info.Pages[0].Height, 1.0);
+        // Landscape A4 is 842 x 595 pt — a normal document page, not 200 x 120.
+        Assert.Equal(842, info.Pages[0].Width, 1.0);
+        Assert.Equal(595, info.Pages[0].Height, 1.0);
+    }
+
+    [Fact]
+    public void ImageToPdf_TallImage_ProducesPortraitA4()
+    {
+        byte[] png = Png(400, 900); // taller than wide -> portrait A4
+
+        var info = PdfInspector.GetInfo(DocumentImport.ImageToPdf(png));
+
+        Assert.Equal(595, info.Pages[0].Width, 1.0);
+        Assert.Equal(842, info.Pages[0].Height, 1.0);
     }
 
     [Fact]

@@ -24,18 +24,32 @@ public static class DocumentImport
         _ => data, // already a PDF
     };
 
-    /// <summary>Wraps a raster image (PNG/JPEG/…) in a one-page PDF sized to the image.</summary>
+    /// <summary>
+    /// Wraps a raster image (PNG/JPEG/…) in a one-page PDF. The page is a standard A4 sheet, in the
+    /// image's orientation, with the image scaled to fit inside a small margin (aspect preserved,
+    /// centred) — so a merged photo is a normal document page, not a page as large as the image's
+    /// pixel count.
+    /// </summary>
     public static byte[] ImageToPdf(byte[] image)
     {
         var data = ImageDataFactory.Create(image);
-        float w = data.GetWidth(), h = data.GetHeight();
-        if (w <= 0 || h <= 0) throw new ArgumentException("The image has no usable dimensions.", nameof(image));
+        float iw = data.GetWidth(), ih = data.GetHeight();
+        if (iw <= 0 || ih <= 0) throw new ArgumentException("The image has no usable dimensions.", nameof(image));
+
+        const float a4Short = 595f, a4Long = 842f, margin = 18f; // ~0.25 inch margin
+        bool landscape = iw > ih;
+        float pw = landscape ? a4Long : a4Short;
+        float ph = landscape ? a4Short : a4Long;
+
+        float scale = Math.Min((pw - 2 * margin) / iw, (ph - 2 * margin) / ih);
+        float w = iw * scale, h = ih * scale;
+        float x = (pw - w) / 2f, y = (ph - h) / 2f;
 
         using var output = new MemoryStream();
         using (var pdf = new PdfDocument(new PdfWriter(output)))
         {
-            var page = pdf.AddNewPage(new PageSize(w, h));
-            new PdfCanvas(page).AddImageFittedIntoRectangle(data, new Rectangle(0, 0, w, h), false);
+            var page = pdf.AddNewPage(new PageSize(pw, ph));
+            new PdfCanvas(page).AddImageFittedIntoRectangle(data, new Rectangle(x, y, w, h), false);
         }
         return output.ToArray();
     }

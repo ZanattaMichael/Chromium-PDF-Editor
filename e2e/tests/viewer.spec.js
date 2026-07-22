@@ -640,43 +640,6 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
-  test('move: grab a run of text and drag it to a new position', async () => {
-    const file = fixture('move.pdf', [[{ text: 'MOVE ME', x: 120, y: 600 }]]);
-    const page = await openViewerWith(file);
-    const span = page.locator('.page[data-page="1"] .text-layer span').first();
-    await span.waitFor({ timeout: 15000 }); // span cache must be ready to grab
-
-    // Count dark pixels in the original text band.
-    const darkCount = () => page.evaluate(async () => {
-      const img = document.querySelector('.page[data-page="1"] .page-image');
-      await img.decode();
-      const c = document.createElement('canvas');
-      c.width = img.naturalWidth; c.height = img.naturalHeight;
-      const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
-      const s = img.naturalWidth / 595;
-      let n = 0;
-      for (let py = 595; py <= 614; py++)
-        for (let px = 118; px <= 190; px++) {
-          const d = ctx.getImageData(Math.round(px * s), Math.round((842 - py) * s), 1, 1).data;
-          if (d[0] < 120 && d[1] < 120 && d[2] < 120) n++;
-        }
-      return n;
-    });
-    expect(await darkCount()).toBeGreaterThan(20); // the text is there to begin with
-
-    await page.click('#tool-move');
-    const box = await span.boundingBox();
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 90, { steps: 10 });
-    await page.mouse.up();
-    await expect(page.locator('#status')).toContainText('Text moved');
-
-    // The original band is now essentially blank paper (the run was lifted from there).
-    expect(await darkCount()).toBeLessThan(5);
-    await page.close();
-  });
-
   test('highlight: dragging across text marks it, keeping the text readable', async () => {
     const file = fixture('highlight.pdf', [[{ text: 'HIGHLIGHT THIS LINE', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);

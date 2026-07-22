@@ -63,6 +63,9 @@ public sealed class MessageProcessor
         "inspect-hidden" => InspectHiddenAction(p),
         "sanitize" => SanitizeAction(p),
         "compare" => CompareAction(p),
+        "ocr-available" => new { available = OcrTool.CanOcr },
+        "ocr-text" => OcrTextAction(p),
+        "ocr-searchable" => OcrSearchableAction(p),
         "list-urls" => ListUrlsAction(p),
         "scan-urls" => ScanUrlsAction(p),
         "get-region-text" => GetRegionText(p),
@@ -255,6 +258,18 @@ public sealed class MessageProcessor
         var result = JavaScriptTool.RemoveScript(Pdf(p),
             p["name"]?.GetValue<string>() ?? "", Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object OcrTextAction(JsonObject p)
+    {
+        string text = OcrTool.ExtractText(Pdf(p), p["page"]?.GetValue<int>() ?? 1, Password(p));
+        return new { text };
+    }
+
+    private static object OcrSearchableAction(JsonObject p)
+    {
+        byte[] result = OcrTool.MakeSearchable(Pdf(p), Password(p));
+        return new { pdf = Convert.ToBase64String(result) };
     }
 
     private static object CompareAction(JsonObject p)

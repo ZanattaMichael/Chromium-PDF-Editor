@@ -272,6 +272,25 @@ public class NewActionsTests
     }
 
     [Fact]
+    public void OcrAvailable_ReturnsABooleanFlag()
+    {
+        var r = Handle("ocr-available", new { });
+        Assert.True(Ok(r));
+        Assert.IsType<bool>(Result(r)["available"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void OcrSearchable_ReturnsPdfOrCleanError_NeverCrashes()
+    {
+        var r = Handle("ocr-searchable", new { pdf = TestPdf.Base64(TestPdf.OnePage("scan")) });
+        // Where Tesseract is installed the page is OCR'd; where it isn't, a clear error comes back.
+        if (Ok(r))
+            Assert.NotNull(Result(r)["pdf"]);
+        else
+            Assert.Contains("Tesseract", r["result"]!["error"]!.GetValue<string>());
+    }
+
+    [Fact]
     public void ScanSafety_DetectsJavaScript_AndStripRemovesIt()
     {
         string pdf = TestPdf.Base64(TestPdf.WithJavaScript());

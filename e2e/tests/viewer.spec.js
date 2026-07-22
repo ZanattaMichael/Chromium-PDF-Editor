@@ -941,6 +941,17 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('ocr: make searchable runs, or reports Tesseract is required', async () => {
+    const file = fixture('ocr.pdf', [[{ text: 'Scanned document', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-ocr');
+    // Deterministic across environments: OCR either succeeds ("searchable") or, when Tesseract is
+    // not installed, surfaces an actionable message naming it — never a silent failure.
+    await expect(page.locator('#status')).toContainText(/searchable|Tesseract/i, { timeout: 60000 });
+    await page.close();
+  });
+
   test('compare versions: summarises added and removed words', async () => {
     const current = fixture('compare-new.pdf', [[{ text: 'Amount Due 750 dollars', x: 72, y: 700 }]]);
     const older = fixture('compare-old.pdf', [[{ text: 'Amount Due 500 dollars', x: 72, y: 700 }]]);

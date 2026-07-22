@@ -607,7 +607,7 @@ function updateChrome() {
   const loaded = !!state.pdf;
   for (const id of ['btn-save', 'btn-print', 'btn-sidebar', 'tool-text', 'tool-draw',
     'tool-highlight', 'tool-edit', 'tool-redact', 'tool-sign',
-    'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-organize', 'btn-js', 'btn-sanitize',
+    'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-organize', 'btn-js', 'btn-sanitize', 'btn-ocr',
     'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
     'menu-read-trigger', 'menu-edit-trigger', 'btn-compare',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
@@ -1897,6 +1897,23 @@ async function removeScript(name) {
   }
 }
 
+// ------------------------------------------------------------------------ OCR
+
+/** Runs OCR over the document, replacing it with a searchable copy (image + invisible text). */
+async function runOcr() {
+  if (!state.pdf) return;
+  try {
+    setStatus('Recognising text (OCR)… this can take a moment.', true);
+    const result = await host.call('ocr-searchable', {
+      pdf: state.pdfB64, pdfPassword: state.password,
+    });
+    await applyResult(result.pdf, 'Document made searchable (OCR).');
+  } catch (e) {
+    // Most likely Tesseract isn't installed; fail() surfaces the actionable message.
+    fail(e);
+  }
+}
+
 // --------------------------------------------------------- document comparison
 
 /** Opens the comparison panel and prompts for the other version to diff against. */
@@ -2340,6 +2357,8 @@ function wire() {
   $('btn-compare').addEventListener('click', openCompare);
   $('compare-pick').addEventListener('click', pickCompareFile);
   $('compare-close').addEventListener('click', () => hidePanels());
+
+  $('btn-ocr').addEventListener('click', runOcr);
 
   $('btn-links').hidden = !URL_SCANNING_ENABLED; // URL scanning disabled for now
   $('btn-links').addEventListener('click', openLinks);

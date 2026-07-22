@@ -32,6 +32,17 @@ function fixture(name, pages, opts) {
 // In the continuous-scroll layout each page is `.page[data-page="N"]` with its own image.
 const pageImageSel = (n = 1) => `.page[data-page="${n}"] .page-image`;
 
+/** Clicks a toolbar control, first opening its Reading/Editing dropdown when it lives in one. */
+async function ui(page, sel) {
+  const triggerId = await page.evaluate((s) => {
+    const el = document.querySelector(s);
+    const menu = el && el.closest('.menu-group');
+    return menu ? menu.querySelector('.menu-trigger').id : null;
+  }, sel);
+  if (triggerId) await page.click('#' + triggerId);
+  await page.click(sel);
+}
+
 /** Opens a fresh viewer page and loads the given fixture through the Open button. */
 async function openViewerWith(file) {
   const page = await ext.context.newPage();
@@ -114,7 +125,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     ]]);
     const page = await openViewerWith(file);
 
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     await dragPdfRect(page, { x: 60, y: 690, width: 260, height: 34 });
     await expect(page.locator('#redact-list li')).toHaveCount(1);
 
@@ -147,7 +158,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(file);
 
     // The Redact panel is shown by the redact tool; the search box lives inside it.
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     await page.fill('#redact-search-text', 'CONFIDENTIAL');
     await page.click('#redact-search-btn');
 
@@ -201,7 +212,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     expect(before.n).toBeGreaterThan(50);
 
     // Search + mark + apply through the real UI / native host.
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     await page.fill('#redact-search-text', 'SECRET');
     await page.click('#redact-search-btn');
     await expect(page.locator('#redact-list li')).toHaveCount(1);
@@ -229,7 +240,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('search-none.pdf', [[{ text: 'nothing to hide here', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     await page.fill('#redact-search-text', 'MISSING');
     await page.click('#redact-search-btn');
 
@@ -319,7 +330,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const portrait = await page.locator('.page[data-page="1"]').boundingBox();
     expect(portrait.height).toBeGreaterThan(portrait.width); // A4 starts portrait
 
-    await page.click('#btn-rotate-right');
+    await ui(page, '#btn-rotate-right');
     await expect(page.locator('#status')).toContainText('Rotated page 1');
 
     // After a 90° turn the laid-out page is landscape (width/height swapped).
@@ -334,7 +345,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('addtext.pdf', [[{ text: 'background', x: 72, y: 100 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#tool-text');
+    await ui(page, '#tool-text');
     // Click (no drag) on the page to drop a default text box near the top.
     const box = await page.locator(pageImageSel(1)).boundingBox();
     const scale = box.width / 595;
@@ -347,7 +358,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#status')).toContainText('Text added');
 
     // The new text is really in the document (and the original still there).
-    await page.click('#tool-edit');
+    await ui(page, '#tool-edit');
     await dragPdfRect(page, { x: 60, y: 675, width: 320, height: 45 });
     await expect(page.locator('#edit-text')).toHaveValue(/STAMPED CAPTION/);
     await page.close();
@@ -357,7 +368,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('draw.pdf', [[{ text: 'canvas', x: 72, y: 100 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#tool-draw');
+    await ui(page, '#tool-draw');
     await expect(page.locator('#panel-draw')).toBeVisible();
     // Use a pure-green pen so we can detect it unambiguously.
     await page.fill('#draw-color', '#00ff00');
@@ -398,7 +409,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     fs.writeFileSync(file, buildFormPdf('fullName', ''));
     const page = await openViewerWith(file);
 
-    await page.click('#btn-forms');
+    await ui(page, '#btn-forms');
     await expect(page.locator('#panel-forms')).toBeVisible();
     const field = page.locator('#forms-list [data-field="fullName"]');
     await expect(field).toHaveCount(1);
@@ -408,7 +419,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#status')).toContainText('Form filled');
 
     // Re-opening the forms panel shows the value persisted into the document.
-    await page.click('#btn-forms');
+    await ui(page, '#btn-forms');
     await expect(page.locator('#forms-list [data-field="fullName"]')).toHaveValue('Alan Turing');
     await page.close();
   });
@@ -417,7 +428,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('insertfield.pdf', [[{ text: 'blank form', x: 72, y: 100 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#btn-forms');
+    await ui(page, '#btn-forms');
     await expect(page.locator('#panel-forms')).toBeVisible();
     await page.selectOption('#field-type', 'text');
     await page.fill('#field-name', 'signature_name');
@@ -471,7 +482,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#btn-redo')).toBeDisabled();
 
     // Make a change (find & replace), then undo and redo it.
-    await page.click('#btn-find');
+    await ui(page, '#btn-find');
     await fillDialog(page, ['Keep me', 'Changed'], 'Replace all');
     await expect(page.locator('#status')).toContainText('Replaced 1 occurrence');
     await expect(page.locator('#btn-undo')).toBeEnabled();
@@ -494,7 +505,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     ]);
     const page = await openViewerWith(file);
 
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     // Top-align page 2 *instantly* (no smooth-scroll animation, so boundingBox() below is
     // settled and the drag can't land on stale coordinates), then let it render.
     await page.evaluate(() =>
@@ -543,7 +554,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
       [[{ text: 'OFFSET SECRET', x: 150, y: 900 }]], { mediaBox: box });
     const page = await openViewerWith(file);
 
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     await dragPdfRect(page, { x: 140, y: 892, width: 240, height: 30 }, box);
     await expect(page.locator('#redact-list li')).toHaveCount(1);
 
@@ -570,7 +581,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
       { mediaBox: [0, 0, 595, 842], cropBox: [0, 0, 595, 1002] });
     const page = await openViewerWith(file);
 
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     await dragPdfRect(page, { x: 60, y: 492, width: 220, height: 30 });
     await expect(page.locator('#redact-list li')).toHaveCount(1);
     await page.click('#redact-apply');
@@ -590,7 +601,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('rotated.pdf', [[{ text: 'rotated secret', x: 120, y: 400 }]], { rotate: 90 });
     const page = await openViewerWith(file);
 
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     const box = await page.locator(pageImageSel(1)).boundingBox();
     // Landscape image (rotated): draw a rectangle across the middle in display coordinates.
     await page.mouse.move(box.x + box.width * 0.30, box.y + box.height * 0.40);
@@ -646,7 +657,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // Let the text layer (span cache) build so the highlight snaps to the text run.
     await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
 
-    await page.click('#tool-highlight');
+    await ui(page, '#tool-highlight');
     // Swipe horizontally across the text line.
     const box = await page.locator(pageImageSel(1)).boundingBox();
     const scale = box.width / 595;
@@ -687,7 +698,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('edit.pdf', [[{ text: 'Amount Due: $500', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#tool-edit');
+    await ui(page, '#tool-edit');
     await dragPdfRect(page, { x: 60, y: 690, width: 250, height: 34 });
     await expect(page.locator('#panel-edit')).toBeVisible();
     await expect(page.locator('#edit-text')).toHaveValue('Amount Due: $500');
@@ -697,7 +708,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#status')).toContainText('Text replaced');
 
     // Re-selecting the same region proves the old text is gone from the file.
-    await page.click('#tool-edit');
+    await ui(page, '#tool-edit');
     await dragPdfRect(page, { x: 60, y: 685, width: 300, height: 40 });
     await expect(page.locator('#edit-text')).toHaveValue(/\$750 \(revised\)/);
     await expect(page.locator('#edit-text')).not.toHaveValue(/\$500/);
@@ -708,7 +719,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('font-edit.pdf', [[{ text: 'Plain Heading', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#tool-edit');
+    await ui(page, '#tool-edit');
     await dragPdfRect(page, { x: 60, y: 690, width: 260, height: 34 });
     await expect(page.locator('#panel-edit')).toBeVisible();
     await expect(page.locator('#edit-text')).toHaveValue('Plain Heading');
@@ -726,7 +737,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#status')).toContainText('Text replaced');
 
     // Re-selecting the region shows the new text, and the detected font/style round-trips.
-    await page.click('#tool-edit');
+    await ui(page, '#tool-edit');
     await dragPdfRect(page, { x: 55, y: 685, width: 300, height: 45 });
     await expect(page.locator('#edit-text')).toHaveValue(/Styled Heading/);
     await expect(page.locator('#edit-font')).toHaveValue('times');
@@ -741,7 +752,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     ]]);
     const page = await openViewerWith(file);
 
-    await page.click('#btn-find');
+    await ui(page, '#btn-find');
     await fillDialog(page, ['OldCorp', 'NewCorp'], 'Replace all');
     await expect(page.locator('#status')).toContainText('Replaced 2 occurrences');
     await page.close();
@@ -776,8 +787,10 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(base);
 
     const chooser = page.waitForEvent('filechooser');
-    await page.click('#btn-merge');
+    await ui(page, '#btn-merge');
     await (await chooser).setFiles(imgFile);
+    // The merge dialog lets you arrange the files; confirm to combine them.
+    await page.locator('dialog#modal').getByRole('button', { name: 'Merge' }).click();
     await expect(page.locator('#status')).toContainText('Merged 1 file');
     await expect(page.locator('#page-total')).toHaveText('2'); // image became a second page
     await page.close();
@@ -792,11 +805,80 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(one);
 
     const chooser = page.waitForEvent('filechooser');
-    await page.click('#btn-merge');
+    await ui(page, '#btn-merge');
     await (await chooser).setFiles(two);
+    await page.locator('dialog#modal').getByRole('button', { name: 'Merge' }).click();
     await expect(page.locator('#status')).toContainText('Merged 1 file');
     await expect(page.locator('#page-input')).toHaveValue('1');
     await expect(page.locator('#page-total')).toHaveText('3');
+    await page.close();
+  });
+
+  test('merge & arrange: dropping the current document keeps only the appended file', async () => {
+    const one = fixture('merge-drop-base.pdf', [[{ text: 'Base only', x: 72, y: 700 }]]);
+    const two = fixture('merge-drop-extra.pdf', [
+      [{ text: 'Extra A', x: 72, y: 700 }],
+      [{ text: 'Extra B', x: 72, y: 700 }],
+    ]);
+    const page = await openViewerWith(one);
+
+    const chooser = page.waitForEvent('filechooser');
+    await ui(page, '#btn-merge');
+    await (await chooser).setFiles(two);
+
+    // The dialog lists "This document" first; remove it so only the two appended pages remain.
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog.locator('.organize-item')).toHaveCount(2);
+    await dialog.locator('.organize-item').first().getByRole('button', { name: 'Remove' }).click();
+    await expect(dialog.locator('.organize-item')).toHaveCount(1);
+    await dialog.getByRole('button', { name: 'Merge' }).click();
+
+    await expect(page.locator('#status')).toContainText('Merged 1 file');
+    await expect(page.locator('#page-total')).toHaveText('2'); // base dropped, 2 extra pages kept
+    await page.close();
+  });
+
+  test('organize pages: remove a page from the document', async () => {
+    const file = fixture('organize.pdf', [
+      [{ text: 'Keep one', x: 72, y: 700 }],
+      [{ text: 'Delete two', x: 72, y: 700 }],
+      [{ text: 'Keep three', x: 72, y: 700 }],
+    ]);
+    const page = await openViewerWith(file);
+    await expect(page.locator('#page-total')).toHaveText('3');
+
+    await ui(page, '#btn-organize');
+    await expect(page.locator('#panel-organize')).toBeVisible();
+    await expect(page.locator('#organize-list .organize-item')).toHaveCount(3);
+
+    // Remove the middle page, then apply.
+    await page.locator('#organize-list .organize-item').nth(1)
+      .getByRole('button', { name: 'Remove page' }).click();
+    await expect(page.locator('#organize-list .organize-item')).toHaveCount(2);
+    await page.click('#organize-apply');
+
+    await expect(page.locator('#status')).toContainText('reorganized');
+    await expect(page.locator('#page-total')).toHaveText('2');
+    await page.close();
+  });
+
+  test('forms: insert a dropdown (choice) field with options', async () => {
+    const file = fixture('dropdown.pdf', [[{ text: 'pick one', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await expect(page.locator('#panel-forms')).toBeVisible();
+    await page.selectOption('#field-type', 'dropdown');
+    await expect(page.locator('#field-options-row')).toBeVisible();
+    await page.fill('#field-name', 'country');
+    await page.fill('#field-options', 'Australia\nCanada\nDenmark');
+    await page.click('#field-place');
+    await expect(page.locator('#status')).toContainText('Drag a box');
+
+    await dragPdfRect(page, { x: 100, y: 600, width: 220, height: 24 });
+
+    // The forms panel reopens and lists the new choice field as a <select>.
+    await expect(page.locator('#forms-list [data-field="country"]')).toHaveCount(1);
     await page.close();
   });
 
@@ -804,7 +886,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('protect.pdf', [[{ text: 'classified', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#btn-protect');
+    await ui(page, '#btn-protect');
     await fillDialog(page, ['s3cret', null], 'Encrypt');
     await expect(page.locator('#status')).toContainText('encrypted');
     await expect(page.locator('#badges .badge.locked')).toBeVisible();
@@ -822,7 +904,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('sign-image.pdf', [[{ text: 'Sign here:', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#tool-sign');
+    await ui(page, '#tool-sign');
     await dragPdfRect(page, { x: 200, y: 640, width: 160, height: 50 });
     await expect(page.locator('#panel-sign')).toBeVisible();
 
@@ -843,7 +925,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('sign-digital.pdf', [[{ text: 'Agreement', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#btn-digital');
+    await ui(page, '#btn-digital');
     await fillDialog(page, ['Approval', '', 'certpw'], 'Continue');
 
     const dialog = page.locator('dialog#modal');
@@ -868,7 +950,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
 
     // Make one change so there is something to save/undo.
-    await page.click('#btn-find');
+    await ui(page, '#btn-find');
     await fillDialog(page, ['Original', 'Changed'], 'Replace all');
     await expect(page.locator('#status')).toContainText('Replaced 1 occurrence');
 

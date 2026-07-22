@@ -47,6 +47,7 @@ public sealed class MessageProcessor
         "render" => Render(p),
         "redact" => Redact(p),
         "rotate" => RotateAction(p),
+        "arrange-pages" => ArrangePagesAction(p),
         "add-text" => AddTextAction(p),
         "move-text" => MoveTextAction(p),
         "add-drawing" => AddDrawingAction(p),
@@ -110,6 +111,13 @@ public sealed class MessageProcessor
         var pages = (p["pages"]?.AsArray().Select(n => n!.GetValue<int>()) ?? Enumerable.Empty<int>()).ToList();
         int degrees = p["degrees"]?.GetValue<int>() ?? 90;
         var result = PageTools.Rotate(Pdf(p), pages, degrees, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object ArrangePagesAction(JsonObject p)
+    {
+        var order = p["order"]!.AsArray().Select(n => n!.GetValue<int>()).ToList();
+        var result = PageTools.Arrange(Pdf(p), order, Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 
@@ -185,10 +193,17 @@ public sealed class MessageProcessor
         var region = Region(p["region"]!.AsObject());
         string type = p["fieldType"]?.GetValue<string>() ?? "text";
         string? name = p["name"]?.GetValue<string>();
-        var result = type == "checkbox"
-            ? FormTools.AddCheckbox(Pdf(p), region.Page, region, name, password: Password(p))
-            : FormTools.AddTextField(Pdf(p), region.Page, region, name,
-                p["value"]?.GetValue<string>(), Password(p));
+        var result = type switch
+        {
+            "checkbox" => FormTools.AddCheckbox(Pdf(p), region.Page, region, name, password: Password(p)),
+            "dropdown" => FormTools.AddDropdown(Pdf(p), region.Page, region, name,
+                (p["options"]?.AsArray() ?? new JsonArray()).Select(o => o!.GetValue<string>()).ToList(),
+                Password(p)),
+            "multiline" => FormTools.AddTextField(Pdf(p), region.Page, region, name,
+                p["value"]?.GetValue<string>(), Password(p), multiline: true),
+            _ => FormTools.AddTextField(Pdf(p), region.Page, region, name,
+                p["value"]?.GetValue<string>(), Password(p)),
+        };
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 

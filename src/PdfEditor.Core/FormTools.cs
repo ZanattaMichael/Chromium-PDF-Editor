@@ -10,9 +10,12 @@ namespace PdfEditor.Core;
 /// <summary>Reads, fills, and inserts AcroForm (Adobe form) fields.</summary>
 public static class FormTools
 {
-    /// <summary>Inserts a fillable text field on the given page at the given rectangle.</summary>
+    /// <summary>
+    /// Inserts a fillable text field on the given page at the given rectangle. When
+    /// <paramref name="multiline"/> is true the field accepts multiple lines (a comment/notes box).
+    /// </summary>
     public static EditResult AddTextField(byte[] pdf, int page, RectRegion rect, string? name = null,
-        string? value = null, string? password = null)
+        string? value = null, string? password = null, bool multiline = false)
     {
         using var output = new MemoryStream();
         using (var doc = PdfIo.Open(pdf, output, password))
@@ -23,7 +26,35 @@ public static class FormTools
             var field = new TextFormFieldBuilder(doc, UniqueName(form, name, "text"))
                 .SetWidgetRectangle(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))
                 .SetPage(page).CreateText();
+            if (multiline) field.SetMultiline(true);
             field.SetValue(value ?? "");
+            field.GetFirstFormAnnotation().SetBorderColor(ColorConstants.GRAY);
+            form.AddField(field);
+        }
+        return EditResult.Of(output.ToArray());
+    }
+
+    /// <summary>
+    /// Inserts a dropdown (combo box) choice field with the given selectable options. The first
+    /// option is preselected; the user picks one when filling the form.
+    /// </summary>
+    public static EditResult AddDropdown(byte[] pdf, int page, RectRegion rect, string? name,
+        IReadOnlyList<string> options, string? password = null)
+    {
+        var choices = options.Where(o => !string.IsNullOrWhiteSpace(o)).Select(o => o.Trim()).ToArray();
+        if (choices.Length == 0)
+            throw new ArgumentException("A dropdown needs at least one option.", nameof(options));
+
+        using var output = new MemoryStream();
+        using (var doc = PdfIo.Open(pdf, output, password))
+        {
+            if (page < 1 || page > doc.GetNumberOfPages())
+                throw new ArgumentOutOfRangeException(nameof(page), $"Page {page} does not exist.");
+            var form = PdfFormCreator.GetAcroForm(doc, true);
+            var field = new ChoiceFormFieldBuilder(doc, UniqueName(form, name, "choice"))
+                .SetWidgetRectangle(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))
+                .SetPage(page).SetOptions(choices).CreateComboBox();
+            field.SetValue(choices[0]);
             field.GetFirstFormAnnotation().SetBorderColor(ColorConstants.GRAY);
             form.AddField(field);
         }

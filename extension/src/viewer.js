@@ -605,8 +605,9 @@ function updateChrome() {
   const loaded = !!state.pdf;
   for (const id of ['btn-save', 'btn-print', 'btn-sidebar', 'tool-text', 'tool-draw',
     'tool-highlight', 'tool-edit', 'tool-redact', 'tool-sign',
-    'btn-rotate-left', 'btn-rotate-right', 'btn-forms',
+    'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-organize',
     'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
+    'menu-read-trigger', 'menu-edit-trigger',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
     $(id).disabled = !loaded;
   }
@@ -887,6 +888,8 @@ function setTool(tool) {
   state.tool = tool;
   for (const button of document.querySelectorAll('.tool')) button.classList.remove('active');
   $(`tool-${tool}`).classList.add('active');
+  // Surface on the Edit menu trigger that an editing tool is active (select lives outside the menu).
+  $('menu-edit-trigger').classList.toggle('has-active', tool !== 'select');
   for (const pe of pageEls) pe.overlay.classList.toggle('tool-active', tool !== 'select');
   // In select mode the text layer is interactive (select/copy); tools capture the overlay instead.
   pagesEl.classList.toggle('select-mode', tool === 'select');
@@ -1328,29 +1331,203 @@ function mergeKind(file) {
   return 'pdf';
 }
 
+const MERGE_ICON = { pdf: '📄', image: '🖼', docx: '📝' };
+
 async function mergeFiles() {
   $('merge-input').onchange = async () => {
     const files = [...$('merge-input').files];
     $('merge-input').value = '';
     if (files.length === 0) return;
+    // Build the ordered entry list: the current document first, then each picked file tagged with
+    // its kind so the host can convert images/Word to PDF pages before concatenating.
+    const entries = [{ label: 'This document', data: state.pdfB64, kind: 'pdf', base: true }];
+    for (const file of files) {
+      entries.push({
+        label: file.name || 'file',
+        data: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
+        kind: mergeKind(file),
+      });
+    }
+    showMergeDialog(entries);
+  };
+  $('merge-input').click();
+}
+
+/** Lets the user arrange (and drop) files before combining them, then merges in that order. */
+function showMergeDialog(entries) {
+  let order = entries.map((_, i) => i);
+
+  modal.innerHTML = '<h2>Merge &amp; arrange</h2>' +
+    '<p class="muted">Drag to set the order the files are combined in, or remove any you don\'t ' +
+    'want. The current document is included first by default.</p>';
+  const list = document.createElement('ol');
+  list.className = 'reorder-list';
+  list.id = 'merge-list';
+  modal.appendChild(list);
+
+  const move = (from, to) => {
+    if (to < 0 || to >= order.length) return;
+    const [it] = order.splice(from, 1);
+    order.splice(to, 0, it);
+    render();
+  };
+  const remove = (pos) => { if (order.length > 1) { order.splice(pos, 1); render(); } };
+
+  let dragPos = null;
+  const render = () => {
+    list.innerHTML = '';
+    order.forEach((entryIndex, pos) => {
+      const e = entries[entryIndex];
+      const li = document.createElement('li');
+      li.className = 'organize-item';
+      li.draggable = true;
+      li.dataset.pos = String(pos);
+
+      const grip = document.createElement('span');
+      grip.className = 'organize-grip';
+      grip.textContent = '⠿';
+      const label = document.createElement('span');
+      label.className = 'organize-label';
+      label.textContent = `${MERGE_ICON[e.kind] ?? '📄'} ${e.label}`;
+
+      const up = actionBtn('▲', 'Move up', pos === 0, () => move(pos, pos - 1));
+      const down = actionBtn('▼', 'Move down', pos === order.length - 1, () => move(pos, pos + 1));
+      const del = actionBtn('🗑', 'Remove', order.length <= 1, () => remove(pos));
+      del.classList.add('organize-del');
+
+      li.append(grip, label, up, down, del);
+      wireReorderDnD(li, pos, () => dragPos, (v) => { dragPos = v; }, move);
+      list.appendChild(li);
+    });
+  };
+  render();
+
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const ok = document.createElement('button');
+  ok.textContent = 'Merge';
+  ok.className = 'danger';
+  const cancel = document.createElement('button');
+  cancel.textContent = 'Cancel';
+  actions.append(ok, cancel);
+  modal.appendChild(actions);
+
+  ok.addEventListener('click', async () => {
+    modal.close();
+    const chosen = order.map((i) => entries[i]);
     try {
-      setStatus(`Merging ${files.length} file${files.length === 1 ? '' : 's'}…`, true);
-      // The current document first, then each picked file tagged with its kind so the host can
-      // convert images and Word documents to PDF pages before concatenating.
-      const payload = [{ data: state.pdfB64, kind: 'pdf' }];
-      for (const file of files) {
-        payload.push({
-          data: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
-          kind: mergeKind(file),
-        });
-      }
-      const result = await host.call('merge-files', { files: payload });
-      await applyResult(result.pdf, `Merged ${files.length} file${files.length === 1 ? '' : 's'} in.`);
+      setStatus('Merging…', true);
+      const result = await host.call('merge-files', {
+        files: chosen.map((e) => ({ data: e.data, kind: e.kind })),
+      });
+      const added = chosen.filter((e) => !e.base).length;
+      await applyResult(result.pdf, `Merged ${added} file${added === 1 ? '' : 's'} in.`);
     } catch (e) {
       fail(e);
     }
+  });
+  cancel.addEventListener('click', () => modal.close());
+  modal.showModal();
+}
+
+/** A small toolbar-style button used inside reorder rows. */
+function actionBtn(text, title, disabled, onClick) {
+  const b = document.createElement('button');
+  b.textContent = text;
+  b.title = title;
+  b.setAttribute('aria-label', title); // accessible name (the label is an emoji glyph)
+  b.disabled = disabled;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+/** Wires HTML5 drag-and-drop reordering onto a row; getPos/setPos hold the dragged position. */
+function wireReorderDnD(li, pos, getPos, setPos, move) {
+  li.addEventListener('dragstart', (e) => {
+    setPos(pos);
+    li.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  li.addEventListener('dragend', () => { li.classList.remove('dragging'); setPos(null); });
+  li.addEventListener('dragover', (e) => { e.preventDefault(); li.classList.add('drop-target'); });
+  li.addEventListener('dragleave', () => li.classList.remove('drop-target'));
+  li.addEventListener('drop', (e) => {
+    e.preventDefault();
+    li.classList.remove('drop-target');
+    const from = getPos();
+    if (from !== null && from !== pos) move(from, pos);
+  });
+}
+
+// ------------------------------------------------------------- page organizer
+
+/** Opens the organizer: a reorderable, deletable list of the document's pages. */
+async function openOrganize() {
+  if (!state.info) return;
+  state.organizeOrder = Array.from({ length: state.info.pageCount }, (_, i) => i + 1);
+  showPanel('panel-organize');
+  renderOrganizeList();
+}
+
+function renderOrganizeList() {
+  const list = $('organize-list');
+  list.innerHTML = '';
+  const move = (from, to) => {
+    if (to < 0 || to >= state.organizeOrder.length) return;
+    const [it] = state.organizeOrder.splice(from, 1);
+    state.organizeOrder.splice(to, 0, it);
+    renderOrganizeList();
   };
-  $('merge-input').click();
+  state.organizeOrder.forEach((pageNum, index) => {
+    const li = document.createElement('li');
+    li.className = 'organize-item';
+    li.draggable = true;
+    li.dataset.index = String(index);
+
+    const grip = document.createElement('span');
+    grip.className = 'organize-grip';
+    grip.textContent = '⠿';
+    const img = document.createElement('img');
+    img.alt = `Page ${pageNum}`;
+    const label = document.createElement('span');
+    label.className = 'organize-label';
+    label.textContent = `Page ${pageNum}`;
+
+    const up = actionBtn('▲', 'Move up', index === 0, () => move(index, index - 1));
+    const down = actionBtn('▼', 'Move down', index === state.organizeOrder.length - 1,
+      () => move(index, index + 1));
+    const del = actionBtn('🗑', 'Remove page', state.organizeOrder.length <= 1, () => {
+      if (state.organizeOrder.length > 1) { state.organizeOrder.splice(index, 1); renderOrganizeList(); }
+    });
+    del.classList.add('organize-del');
+
+    li.append(grip, img, label, up, down, del);
+    wireReorderDnD(li, index, () => organizeDragIndex, (v) => { organizeDragIndex = v; }, move);
+    list.appendChild(li);
+
+    renderThumbToCache(pageNum)
+      .then((png) => { if (li.isConnected) img.src = `data:image/png;base64,${png}`; })
+      .catch(() => {});
+  });
+}
+
+let organizeDragIndex = null;
+
+async function applyOrganize() {
+  const order = state.organizeOrder;
+  const original = Array.from({ length: state.info.pageCount }, (_, i) => i + 1);
+  const unchanged = order.length === original.length && order.every((v, i) => v === original[i]);
+  if (unchanged) { hidePanels(); toast('No page changes to apply.'); return; }
+  try {
+    setStatus('Reorganizing pages…', true);
+    const result = await host.call('arrange-pages', {
+      pdf: state.pdfB64, order, pdfPassword: state.password,
+    });
+    hidePanels();
+    await applyResult(result.pdf, 'Pages reorganized.');
+  } catch (e) {
+    fail(e);
+  }
 }
 
 async function protect() {
@@ -1578,10 +1755,22 @@ async function applyForms() {
   }
 }
 
+const FIELD_LABELS = {
+  text: 'Text field', multiline: 'Text area', checkbox: 'Checkbox', dropdown: 'Dropdown',
+};
+
 /** Enters "place a field" mode: the next box drawn on a page becomes a new form field. */
 function beginPlaceField() {
   if (!state.pdf) return;
-  state.pendingField = { fieldType: $('field-type').value, name: $('field-name').value.trim() };
+  const fieldType = $('field-type').value;
+  const options = fieldType === 'dropdown'
+    ? $('field-options').value.split('\n').map((o) => o.trim()).filter(Boolean)
+    : [];
+  if (fieldType === 'dropdown' && options.length === 0) {
+    toast('Add at least one dropdown option first.');
+    return;
+  }
+  state.pendingField = { fieldType, name: $('field-name').value.trim(), options };
   state.tool = 'field';
   for (const b of document.querySelectorAll('.tool')) b.classList.remove('active');
   for (const pe of pageEls) pe.overlay.classList.add('tool-active');
@@ -1598,10 +1787,11 @@ async function placeField(region) {
     setStatus('Adding field…', true);
     const result = await host.call('add-form-field', {
       pdf: state.pdfB64, region, fieldType: pf.fieldType,
-      name: pf.name || undefined, pdfPassword: state.password,
+      name: pf.name || undefined, options: pf.options?.length ? pf.options : undefined,
+      pdfPassword: state.password,
     });
     setTool('select');
-    await applyResult(result.pdf, `${pf.fieldType === 'checkbox' ? 'Checkbox' : 'Text field'} added.`);
+    await applyResult(result.pdf, `${FIELD_LABELS[pf.fieldType] ?? 'Field'} added.`);
     openForms(); // show the updated field list (and let them add another)
   } catch (e) {
     fail(e);
@@ -1866,6 +2056,14 @@ function wire() {
   $('forms-apply').addEventListener('click', applyForms);
   $('forms-cancel').addEventListener('click', () => hidePanels());
   $('field-place').addEventListener('click', beginPlaceField);
+  $('field-type').addEventListener('change', () => {
+    $('field-options-row').hidden = $('field-type').value !== 'dropdown';
+  });
+
+  $('btn-organize').addEventListener('click', openOrganize);
+  $('organize-apply').addEventListener('click', applyOrganize);
+  $('organize-reset').addEventListener('click', openOrganize); // rebuild the original order
+  $('organize-cancel').addEventListener('click', () => hidePanels());
 
   $('btn-links').hidden = !URL_SCANNING_ENABLED; // URL scanning disabled for now
   $('btn-links').addEventListener('click', openLinks);
@@ -1911,8 +2109,34 @@ function wire() {
   $('sign-apply').addEventListener('click', applyImageSignature);
   $('sign-cancel').addEventListener('click', () => { hidePanels(); setTool('select'); });
 
+  initMenus();
   initSignaturePad();
   window.addEventListener('resize', drawRegions);
+}
+
+/** Wires the Reading/Editing dropdown menus: click the trigger to toggle, click away to close. */
+function initMenus() {
+  for (const menu of document.querySelectorAll('.menu-group')) {
+    const trigger = menu.querySelector('.menu-trigger');
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = menu.classList.contains('open');
+      closeAllMenus();
+      if (!open) { menu.classList.add('open'); trigger.setAttribute('aria-expanded', 'true'); }
+    });
+    // Choosing an item runs its own handler and then closes the menu.
+    for (const item of menu.querySelectorAll('.menu-item')) {
+      item.addEventListener('click', () => closeAllMenus());
+    }
+  }
+  document.addEventListener('click', closeAllMenus);
+}
+
+function closeAllMenus() {
+  for (const menu of document.querySelectorAll('.menu-group.open')) {
+    menu.classList.remove('open');
+    menu.querySelector('.menu-trigger')?.setAttribute('aria-expanded', 'false');
+  }
 }
 
 async function start() {

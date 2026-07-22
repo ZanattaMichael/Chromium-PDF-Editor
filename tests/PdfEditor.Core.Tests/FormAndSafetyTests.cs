@@ -100,6 +100,43 @@ public class FormToolsTests
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             FormTools.AddTextField(pdf, 9, new RectRegion(9, 0, 0, 10, 10), "n"));
     }
+
+    [Fact]
+    public void AddTextField_Multiline_InsertsAFillableTextField()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+
+        var result = FormTools.AddTextField(pdf, 1, new RectRegion(1, 100, 400, 200, 80),
+            "comments", multiline: true);
+
+        var field = Assert.Single(FormTools.ListFields(result.Pdf));
+        Assert.Equal("comments", field.Name);
+        Assert.Equal("text", field.Type);
+    }
+
+    [Fact]
+    public void AddDropdown_InsertsAChoiceField_WithOptionsAndDefault()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+
+        var result = FormTools.AddDropdown(pdf, 1, new RectRegion(1, 100, 500, 160, 22),
+            "country", new[] { "Australia", "Canada", "Denmark" });
+
+        var field = Assert.Single(FormTools.ListFields(result.Pdf));
+        Assert.Equal("country", field.Name);
+        Assert.Equal("choice", field.Type);
+        Assert.Equal("Australia", field.Value); // first option preselected
+        Assert.Equal(new[] { "Australia", "Canada", "Denmark" }, field.Options);
+    }
+
+    [Fact]
+    public void AddDropdown_NoUsableOptions_Throws()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+        Assert.Throws<ArgumentException>(() =>
+            FormTools.AddDropdown(pdf, 1, new RectRegion(1, 100, 500, 160, 22), "empty",
+                new[] { "  ", "" }));
+    }
 }
 
 public class PdfSafetyTests

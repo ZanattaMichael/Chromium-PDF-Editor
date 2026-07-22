@@ -103,6 +103,54 @@ public class NewActionsTests
     }
 
     [Fact]
+    public void ArrangePages_ReordersAndDrops()
+    {
+        var r = Handle("arrange-pages", new
+        {
+            pdf = TestPdf.Base64(TestPdf.ManyPages(3)),
+            order = new[] { 3, 1 }, // keep pages 3 then 1, drop page 2
+        });
+        Assert.True(Ok(r));
+        string arranged = Result(r)["pdf"]!.GetValue<string>();
+
+        var info = Handle("info", new { pdf = arranged });
+        Assert.Equal(2, Result(info)["pageCount"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void AddFormField_Dropdown_InsertsChoiceField()
+    {
+        var added = Handle("add-form-field", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage()),
+            region = new { page = 1, x = 100, y = 500, width = 200, height = 24 },
+            fieldType = "dropdown", name = "country",
+            options = new[] { "Australia", "Canada" },
+        });
+        Assert.True(Ok(added));
+
+        var list = Handle("form-fields", new { pdf = Result(added)["pdf"]!.GetValue<string>() });
+        var field = Assert.Single(Result(list)["fields"]!.AsArray());
+        Assert.Equal("country", field!["name"]!.GetValue<string>());
+        Assert.Equal("choice", field["type"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void AddFormField_Multiline_InsertsTextField()
+    {
+        var added = Handle("add-form-field", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage()),
+            region = new { page = 1, x = 100, y = 400, width = 200, height = 80 },
+            fieldType = "multiline", name = "comments",
+        });
+        Assert.True(Ok(added));
+
+        var list = Handle("form-fields", new { pdf = Result(added)["pdf"]!.GetValue<string>() });
+        Assert.Equal("comments", Assert.Single(Result(list)["fields"]!.AsArray())!["name"]!.GetValue<string>());
+    }
+
+    [Fact]
     public void ScanSafety_DetectsJavaScript_AndStripRemovesIt()
     {
         string pdf = TestPdf.Base64(TestPdf.WithJavaScript());

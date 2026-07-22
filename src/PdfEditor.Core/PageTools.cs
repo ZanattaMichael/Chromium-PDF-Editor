@@ -1,10 +1,36 @@
 using iText.Kernel.Pdf;
+using iText.Kernel.Utils;
 
 namespace PdfEditor.Core;
 
-/// <summary>Page-level operations: rotation (and room to grow — reorder, delete, insert).</summary>
+/// <summary>Page-level operations: rotation and arranging (reorder / delete).</summary>
 public static class PageTools
 {
+    /// <summary>
+    /// Rebuilds the document so its pages appear in exactly the given 1-based order. Pages omitted
+    /// from <paramref name="order"/> are dropped, so this single operation covers both reordering
+    /// and deleting pages (a page number may repeat to duplicate a page). The order must reference
+    /// at least one existing page.
+    /// </summary>
+    public static EditResult Arrange(byte[] pdf, IReadOnlyList<int> order, string? password = null)
+    {
+        if (order.Count == 0)
+            throw new ArgumentException("At least one page must remain.", nameof(order));
+
+        using var source = PdfIo.OpenReadOnly(pdf, password);
+        int count = source.GetNumberOfPages();
+        foreach (int n in order)
+            if (n < 1 || n > count)
+                throw new ArgumentOutOfRangeException(nameof(order), $"Page {n} does not exist.");
+
+        using var output = new MemoryStream();
+        using (var target = new PdfDocument(new PdfWriter(output)))
+        {
+            new PdfMerger(target).Merge(source, order.ToList());
+        }
+        return EditResult.Of(output.ToArray());
+    }
+
     /// <summary>
     /// Rotates the given pages (1-based) by <paramref name="deltaDegrees"/> clockwise, on top of
     /// each page's existing rotation. The delta is normalised to a multiple of 90; the resulting

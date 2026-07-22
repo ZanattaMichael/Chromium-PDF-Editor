@@ -73,4 +73,43 @@ public class PageToolsTests
 
         Assert.Contains("Confidential 1", TestPdfAssert.ExtractText(result.Pdf, 1));
     }
+
+    [Fact]
+    public void Arrange_ReordersPages_IntoTheGivenSequence()
+    {
+        byte[] pdf = TestPdfs.MultiPage(3);
+
+        var result = PageTools.Arrange(pdf, new[] { 3, 1, 2 });
+
+        Assert.Equal(3, PdfInspector.GetInfo(result.Pdf).PageCount);
+        Assert.Contains("Page 3", TestPdfAssert.ExtractText(result.Pdf, 1));
+        Assert.Contains("Page 1", TestPdfAssert.ExtractText(result.Pdf, 2));
+        Assert.Contains("Page 2", TestPdfAssert.ExtractText(result.Pdf, 3));
+    }
+
+    [Fact]
+    public void Arrange_OmittingAPage_DeletesIt()
+    {
+        byte[] pdf = TestPdfs.MultiPage(3);
+
+        var result = PageTools.Arrange(pdf, new[] { 1, 3 });
+
+        Assert.Equal(2, PdfInspector.GetInfo(result.Pdf).PageCount);
+        Assert.Contains("Page 1", TestPdfAssert.ExtractText(result.Pdf, 1));
+        Assert.Contains("Page 3", TestPdfAssert.ExtractText(result.Pdf, 2));
+    }
+
+    [Fact]
+    public void Arrange_EmptyOrder_Throws()
+    {
+        byte[] pdf = TestPdfs.MultiPage(2);
+        Assert.Throws<ArgumentException>(() => PageTools.Arrange(pdf, Array.Empty<int>()));
+    }
+
+    [Fact]
+    public void Arrange_InvalidPage_Throws()
+    {
+        byte[] pdf = TestPdfs.MultiPage(2);
+        Assert.Throws<ArgumentOutOfRangeException>(() => PageTools.Arrange(pdf, new[] { 1, 5 }));
+    }
 }

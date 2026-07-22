@@ -585,7 +585,7 @@ function updateNav() {
 function updateChrome() {
   const loaded = !!state.pdf;
   for (const id of ['btn-save', 'btn-print', 'btn-sidebar', 'tool-text', 'tool-draw',
-    'tool-highlight', 'tool-edit', 'tool-redact', 'tool-sign',
+    'tool-highlight', 'tool-move', 'tool-edit', 'tool-redact', 'tool-sign',
     'btn-rotate-left', 'btn-rotate-right', 'btn-forms',
     'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
@@ -699,6 +699,7 @@ function pxPerPoint(pageNum, img) {
 }
 
 let inkDrag = null; // { pe, pageNum, points: [{x,y}], poly }
+let moveDrag = null; // { pe, pageNum, span, cx0, cy0, baseLeft, baseTop, ghost } while moving text
 
 /** Renders every captured stroke for a page (used after re-layout / zoom). */
 function redrawInk() {
@@ -743,6 +744,22 @@ pagesEl.addEventListener('pointerdown', (e) => {
     return;
   }
 
+  if (state.tool === 'move') {
+    const pageNum = Number(pe.wrap.dataset.page);
+    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+    const pt = cssToPdf(pageNum, pe.img, cx, cy);
+    const span = spanAt(pageNum, pt.x, pt.y);
+    if (!span) { toast('Grab a run of text to move it.'); return; }
+    const css = pdfRectToCss(pageNum, pe.img, span);
+    const ghost = document.createElement('div');
+    ghost.className = 'region edit move-ghost';
+    ghost.style.cssText = `left:${css.left}px;top:${css.top}px;width:${css.width}px;height:${css.height}px;`;
+    pe.overlay.appendChild(ghost);
+    moveDrag = { pe, pageNum, span, cx0: cx, cy0: cy, baseLeft: css.left, baseTop: css.top, ghost };
+    overlay.setPointerCapture(e.pointerId);
+    return;
+  }
+
   drag = { pe, pageNum: Number(pe.wrap.dataset.page), x0: e.clientX - rect.left, y0: e.clientY - rect.top, div: null };
   overlay.setPointerCapture(e.pointerId);
 });
@@ -752,6 +769,14 @@ pagesEl.addEventListener('pointermove', (e) => {
     const rect = inkDrag.pe.overlay.getBoundingClientRect();
     inkDrag.points.push({ x: e.clientX - rect.left, y: e.clientY - rect.top });
     inkDrag.poly.setAttribute('points', inkDrag.points.map((pt) => `${pt.x},${pt.y}`).join(' '));
+    return;
+  }
+  if (moveDrag) {
+    const rect = moveDrag.pe.overlay.getBoundingClientRect();
+    const dx = (e.clientX - rect.left) - moveDrag.cx0;
+    const dy = (e.clientY - rect.top) - moveDrag.cy0;
+    moveDrag.ghost.style.left = `${moveDrag.baseLeft + dx}px`;
+    moveDrag.ghost.style.top = `${moveDrag.baseTop + dy}px`;
     return;
   }
   if (!drag) return;
@@ -772,6 +797,18 @@ pagesEl.addEventListener('pointermove', (e) => {
 });
 
 pagesEl.addEventListener('pointerup', async (e) => {
+  if (moveDrag) {
+    const md = moveDrag;
+    moveDrag = null;
+    const rect = md.pe.overlay.getBoundingClientRect();
+    const cx1 = e.clientX - rect.left, cy1 = e.clientY - rect.top;
+    md.ghost.remove();
+    if (Math.abs(cx1 - md.cx0) < 3 && Math.abs(cy1 - md.cy0) < 3) return; // negligible move
+    const p0 = cssToPdf(md.pageNum, md.pe.img, md.cx0, md.cy0);
+    const p1 = cssToPdf(md.pageNum, md.pe.img, cx1, cy1);
+    moveText(md.pageNum, md.span, p1.x - p0.x, p1.y - p0.y);
+    return;
+  }
   if (inkDrag) {
     if (inkDrag.points.length > 0) {
       const list = inkByPage.get(inkDrag.pageNum) ?? [];
@@ -1082,6 +1119,29 @@ async function applyTextEdit() {
     hidePanels();
     if (adding) setTool('text');
     await applyResult(result.pdf, adding ? 'Text added.' : 'Text replaced.');
+  } catch (e) {
+    fail(e);
+  }
+}
+
+// -------------------------------------------------------------- move text
+
+/** The text run whose box contains a PDF-space point on a page (from the span cache), if any. */
+function spanAt(pageNum, pdfX, pdfY) {
+  const spans = spanCache.get(`${state.version}|${pageNum}`) ?? [];
+  return spans.find((s) => pdfX >= s.x && pdfX <= s.x + s.width && pdfY >= s.y && pdfY <= s.y + s.height);
+}
+
+/** Removes a run of text from its spot and re-stamps it shifted by (dx, dy) in PDF space. */
+async function moveText(pageNum, span, dx, dy) {
+  try {
+    setStatus('Moving text…', true);
+    const region = { page: pageNum, x: span.x - 1, y: span.y - 1, width: span.width + 2, height: span.height + 2 };
+    const result = await host.call('move-text', {
+      pdf: state.pdfB64, region, dx, dy, pdfPassword: state.password,
+    });
+    await applyResult(result.pdf, 'Text moved.');
+    setTool('move'); // stay in move mode
   } catch (e) {
     fail(e);
   }
@@ -1827,6 +1887,7 @@ function wire() {
   $('tool-text').addEventListener('click', () => setTool('text'));
   $('tool-draw').addEventListener('click', () => setTool('draw'));
   $('tool-highlight').addEventListener('click', () => setTool('highlight'));
+  $('tool-move').addEventListener('click', () => setTool('move'));
   $('tool-edit').addEventListener('click', () => setTool('edit'));
   $('tool-redact').addEventListener('click', () => setTool('redact'));
   $('tool-sign').addEventListener('click', () => setTool('sign'));

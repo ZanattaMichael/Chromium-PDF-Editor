@@ -53,6 +53,24 @@ public static class TextTools
     }
 
     /// <summary>
+    /// Moves the text found in <paramref name="source"/> by (<paramref name="dx"/>,
+    /// <paramref name="dy"/>) in PDF user space: the original text is removed and re-stamped at the
+    /// shifted position, preserving its detected font, size, and style. A no-op if the region holds
+    /// no text.
+    /// </summary>
+    public static EditResult MoveText(byte[] pdf, RectRegion source, float dx, float dy, string? password = null)
+    {
+        var found = GetTextInRegion(pdf, source, password);
+        if (string.IsNullOrWhiteSpace(found.Text)) return EditResult.Of(pdf);
+
+        var removed = Redactor.RemoveContent(pdf, new[] { source }, password);
+        var dest = new RectRegion(source.Page, source.X + dx, source.Y + dy, source.Width, source.Height);
+        var stamped = StampText(removed.Pdf, dest, found.Text, found.FontSize, password,
+            fontName: ResolveFont(found.FontFamily, found.Bold, found.Italic), wrap: false);
+        return new EditResult(stamped, removed.Warnings);
+    }
+
+    /// <summary>
     /// Adds new text on top of the page inside <paramref name="region"/> (wrapped to its width),
     /// without touching any existing content. Used by the "add text anywhere" tool.
     /// </summary>

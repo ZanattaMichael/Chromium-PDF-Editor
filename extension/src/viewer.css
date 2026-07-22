@@ -378,6 +378,25 @@ select {
 
 .badge.warn { background: #7c3a10; color: #ffd9b0; cursor: pointer; }
 
+/* ---------------------------------------------------- rudimentary code editor */
+textarea.code-editor {
+  font: 12.5px/1.5 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  tab-size: 2;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+  background: #1e1e24;
+  color: #e6e6ec;
+  border-color: #55555e;
+}
+textarea.code-editor:focus { outline: 1px solid var(--accent-2); }
+
+/* Saved document scripts, shown above the editor. */
+#js-list:empty { display: none; }
+#js-list .organize-label { font-family: ui-monospace, monospace; color: var(--text); }
+#js-list .organize-item { cursor: pointer; }
+#js-list .organize-item.active { border-color: var(--accent-2); }
+
 .safety-samples {
   max-height: 30vh;
   overflow: auto;

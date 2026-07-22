@@ -57,6 +57,9 @@ public sealed class MessageProcessor
         "add-form-field" => AddFormFieldAction(p),
         "scan-safety" => ScanSafetyAction(p),
         "strip-active" => StripActiveAction(p),
+        "list-scripts" => ListScriptsAction(p),
+        "add-script" => AddScriptAction(p),
+        "remove-script" => RemoveScriptAction(p),
         "list-urls" => ListUrlsAction(p),
         "scan-urls" => ScanUrlsAction(p),
         "get-region-text" => GetRegionText(p),
@@ -201,6 +204,8 @@ public sealed class MessageProcessor
                 Password(p)),
             "multiline" => FormTools.AddTextField(Pdf(p), region.Page, region, name,
                 p["value"]?.GetValue<string>(), Password(p), multiline: true),
+            "button" => FormTools.AddButton(Pdf(p), region.Page, region, name,
+                p["caption"]?.GetValue<string>(), p["script"]?.GetValue<string>(), Password(p)),
             _ => FormTools.AddTextField(Pdf(p), region.Page, region, name,
                 p["value"]?.GetValue<string>(), Password(p)),
         };
@@ -225,6 +230,27 @@ public sealed class MessageProcessor
         bool js = p["javaScript"]?.GetValue<bool>() ?? true;
         bool urls = p["urls"]?.GetValue<bool>() ?? true;
         var result = PdfSafety.StripActive(Pdf(p), js, urls, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object ListScriptsAction(JsonObject p)
+    {
+        var scripts = JavaScriptTool.ListScripts(Pdf(p), Password(p));
+        return new { scripts = scripts.Select(s => new { name = s.Name, script = s.Script }) };
+    }
+
+    private static object AddScriptAction(JsonObject p)
+    {
+        var result = JavaScriptTool.AddDocumentScript(Pdf(p),
+            p["name"]?.GetValue<string>() ?? "",
+            p["script"]?.GetValue<string>() ?? "", Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object RemoveScriptAction(JsonObject p)
+    {
+        var result = JavaScriptTool.RemoveScript(Pdf(p),
+            p["name"]?.GetValue<string>() ?? "", Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 

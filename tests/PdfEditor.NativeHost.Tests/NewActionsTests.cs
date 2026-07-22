@@ -151,6 +151,60 @@ public class NewActionsTests
     }
 
     [Fact]
+    public void AddScript_ThenListScripts_RoundTripsTheSource()
+    {
+        var added = Handle("add-script", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage()),
+            name = "calc", script = "app.alert('hi');",
+        });
+        Assert.True(Ok(added));
+        string withJs = Result(added)["pdf"]!.GetValue<string>();
+
+        var list = Handle("list-scripts", new { pdf = withJs });
+        var script = Assert.Single(Result(list)["scripts"]!.AsArray());
+        Assert.Equal("calc", script!["name"]!.GetValue<string>());
+        Assert.Equal("app.alert('hi');", script["script"]!.GetValue<string>());
+
+        // And scan-safety flags the freshly-added script.
+        var scan = Handle("scan-safety", new { pdf = withJs });
+        Assert.True(Result(scan)["hasActiveContent"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void RemoveScript_DropsTheNamedScript()
+    {
+        string withJs = Result(Handle("add-script", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage()), name = "s", script = "1;",
+        }))["pdf"]!.GetValue<string>();
+
+        var removed = Handle("remove-script", new { pdf = withJs, name = "s" });
+        Assert.True(Ok(removed));
+
+        var list = Handle("list-scripts", new { pdf = Result(removed)["pdf"]!.GetValue<string>() });
+        Assert.Empty(Result(list)["scripts"]!.AsArray());
+    }
+
+    [Fact]
+    public void AddFormField_Button_InsertsButtonFieldWithScript()
+    {
+        var added = Handle("add-form-field", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage()),
+            region = new { page = 1, x = 100, y = 500, width = 90, height = 24 },
+            fieldType = "button", name = "go", caption = "Go",
+            script = "app.alert('clicked');",
+        });
+        Assert.True(Ok(added));
+
+        var list = Handle("form-fields", new { pdf = Result(added)["pdf"]!.GetValue<string>() });
+        var field = Assert.Single(Result(list)["fields"]!.AsArray());
+        Assert.Equal("go", field!["name"]!.GetValue<string>());
+        Assert.Equal("button", field["type"]!.GetValue<string>());
+    }
+
+    [Fact]
     public void ScanSafety_DetectsJavaScript_AndStripRemovesIt()
     {
         string pdf = TestPdf.Base64(TestPdf.WithJavaScript());

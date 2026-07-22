@@ -38,6 +38,7 @@ const state = {
   keepLinks: false,     // false = strip link URLs on save until the user enables them
   links: [],            // extracted { page, url }
   urlVerdicts: [],      // [{ page, url, level, category, source, detail }] once scanned
+  scripts: [],          // document-level JavaScript { name, script } once listed
 };
 
 // Freehand strokes captured for the draw tool, in CSS pixels per page: Map(pageNum -> [stroke]),
@@ -605,7 +606,7 @@ function updateChrome() {
   const loaded = !!state.pdf;
   for (const id of ['btn-save', 'btn-print', 'btn-sidebar', 'tool-text', 'tool-draw',
     'tool-highlight', 'tool-edit', 'tool-redact', 'tool-sign',
-    'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-organize',
+    'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-organize', 'btn-js',
     'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
     'menu-read-trigger', 'menu-edit-trigger',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
@@ -1757,7 +1758,16 @@ async function applyForms() {
 
 const FIELD_LABELS = {
   text: 'Text field', multiline: 'Text area', checkbox: 'Checkbox', dropdown: 'Dropdown',
+  button: 'Button',
 };
+
+/** Shows only the extra inputs (options / caption+script) the chosen field type needs. */
+function updateFieldTypeRows() {
+  const type = $('field-type').value;
+  $('field-options-row').hidden = type !== 'dropdown';
+  $('field-caption-row').hidden = type !== 'button';
+  $('field-script-row').hidden = type !== 'button';
+}
 
 /** Enters "place a field" mode: the next box drawn on a page becomes a new form field. */
 function beginPlaceField() {
@@ -1770,7 +1780,11 @@ function beginPlaceField() {
     toast('Add at least one dropdown option first.');
     return;
   }
-  state.pendingField = { fieldType, name: $('field-name').value.trim(), options };
+  state.pendingField = {
+    fieldType, name: $('field-name').value.trim(), options,
+    caption: fieldType === 'button' ? $('field-caption').value.trim() : '',
+    script: fieldType === 'button' ? $('field-script').value : '',
+  };
   state.tool = 'field';
   for (const b of document.querySelectorAll('.tool')) b.classList.remove('active');
   for (const pe of pageEls) pe.overlay.classList.add('tool-active');
@@ -1788,14 +1802,110 @@ async function placeField(region) {
     const result = await host.call('add-form-field', {
       pdf: state.pdfB64, region, fieldType: pf.fieldType,
       name: pf.name || undefined, options: pf.options?.length ? pf.options : undefined,
+      caption: pf.caption || undefined, script: pf.script || undefined,
       pdfPassword: state.password,
     });
+    // A button carrying a script is deliberately-authored active content — keep it on save.
+    if (pf.script) state.keepActiveContent = true;
     setTool('select');
     await applyResult(result.pdf, `${FIELD_LABELS[pf.fieldType] ?? 'Field'} added.`);
     openForms(); // show the updated field list (and let them add another)
   } catch (e) {
     fail(e);
   }
+}
+
+// --------------------------------------------------------- document JavaScript
+
+/** Opens the JavaScript panel: a list of the document's scripts plus a small code editor. */
+async function openJavaScript() {
+  if (!state.pdf) return;
+  $('js-name').value = '';
+  $('js-source').value = '';
+  showPanel('panel-js');
+  try {
+    setStatus('Reading scripts…', true);
+    await refreshScripts();
+    setStatus('');
+  } catch (e) {
+    fail(e);
+  }
+}
+
+/** Reloads the document's script list into the panel without disturbing the status line. */
+async function refreshScripts() {
+  const result = await host.call('list-scripts', { pdf: state.pdfB64, pdfPassword: state.password });
+  state.scripts = result.scripts ?? [];
+  renderScriptList();
+}
+
+function renderScriptList() {
+  const list = $('js-list');
+  list.innerHTML = '';
+  for (const s of state.scripts) {
+    const li = document.createElement('li');
+    li.className = 'organize-item';
+    const label = document.createElement('span');
+    label.className = 'organize-label';
+    label.textContent = s.name; // textContent — names come from the document
+    // Load a script into the editor for editing.
+    li.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      $('js-name').value = s.name;
+      $('js-source').value = s.script;
+      for (const el of list.querySelectorAll('.organize-item')) el.classList.remove('active');
+      li.classList.add('active');
+    });
+    const del = actionBtn('🗑', 'Remove script', false, () => removeScript(s.name));
+    del.classList.add('organize-del');
+    li.append(label, del);
+    list.appendChild(li);
+  }
+}
+
+async function addScript() {
+  const name = $('js-name').value.trim();
+  const script = $('js-source').value;
+  if (!name) { toast('Give the script a name.'); return; }
+  if (!script.trim()) { toast('The script is empty.'); return; }
+  try {
+    setStatus('Adding script…', true);
+    const result = await host.call('add-script', {
+      pdf: state.pdfB64, name, script, pdfPassword: state.password,
+    });
+    state.keepActiveContent = true; // the user added this on purpose — keep it on save
+    await applyResult(result.pdf, `Script “${name}” added.`);
+    $('js-name').value = '';
+    $('js-source').value = '';
+    await refreshScripts(); // update the list, leaving the "added" status visible
+  } catch (e) {
+    fail(e);
+  }
+}
+
+async function removeScript(name) {
+  try {
+    setStatus('Removing script…', true);
+    const result = await host.call('remove-script', {
+      pdf: state.pdfB64, name, pdfPassword: state.password,
+    });
+    await applyResult(result.pdf, `Script “${name}” removed.`);
+    await refreshScripts();
+  } catch (e) {
+    fail(e);
+  }
+}
+
+/** Lets Tab indent inside a code editor instead of moving focus out of it. */
+function enableCodeEditorTab(textarea) {
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    textarea.value = textarea.value.slice(0, start) + '  ' + textarea.value.slice(end);
+    textarea.selectionStart = textarea.selectionEnd = start + 2;
+  });
 }
 
 // ---------------------------------------------------------------- links / URLs
@@ -2056,14 +2166,22 @@ function wire() {
   $('forms-apply').addEventListener('click', applyForms);
   $('forms-cancel').addEventListener('click', () => hidePanels());
   $('field-place').addEventListener('click', beginPlaceField);
-  $('field-type').addEventListener('change', () => {
-    $('field-options-row').hidden = $('field-type').value !== 'dropdown';
-  });
+  $('field-type').addEventListener('change', updateFieldTypeRows);
+  enableCodeEditorTab($('field-script'));
 
   $('btn-organize').addEventListener('click', openOrganize);
   $('organize-apply').addEventListener('click', applyOrganize);
   $('organize-reset').addEventListener('click', openOrganize); // rebuild the original order
   $('organize-cancel').addEventListener('click', () => hidePanels());
+
+  $('btn-js').addEventListener('click', openJavaScript);
+  $('js-add').addEventListener('click', addScript);
+  $('js-clear').addEventListener('click', () => {
+    $('js-name').value = ''; $('js-source').value = '';
+    for (const el of $('js-list').querySelectorAll('.organize-item')) el.classList.remove('active');
+  });
+  $('js-close').addEventListener('click', () => hidePanels());
+  enableCodeEditorTab($('js-source'));
 
   $('btn-links').hidden = !URL_SCANNING_ENABLED; // URL scanning disabled for now
   $('btn-links').addEventListener('click', openLinks);

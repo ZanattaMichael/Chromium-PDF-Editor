@@ -4,6 +4,7 @@ using iText.Forms.Fields.Properties;
 using iText.Kernel.Colors;
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
+using iText.Kernel.Pdf.Action;
 
 namespace PdfEditor.Core;
 
@@ -75,6 +76,32 @@ public static class FormTools
                 .SetWidgetRectangle(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))
                 .SetPage(page).SetCheckType(CheckBoxType.CHECK).CreateCheckBox();
             field.SetValue(isChecked ? "Yes" : "Off");
+            form.AddField(field);
+        }
+        return EditResult.Of(output.ToArray());
+    }
+
+    /// <summary>
+    /// Inserts a clickable push button. When <paramref name="script"/> is set the button runs that
+    /// JavaScript on activation (mouse-up) in Acrobat/Chrome — e.g. a "Submit" or "Calculate"
+    /// button on a fillable form. The caption is the visible label.
+    /// </summary>
+    public static EditResult AddButton(byte[] pdf, int page, RectRegion rect, string? name = null,
+        string? caption = null, string? script = null, string? password = null)
+    {
+        using var output = new MemoryStream();
+        using (var doc = PdfIo.Open(pdf, output, password))
+        {
+            if (page < 1 || page > doc.GetNumberOfPages())
+                throw new ArgumentOutOfRangeException(nameof(page), $"Page {page} does not exist.");
+            var form = PdfFormCreator.GetAcroForm(doc, true);
+            var field = new PushButtonFormFieldBuilder(doc, UniqueName(form, name, "button"))
+                .SetWidgetRectangle(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))
+                .SetCaption(string.IsNullOrWhiteSpace(caption) ? "Button" : caption)
+                .SetPage(page).CreatePushButton();
+            field.GetFirstFormAnnotation().SetBorderColor(ColorConstants.GRAY);
+            if (!string.IsNullOrEmpty(script))
+                field.GetWidgets()[0].SetAction(PdfAction.CreateJavaScript(script));
             form.AddField(field);
         }
         return EditResult.Of(output.ToArray());

@@ -49,6 +49,9 @@
         <button id="btn-organize" class="menu-item" role="menuitem" title="Reorder or delete pages">🗂 Organize pages…</button>
         <button id="btn-merge" class="menu-item" role="menuitem" title="Append PDFs, images, or Word documents">➕ Merge files…</button>
         <div class="menu-sep" aria-hidden="true"></div>
+        <div class="menu-label">Advanced</div>
+        <button id="btn-js" class="menu-item" role="menuitem" title="Add interactive JavaScript to the document">⚙ JavaScript…</button>
+        <div class="menu-sep" aria-hidden="true"></div>
         <div class="menu-label">Secure</div>
         <button id="btn-protect" class="menu-item" role="menuitem" title="Password-protect (AES-256)">🔒 Protect</button>
         <button id="btn-digital" class="menu-item" role="menuitem" title="Digitally sign with a certificate">🪪 Certify</button>
@@ -136,14 +139,40 @@
             <option value="multiline">Text area (multi-line)</option>
             <option value="checkbox">Checkbox</option>
             <option value="dropdown">Dropdown (choose one)</option>
+            <option value="button">Button (runs JavaScript)</option>
           </select>
         </label>
         <label>Name <input id="field-name" type="text" placeholder="e.g. fullName" /></label>
         <label id="field-options-row" hidden>Options (one per line)
           <textarea id="field-options" rows="4" placeholder="Australia&#10;Canada&#10;Denmark"></textarea>
         </label>
+        <label id="field-caption-row" hidden>Button label
+          <input id="field-caption" type="text" placeholder="e.g. Submit" />
+        </label>
+        <label id="field-script-row" hidden>JavaScript to run on click
+          <textarea id="field-script" class="code-editor" rows="4" spellcheck="false"
+            placeholder="app.alert('Thanks!');"></textarea>
+        </label>
         <div class="actions">
           <button id="field-place">Place on page…</button>
+        </div>
+      </div>
+
+      <div id="panel-js" class="panel-section" hidden>
+        <h2>Document JavaScript</h2>
+        <p class="muted">Add interactive JavaScript that runs when the PDF is opened in Acrobat or
+          another PDF reader — for form calculations, validation, and the like. Scripts are
+          <strong>never executed inside this editor</strong>; the viewer only renders pages.</p>
+        <ul id="js-list" class="reorder-list"></ul>
+        <label>Script name <input id="js-name" type="text" placeholder="e.g. calculateTotal" /></label>
+        <label>Source
+          <textarea id="js-source" class="code-editor" rows="10" spellcheck="false"
+            placeholder="// Runs at document level.&#10;var total = this.getField('a').value * 1;&#10;this.getField('b').value = total;"></textarea>
+        </label>
+        <div class="actions">
+          <button id="js-add">Add / update</button>
+          <button id="js-clear">New</button>
+          <button id="js-close">Close</button>
         </div>
       </div>
 

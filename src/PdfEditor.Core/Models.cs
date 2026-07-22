@@ -71,6 +71,9 @@ public sealed record SafetyReport(int JavaScriptCount, int UrlCount, IReadOnlyLi
 /// <summary>A link URL found in the document, with the page it appears on.</summary>
 public sealed record PdfLink(int Page, string Url);
 
+/// <summary>A named document-level JavaScript stored in the /Names /JavaScript tree.</summary>
+public sealed record PdfScript(string Name, string Script);
+
 /// <summary>
 /// A safety assessment for one URL. <paramref name="Level"/> is the traffic-light rating
 /// (<c>green</c>/<c>yellow</c>/<c>red</c>/<c>unknown</c>), <paramref name="Category"/> a short

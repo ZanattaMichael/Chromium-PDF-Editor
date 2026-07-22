@@ -882,6 +882,65 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('javascript: author a document script in the code editor, kept on save', async () => {
+    const file = fixture('addjs.pdf', [[{ text: 'form doc', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-js');
+    await expect(page.locator('#panel-js')).toBeVisible();
+    await page.fill('#js-name', 'greet');
+    await page.fill('#js-source', "app.alert('hello from the PDF');");
+    await page.click('#js-add');
+    await expect(page.locator('#status')).toContainText('added');
+
+    // The script is now listed in the panel...
+    await expect(page.locator('#js-list .organize-label', { hasText: 'greet' })).toHaveCount(1);
+    // ...and the active-content badge shows it is being kept (not stripped) on save.
+    const badge = page.locator('#badges .badge.warn');
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText('kept');
+    await page.close();
+  });
+
+  test('javascript: a document script can be removed again', async () => {
+    const file = fixture('rmjs.pdf', [[{ text: 'doc', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-js');
+    await page.fill('#js-name', 'temp');
+    await page.fill('#js-source', 'console.println("x");');
+    await page.click('#js-add');
+    await expect(page.locator('#js-list .organize-label', { hasText: 'temp' })).toHaveCount(1);
+
+    await page.locator('#js-list .organize-item').first()
+      .getByRole('button', { name: 'Remove script' }).click();
+    await expect(page.locator('#status')).toContainText('removed');
+    await expect(page.locator('#js-list .organize-item')).toHaveCount(0);
+    await page.close();
+  });
+
+  test('forms: insert a JavaScript push-button', async () => {
+    const file = fixture('jsbutton.pdf', [[{ text: 'form', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await page.selectOption('#field-type', 'button');
+    await expect(page.locator('#field-caption-row')).toBeVisible();
+    await expect(page.locator('#field-script-row')).toBeVisible();
+    await page.fill('#field-name', 'submitBtn');
+    await page.fill('#field-caption', 'Submit');
+    await page.fill('#field-script', "app.alert('submitted');");
+    await page.click('#field-place');
+    await expect(page.locator('#status')).toContainText('Drag a box');
+
+    await dragPdfRect(page, { x: 100, y: 600, width: 120, height: 28 });
+
+    // The button is listed as a form field, and the script it carries is kept on save.
+    await expect(page.locator('#forms-list [data-field="submitBtn"]')).toHaveCount(1);
+    await expect(page.locator('#badges .badge.warn')).toContainText('kept');
+    await page.close();
+  });
+
   test('password protection encrypts the document', async () => {
     const file = fixture('protect.pdf', [[{ text: 'classified', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);

@@ -180,6 +180,53 @@ public class MessageProcessorSecurityTests
         Assert.False(Ok(r));
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void AddScript_EmptyName_ReturnsError_NotCrash(string name)
+    {
+        var r = HandleOne(Request("add-script", new
+        {
+            pdf = Convert.ToBase64String(TestPdf.OnePage()), name, script = "app.alert('x');",
+        }));
+        Assert.False(Ok(r));
+    }
+
+    [Fact]
+    public void AddScript_EmptyBody_ReturnsError_NotCrash()
+    {
+        var r = HandleOne(Request("add-script", new
+        {
+            pdf = Convert.ToBase64String(TestPdf.OnePage()), name = "n", script = "",
+        }));
+        Assert.False(Ok(r));
+    }
+
+    [Fact]
+    public void ListScripts_OnGarbageBytes_ReturnsError_NotCrash()
+    {
+        string garbage = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes("not a pdf"));
+        Assert.False(Ok(HandleOne(Request("list-scripts", new { pdf = garbage }))));
+    }
+
+    [Fact]
+    public void AddScript_HostileScriptSource_IsStoredAsInertData_NeverEmittedRaw()
+    {
+        // The script body is attacker-controlled text. The host stores and returns it as a JSON
+        // string value; it must never break out of the JSON envelope on the wire.
+        const string hostile = "</script><svg onload=alert(1)>\"'\\";
+        string withJs = HandleOne(Request("add-script", new
+        {
+            pdf = Convert.ToBase64String(TestPdf.OnePage()), name = "x", script = hostile,
+        }))["result"]!["pdf"]!.GetValue<string>();
+
+        var (response, rawFrame) = Handle(Request("list-scripts", new { pdf = withJs }));
+
+        Assert.True(Ok(response));
+        Assert.Equal(hostile, response["result"]!["scripts"]![0]!["script"]!.GetValue<string>());
+        Assert.DoesNotContain("</script><svg", rawFrame); // escaped in the emitted JSON
+    }
+
     // --------------------------------------------------------------- no secret leak
 
     [Fact]

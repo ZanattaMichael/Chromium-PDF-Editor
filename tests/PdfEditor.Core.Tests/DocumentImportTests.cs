@@ -85,6 +85,49 @@ public class DocumentImportTests
     }
 
     [Fact]
+    public void ToPdf_UnknownKind_PassesBytesThroughUnchanged()
+    {
+        // Anything that isn't image/docx/word is assumed to already be a PDF and returned as-is.
+        byte[] pdf = TestPdfs.WithText(("hi", 72, 700, 12));
+        Assert.Same(pdf, DocumentImport.ToPdf(pdf, "something-else"));
+    }
+
+    [Fact]
+    public void ToPdf_WordAlias_RoutesToDocxConversion()
+    {
+        // The "word" alias hits the same LibreOffice path as "docx"; with unconvertible bytes it
+        // must surface the same clear error rather than being treated as a passthrough PDF.
+        Assert.Throws<InvalidOperationException>(() => DocumentImport.ToPdf(BuildDocx("x"), "word"));
+    }
+
+    [Fact]
+    public void ImageToPdf_Jpeg_ProducesAOnePagePdf()
+    {
+        using var bmp = new SKBitmap(120, 80);
+        using (var c = new SKCanvas(bmp)) c.Clear(SKColors.Blue);
+        using var img = SKImage.FromBitmap(bmp);
+        byte[] jpeg = img.Encode(SKEncodedImageFormat.Jpeg, 90).ToArray();
+
+        var info = PdfInspector.GetInfo(DocumentImport.ImageToPdf(jpeg));
+
+        Assert.Equal(1, info.PageCount);
+        Assert.Equal(842, info.Pages[0].Width, 1.0); // landscape A4
+    }
+
+    [Fact]
+    public void ImageToPdf_NotAnImage_Throws()
+    {
+        byte[] garbage = System.Text.Encoding.ASCII.GetBytes("this is not an image at all");
+        Assert.ThrowsAny<Exception>(() => DocumentImport.ImageToPdf(garbage));
+    }
+
+    [Fact]
+    public void ImageToPdf_EmptyInput_Throws()
+    {
+        Assert.ThrowsAny<Exception>(() => DocumentImport.ImageToPdf(Array.Empty<byte>()));
+    }
+
+    [Fact]
     public void CanConvertWord_ReflectsLibreOfficePresence()
     {
         // Whatever the environment, this must return a boolean without throwing.

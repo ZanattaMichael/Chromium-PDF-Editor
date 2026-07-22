@@ -137,6 +137,79 @@ public class FormToolsTests
             FormTools.AddDropdown(pdf, 1, new RectRegion(1, 100, 500, 160, 22), "empty",
                 new[] { "  ", "" }));
     }
+
+    [Fact]
+    public void AddDropdown_TrimsWhitespace_AndSkipsBlankOptions()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+
+        var result = FormTools.AddDropdown(pdf, 1, new RectRegion(1, 100, 500, 160, 22),
+            "sized", new[] { "  Small ", "", "   ", "Large  " });
+
+        var field = Assert.Single(FormTools.ListFields(result.Pdf));
+        Assert.Equal(new[] { "Small", "Large" }, field.Options); // blanks dropped, values trimmed
+        Assert.Equal("Small", field.Value);
+    }
+
+    [Fact]
+    public void AddDropdown_ThenFill_SelectsTheChosenOption()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+        byte[] withField = FormTools.AddDropdown(pdf, 1, new RectRegion(1, 100, 500, 160, 22),
+            "country", new[] { "Australia", "Canada", "Denmark" }).Pdf;
+
+        var result = FormTools.FillFields(withField,
+            new Dictionary<string, string> { ["country"] = "Denmark" });
+
+        Assert.Equal("Denmark", Assert.Single(FormTools.ListFields(result.Pdf)).Value);
+    }
+
+    [Fact]
+    public void AddDropdown_InvalidPage_Throws()
+    {
+        byte[] pdf = TestPdfs.WithText(("x", 72, 700, 12));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            FormTools.AddDropdown(pdf, 9, new RectRegion(9, 0, 0, 40, 12), "n", new[] { "a" }));
+    }
+
+    [Fact]
+    public void AddDropdown_AvoidsNameCollision()
+    {
+        byte[] pdf = TestPdfs.WithTextField("choice", "one");
+
+        var result = FormTools.AddDropdown(pdf, 1, new RectRegion(1, 100, 400, 160, 22),
+            "choice", new[] { "x", "y" });
+
+        var names = FormTools.ListFields(result.Pdf).Select(f => f.Name).ToList();
+        Assert.Contains("choice", names);
+        Assert.Contains("choice_2", names); // renamed to avoid clashing with the existing field
+    }
+
+    [Fact]
+    public void AddTextField_Multiline_AcceptsAndReadsBackAMultiLineValue()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+
+        byte[] withField = FormTools.AddTextField(pdf, 1, new RectRegion(1, 100, 400, 200, 80),
+            "notes", multiline: true).Pdf;
+        var result = FormTools.FillFields(withField,
+            new Dictionary<string, string> { ["notes"] = "line one\nline two" });
+
+        Assert.Equal("line one\nline two", Assert.Single(FormTools.ListFields(result.Pdf)).Value);
+    }
+
+    [Fact]
+    public void AddCheckbox_DefaultsToUnchecked_AndCanBeCheckedByFilling()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+        byte[] withBox = FormTools.AddCheckbox(pdf, 1, new RectRegion(1, 100, 500, 16, 16), "agree").Pdf;
+
+        Assert.Equal("Off", Assert.Single(FormTools.ListFields(withBox)).Value); // unchecked by default
+
+        var result = FormTools.FillFields(withBox,
+            new Dictionary<string, string> { ["agree"] = "Yes" });
+        Assert.Equal("Yes", Assert.Single(FormTools.ListFields(result.Pdf)).Value);
+    }
 }
 
 public class PdfSafetyTests

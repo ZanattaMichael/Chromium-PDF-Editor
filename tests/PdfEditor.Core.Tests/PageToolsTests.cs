@@ -112,4 +112,69 @@ public class PageToolsTests
         byte[] pdf = TestPdfs.MultiPage(2);
         Assert.Throws<ArgumentOutOfRangeException>(() => PageTools.Arrange(pdf, new[] { 1, 5 }));
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Arrange_ZeroOrNegativePage_Throws(int badPage)
+    {
+        byte[] pdf = TestPdfs.MultiPage(2);
+        Assert.Throws<ArgumentOutOfRangeException>(() => PageTools.Arrange(pdf, new[] { 1, badPage }));
+    }
+
+    [Fact]
+    public void Arrange_RepeatedPageNumber_DuplicatesThatPage()
+    {
+        byte[] pdf = TestPdfs.MultiPage(2);
+
+        // Page 1 appears twice: the output has three pages, the first two both being page 1.
+        var result = PageTools.Arrange(pdf, new[] { 1, 1, 2 });
+
+        Assert.Equal(3, PdfInspector.GetInfo(result.Pdf).PageCount);
+        Assert.Contains("Page 1", TestPdfAssert.ExtractText(result.Pdf, 1));
+        Assert.Contains("Page 1", TestPdfAssert.ExtractText(result.Pdf, 2));
+        Assert.Contains("Page 2", TestPdfAssert.ExtractText(result.Pdf, 3));
+    }
+
+    [Fact]
+    public void Arrange_SinglePageKept_DropsTheRest()
+    {
+        byte[] pdf = TestPdfs.MultiPage(4);
+
+        var result = PageTools.Arrange(pdf, new[] { 2 });
+
+        Assert.Equal(1, PdfInspector.GetInfo(result.Pdf).PageCount);
+        Assert.Contains("Page 2", TestPdfAssert.ExtractText(result.Pdf, 1));
+    }
+
+    [Fact]
+    public void Arrange_FullReverse_PreservesEveryPage()
+    {
+        byte[] pdf = TestPdfs.MultiPage(3);
+
+        var result = PageTools.Arrange(pdf, new[] { 3, 2, 1 });
+
+        Assert.Equal(3, PdfInspector.GetInfo(result.Pdf).PageCount);
+        Assert.Contains("Page 3", TestPdfAssert.ExtractText(result.Pdf, 1));
+        Assert.Contains("Page 1", TestPdfAssert.ExtractText(result.Pdf, 3));
+    }
+
+    [Fact]
+    public void Arrange_EncryptedSource_WorksWithPassword_AndDecryptsOutput()
+    {
+        byte[] locked = Encryptor.Encrypt(TestPdfs.MultiPage(3, "Secret"), "pw");
+
+        var result = PageTools.Arrange(locked, new[] { 3, 1 }, "pw");
+
+        Assert.False(Encryptor.IsEncrypted(result.Pdf)); // the rebuilt copy is a fresh, open document
+        Assert.Contains("Secret 3", TestPdfAssert.ExtractText(result.Pdf, 1));
+        Assert.Contains("Secret 1", TestPdfAssert.ExtractText(result.Pdf, 2));
+    }
+
+    [Fact]
+    public void Arrange_WrongPasswordForEncryptedSource_Throws()
+    {
+        byte[] locked = Encryptor.Encrypt(TestPdfs.MultiPage(2), "correct");
+        Assert.ThrowsAny<Exception>(() => PageTools.Arrange(locked, new[] { 1 }, "wrong"));
+    }
 }

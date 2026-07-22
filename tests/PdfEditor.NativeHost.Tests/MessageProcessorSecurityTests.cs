@@ -133,6 +133,53 @@ public class MessageProcessorSecurityTests
         Assert.False(Ok(r));
     }
 
+    // ---------------------------------------------- page/form actions reject bad input
+
+    [Fact]
+    public void ArrangePages_EmptyOrder_ReturnsError_NotCrash()
+    {
+        string pdf = Convert.ToBase64String(TestPdf.ManyPages(3));
+        Assert.False(Ok(HandleOne(Request("arrange-pages", new { pdf, order = Array.Empty<int>() }))));
+    }
+
+    [Fact]
+    public void ArrangePages_PageBeyondDocument_ReturnsError_NotCrash()
+    {
+        string pdf = Convert.ToBase64String(TestPdf.ManyPages(2));
+        Assert.False(Ok(HandleOne(Request("arrange-pages", new { pdf, order = new[] { 1, 999 } }))));
+    }
+
+    [Fact]
+    public void ArrangePages_MissingOrder_ReturnsError_NotCrash()
+    {
+        string pdf = Convert.ToBase64String(TestPdf.ManyPages(2));
+        Assert.False(Ok(HandleOne(Request("arrange-pages", new { pdf }))));
+    }
+
+    [Fact]
+    public void AddFormField_DropdownWithNoOptions_ReturnsError_NotCrash()
+    {
+        var r = HandleOne(Request("add-form-field", new
+        {
+            pdf = Convert.ToBase64String(TestPdf.OnePage()),
+            region = new { page = 1, x = 100, y = 500, width = 200, height = 24 },
+            fieldType = "dropdown", name = "empty", options = Array.Empty<string>(),
+        }));
+        Assert.False(Ok(r));
+    }
+
+    [Fact]
+    public void AddFormField_PageBeyondDocument_ReturnsError_NotCrash()
+    {
+        var r = HandleOne(Request("add-form-field", new
+        {
+            pdf = Convert.ToBase64String(TestPdf.OnePage()),
+            region = new { page = 42, x = 100, y = 500, width = 200, height = 24 },
+            fieldType = "text", name = "n",
+        }));
+        Assert.False(Ok(r));
+    }
+
     // --------------------------------------------------------------- no secret leak
 
     [Fact]

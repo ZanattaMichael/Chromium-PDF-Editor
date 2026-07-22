@@ -946,9 +946,14 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(file);
 
     await ui(page, '#btn-ocr');
-    // Deterministic across environments: OCR either succeeds ("searchable") or, when Tesseract is
-    // not installed, surfaces an actionable message naming it — never a silent failure.
-    await expect(page.locator('#status')).toContainText(/searchable|Tesseract/i, { timeout: 60000 });
+    // Deterministic across environments: OCR either succeeds (status confirms "searchable") or,
+    // when Tesseract is not installed, an in-app note naming it appears — never a silent failure.
+    await expect.poll(async () => {
+      const dialog = page.locator('dialog#modal');
+      if (await dialog.isVisible() && /Tesseract/i.test((await dialog.textContent()) || '')) return 'note';
+      if (/searchable/i.test((await page.locator('#status').textContent()) || '')) return 'done';
+      return 'pending';
+    }, { timeout: 60000 }).not.toBe('pending');
     await page.close();
   });
 

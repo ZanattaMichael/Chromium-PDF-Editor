@@ -14,8 +14,30 @@ so your documents never leave your machine.
 | 💾 **Save changes** | Save the edited document via the file picker or the downloads bar. Undo history while editing. |
 | 🧭 **Sits on top of browser PDF viewing** | Navigating to a `.pdf` opens the editor automatically (toggleable). Embedded PDF viewers on web pages get an “Edit in PDF Editor” overlay button, plus a toolbar button and right-click menu. Adobe sites and viewers are always left alone. |
 | 🔒 **Password protection** | AES-256 encryption with user/owner passwords; open, edit, and decrypt protected files. |
-| ➕ **Merge** | Append any number of PDFs to the open document, including encrypted sources. |
+| ➕ **Merge & arrange** | Append PDFs, images, or Word documents; a **Merge & arrange** dialog lets you set the combine order (or drop files) before merging. Images are laid onto standard A4 pages. |
+| 🗂 **Organize pages** | Reorder pages by drag or ▲/▼ and delete the ones you don't need. |
+| 🗒 **Fillable forms** | Insert text, multi-line, checkbox, dropdown (choice), and JavaScript **button** fields others can fill in, and fill/flatten existing AcroForm fields. |
+| 🖍 **Annotate** | Highlight text, draw freehand, and add text anywhere. |
+| ⚙ **Interactive JavaScript** | Add document-level scripts in a small code editor for form calculations/validation (runs in Acrobat/Chrome, never inside the viewer). |
+| 🧹 **Remove hidden information** | Scan for and strip metadata, embedded attachments, scripts/actions, comments, bookmarks, and hidden layers before sharing. |
+| 🔀 **Compare versions** | Word-level diff against another version, with a per-page summary of added and removed text. |
+| 🔎 **OCR** | Turn a scanned document into searchable, selectable text. Requires Tesseract — see [Optional external tools](#optional-external-tools). |
+| 🔒 **Password protection** | AES-256 encryption with user/owner passwords; open, edit, and decrypt protected files. |
 | 🖋 **Electronic signatures** | Draw a signature on a pad (or upload an image) and place it anywhere; or apply a cryptographic **digital signature** from a PKCS#12 certificate — the editor can also generate a self-signed certificate for you. Signature validity is verified and shown in the status bar. |
+
+## Optional external tools
+
+Most features work out of the box. Two optional capabilities shell out to a tool you install
+separately on the machine that runs the native host; when the tool is absent the editor reports a
+clear, actionable message instead of failing silently.
+
+| Capability | Needs | Install |
+| --- | --- | --- |
+| **OCR** (Make searchable) | [Tesseract OCR](https://tesseract-ocr.github.io/) + a language pack | Linux: `sudo apt install tesseract-ocr tesseract-ocr-eng` · macOS: `brew install tesseract` · Windows: [UB-Mannheim installer](https://github.com/UB-Mannheim/tesseract/wiki), then ensure `tesseract` is on `PATH` |
+| **Merging Word documents** | [LibreOffice](https://www.libreoffice.org/) (the `soffice` command) | Linux: `sudo apt install libreoffice` · macOS: `brew install --cask libreoffice` · Windows: the LibreOffice installer |
+
+The host looks for each tool on `PATH` and in the usual install locations. After installing, restart
+the browser (so the native host is respawned) and the capability lights up automatically.
 
 ## Architecture
 

@@ -1903,15 +1903,39 @@ async function removeScript(name) {
 async function runOcr() {
   if (!state.pdf) return;
   try {
+    // Check up front so we can show a helpful note instead of failing mid-operation.
+    const { available } = await host.call('ocr-available', {});
+    if (!available) { showOcrRequirement(); return; }
     setStatus('Recognising text (OCR)… this can take a moment.', true);
     const result = await host.call('ocr-searchable', {
       pdf: state.pdfB64, pdfPassword: state.password,
     });
     await applyResult(result.pdf, 'Document made searchable (OCR).');
   } catch (e) {
-    // Most likely Tesseract isn't installed; fail() surfaces the actionable message.
     fail(e);
   }
+}
+
+/** An in-app note explaining that OCR needs Tesseract installed, with per-platform commands. */
+function showOcrRequirement() {
+  modal.innerHTML =
+    '<h2>OCR needs Tesseract</h2>' +
+    '<p class="muted">“Make searchable (OCR)” recognises text in scanned pages using ' +
+    'Tesseract OCR, which runs alongside the native host. It isn’t installed on this machine.</p>' +
+    '<p class="muted">Install it, restart your browser, then try again:</p>' +
+    '<ul class="muted note-list">' +
+    '<li><b>Linux:</b> <code>sudo apt install tesseract-ocr tesseract-ocr-eng</code></li>' +
+    '<li><b>macOS:</b> <code>brew install tesseract</code></li>' +
+    '<li><b>Windows:</b> the UB-Mannheim installer, then put <code>tesseract</code> on your PATH</li>' +
+    '</ul>';
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const ok = document.createElement('button');
+  ok.textContent = 'Got it';
+  ok.addEventListener('click', () => modal.close());
+  actions.appendChild(ok);
+  modal.appendChild(actions);
+  modal.showModal();
 }
 
 // --------------------------------------------------------- document comparison

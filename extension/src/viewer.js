@@ -37,6 +37,7 @@ const state = {
   keepActiveContent: false, // false = strip JavaScript on save until the user opts in
   keepLinks: false,     // false = strip link URLs on save until the user enables them
   links: [],            // extracted { page, url }
+  formFields: [],       // [{ name, type, value, readOnly, page, x, y, width, height }] once listed
   urlVerdicts: [],      // [{ page, url, level, category, source, detail }] once scanned
   scripts: [],          // document-level JavaScript { name, script } once listed
   hidden: null,         // hidden-data report { metadataFields, attachments, ... } once inspected
@@ -205,6 +206,7 @@ async function loadDocument(bytes, fileName, { pushHistory = false, password } =
     updateChrome();
     if (freshOpen) warnActiveContent();
     refreshLinks(); // fetch, rate, and draw the clickable link hotspots
+    refreshFormFields(); // outline the document's form fields on the page
   });
 }
 
@@ -411,6 +413,7 @@ async function renderPageEl(pageNum) {
     pe.renderedKey = key;
     ensureTextLayer(pe, pageNum);
     buildLinkLayer(pe, pageNum); // draw any clickable link hotspots for this page
+    buildFieldLayer(pe, pageNum); // outline any form fields for this page
   } catch {
     /* leave the placeholder blank; it renders again when it next scrolls into view */
   }
@@ -2434,17 +2437,86 @@ function showLinkPopup(anchor, link, level, verdict) {
     : '● In-document action — opens nothing on the web';
   pop.appendChild(risk);
 
+  placePopupNear(pop, anchor);
+}
+
+/** Positions the shared popup just above (or below) an anchor element, kept on-screen. */
+function placePopupNear(pop, anchor) {
   pop.hidden = false;
   const r = anchor.getBoundingClientRect();
   const pw = pop.offsetWidth, ph = pop.offsetHeight;
-  let y = r.top - ph - 6;          // prefer above the link...
-  if (y < 4) y = r.bottom + 6;     // ...otherwise below it
+  let y = r.top - ph - 6;          // prefer above...
+  if (y < 4) y = r.bottom + 6;     // ...otherwise below
   const x = Math.min(Math.max(4, r.left), window.innerWidth - pw - 6);
   pop.style.left = `${x}px`;
   pop.style.top = `${y}px`;
 }
 
 function hideLinkPopup() { $('link-popup').hidden = true; }
+
+// ------------------------------------------------------- form-field markers
+
+const FIELD_ICONS = {
+  text: 'abc', multiline: '¶', checkbox: '☑', choice: '▾', radio: '◉',
+  button: 'btn', signature: '✍',
+};
+
+/** Fetches the document's form fields (with their on-page rectangles) and outlines them. */
+async function refreshFormFields() {
+  try {
+    const result = await host.call('form-fields', { pdf: state.pdfB64, pdfPassword: state.password });
+    state.formFields = result.fields ?? [];
+  } catch { state.formFields = []; }
+  drawFormFields();
+}
+
+function drawFormFields() {
+  for (const pe of pageEls) {
+    if (pe.wrap.isConnected) buildFieldLayer(pe, Number(pe.wrap.dataset.page));
+  }
+}
+
+/** Outlines each form field on one page so empty/borderless fields are visible; hover shows value. */
+function buildFieldLayer(pe, pageNum) {
+  pe.wrap.querySelector('.field-layer')?.remove();
+  const fields = (state.formFields ?? []).filter((f) => f.page === pageNum && f.width > 0 && f.height > 0);
+  if (fields.length === 0) return;
+  const layer = document.createElement('div');
+  layer.className = 'field-layer';
+  for (const field of fields) {
+    const css = pdfRectToCss(pageNum, pe.img, { x: field.x, y: field.y, width: field.width, height: field.height });
+    if (css.width <= 0 || css.height <= 0) continue;
+    const marker = document.createElement('div');
+    marker.className = 'field-marker';
+    marker.style.cssText = `left:${css.left}px;top:${css.top}px;width:${css.width}px;height:${css.height}px;`;
+    const tag = document.createElement('span');
+    tag.className = 'field-tag';
+    tag.textContent = FIELD_ICONS[field.type] ?? '▭';
+    marker.appendChild(tag);
+    marker.addEventListener('mouseenter', () => showFieldPopup(marker, field));
+    marker.addEventListener('mouseleave', hideLinkPopup);
+    marker.addEventListener('click', () => openForms()); // jump to the fill panel
+    layer.appendChild(marker);
+  }
+  pe.wrap.insertBefore(layer, pe.overlay); // above the text/link layers, below the tool overlay
+}
+
+/** Rollover popup for a form field: its name, type, and current value. */
+function showFieldPopup(marker, field) {
+  const pop = $('link-popup');
+  pop.innerHTML = '';
+  const name = document.createElement('div');
+  name.className = 'lp-url';
+  name.textContent = field.name || '(unnamed field)'; // textContent — document data, never HTML
+  pop.appendChild(name);
+  const meta = document.createElement('div');
+  meta.className = 'lp-risk unknown';
+  const value = (field.value ?? '').trim();
+  meta.textContent = `${field.type}${field.readOnly ? ' · read-only' : ''} · ` +
+    (value ? `“${value.length > 60 ? value.slice(0, 60) + '…' : value}”` : 'empty');
+  pop.appendChild(meta);
+  placePopupNear(pop, marker);
+}
 
 async function openLinks() {
   try {

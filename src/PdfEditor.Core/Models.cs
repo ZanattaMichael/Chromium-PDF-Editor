@@ -55,7 +55,8 @@ public sealed record SignatureInfo(string Name, string? SignerName, bool Integri
 /// fields (empty otherwise).
 /// </summary>
 public sealed record FormField(string Name, string Type, string Value,
-    IReadOnlyList<string> Options, bool ReadOnly);
+    IReadOnlyList<string> Options, bool ReadOnly,
+    int Page = 0, float X = 0, float Y = 0, float Width = 0, float Height = 0);
 
 /// <summary>
 /// Result of scanning a document for active content. <paramref name="Samples"/> holds a few

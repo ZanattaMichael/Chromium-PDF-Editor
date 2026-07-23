@@ -18,6 +18,21 @@ public class FormToolsTests
     }
 
     [Fact]
+    public void ListFields_ReportsTheWidgetPageAndRectangle()
+    {
+        // The viewer outlines each field on the page, so it needs the widget's page and box.
+        byte[] pdf = TestPdfs.WithTextField("fullName", "Jane");
+
+        var field = Assert.Single(FormTools.ListFields(pdf));
+
+        Assert.Equal(1, field.Page);
+        Assert.Equal(100f, field.X, 1f);
+        Assert.Equal(600f, field.Y, 1f);
+        Assert.Equal(200f, field.Width, 1f);
+        Assert.Equal(24f, field.Height, 1f);
+    }
+
+    [Fact]
     public void ListFields_NoForm_ReturnsEmpty()
     {
         byte[] pdf = TestPdfs.WithText(("no form here", 72, 700, 12));

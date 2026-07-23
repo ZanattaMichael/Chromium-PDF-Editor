@@ -526,6 +526,26 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('forms: fields are outlined on the page and the rollover shows their value', async () => {
+    const file = path.join(fixtureDir, 'formoverlay.pdf');
+    fs.writeFileSync(file, buildFormPdf('fullName', 'Ada'));
+    const page = await openViewerWith(file);
+
+    // The field's widget rectangle is outlined so an otherwise-invisible field is locatable.
+    const marker = page.locator('.page[data-page="1"] .field-marker');
+    await expect(marker).toHaveCount(1, { timeout: 15000 });
+    await expect(marker.locator('.field-tag')).toHaveText('abc'); // text-field icon
+
+    // Rolling over reveals the field's name, type, and current value.
+    await marker.hover();
+    const popup = page.locator('#link-popup');
+    await expect(popup).toBeVisible();
+    await expect(popup.locator('.lp-url')).toHaveText('fullName');
+    await expect(popup.locator('.lp-risk')).toContainText('text');
+    await expect(popup.locator('.lp-risk')).toContainText('Ada');
+    await page.close();
+  });
+
   test('undo / redo: a change can be undone and then redone', async () => {
     const file = fixture('undoredo.pdf', [[{ text: 'Keep me', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);

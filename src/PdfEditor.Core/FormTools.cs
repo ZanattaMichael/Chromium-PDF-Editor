@@ -171,6 +171,15 @@ public static class FormTools
         field.RegenerateField(); // emit an /AP appearance stream so PDFium actually draws it
     }
 
+    /// <summary>The page number (1-based) and rectangle of a field's first on-page widget.</summary>
+    private static (int Page, Rectangle? Rect) WidgetLocation(PdfDocument doc, PdfFormField field)
+    {
+        var widget = field.GetWidgets().FirstOrDefault();
+        if (widget == null) return (0, null);
+        var page = widget.GetPage();
+        return (page == null ? 0 : doc.GetPageNumber(page), widget.GetRectangle()?.ToRectangle());
+    }
+
     /// <summary>A field name that doesn't collide with an existing one.</summary>
     private static string UniqueName(PdfAcroForm form, string? requested, string prefix)
     {
@@ -197,7 +206,10 @@ public static class FormTools
             string type = FieldType(field);
             if (type == "container") continue; // non-terminal parent — not directly fillable
             bool readOnly = (field.GetFieldFlags() & PdfFormField.FF_READ_ONLY) != 0;
-            fields.Add(new FormField(name, type, field.GetValueAsString() ?? "", Options(field), readOnly));
+            var (page, rect) = WidgetLocation(doc, field);
+            fields.Add(new FormField(name, type, field.GetValueAsString() ?? "", Options(field), readOnly,
+                page,
+                rect?.GetX() ?? 0, rect?.GetY() ?? 0, rect?.GetWidth() ?? 0, rect?.GetHeight() ?? 0));
         }
         return fields;
     }

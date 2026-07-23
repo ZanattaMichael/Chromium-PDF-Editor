@@ -5,10 +5,10 @@ import { HostClient, bytesToBase64, base64ToBytes } from './host-client.js';
 
 const host = new HostClient();
 
-// URL/link scanning (the 🔗 Links panel + Cloudflare rating) is disabled for now. The backend
-// (list-urls/scan-urls, UrlClassifier, CloudflareUrlScanner) stays in place; flip this to re-enable
-// the button, the links badge, and stripping link URLs on save.
-const URL_SCANNING_ENABLED = false;
+// URL/link handling: a document with links shows a warning badge, links are disabled (stripped on
+// save) by default, and the 🔗 Links panel lists every URL (the "source") so the user can review
+// them and opt in to keeping them — optionally rated by the offline classifier / Cloudflare scanner.
+const URL_SCANNING_ENABLED = true;
 
 const state = {
   pdf: null,            // Uint8Array — current working document
@@ -1650,7 +1650,7 @@ async function openFromUrl(url) {
 // ----------------------------------------------------- forms + JS/URL safety
 
 /** Explains detected active content and lets the user keep it (default: strip on save). */
-function showSafetyDialog() {
+async function showSafetyDialog() {
   const s = state.safety;
   if (!s?.javaScriptCount) return;
   modal.innerHTML = '<h2>⚠ Embedded JavaScript</h2>';
@@ -1658,25 +1658,44 @@ function showSafetyDialog() {
   p.className = 'muted';
   p.textContent = `This document contains ${s.javaScriptCount} embedded JavaScript ` +
     `action${s.javaScriptCount === 1 ? '' : 's'}, which can run when the file is opened in ` +
-    'another PDF viewer. It is ' +
+    'another PDF viewer. Nothing runs inside this editor. It is ' +
     (state.keepActiveContent ? 'currently kept.' : 'disabled and will be removed when you save.');
   modal.appendChild(p);
-  if (s.samples?.length) {
-    const pre = document.createElement('pre');
-    pre.className = 'safety-samples';
-    pre.textContent = s.samples.join('\n'); // textContent — untrusted script/URL text is never executed
-    modal.appendChild(pre);
-  }
+
+  const srcLabel = document.createElement('p');
+  srcLabel.className = 'muted';
+  srcLabel.textContent = 'Source:';
+  modal.appendChild(srcLabel);
+  const pre = document.createElement('pre');
+  pre.className = 'safety-samples';
+  pre.textContent = 'Loading…';
+  modal.appendChild(pre);
+
   const actions = document.createElement('div');
   actions.className = 'actions';
   const toggle = document.createElement('button');
   toggle.className = state.keepActiveContent ? '' : 'danger';
   toggle.textContent = state.keepActiveContent ? 'Disable & strip on save' : 'Enable (keep) active content';
+  const edit = document.createElement('button');
+  edit.textContent = '⚙ Open in JavaScript editor';
   const close = document.createElement('button');
   close.textContent = 'Close';
-  actions.append(toggle, close);
+  actions.append(toggle, edit, close);
   modal.appendChild(actions);
   modal.showModal();
+
+  // Pull the full source of every detected script so the warning points at the actual code.
+  try {
+    const result = await host.call('js-sources', { pdf: state.pdfB64, pdfPassword: state.password });
+    const sources = result.sources ?? [];
+    // textContent — attacker-authored script text is shown inert, never executed or parsed as HTML.
+    pre.textContent = sources.length
+      ? sources.map((src, i) => `/* — script ${i + 1} — */\n${src}`).join('\n\n')
+      : (s.samples?.join('\n') || '(source unavailable)');
+  } catch {
+    pre.textContent = s.samples?.join('\n') || '(source unavailable)';
+  }
+
   toggle.addEventListener('click', () => {
     state.keepActiveContent = !state.keepActiveContent;
     modal.close();
@@ -1685,6 +1704,7 @@ function showSafetyDialog() {
       ? 'Active content will be kept when you save.'
       : 'Active content will be stripped when you save.');
   });
+  edit.addEventListener('click', () => { modal.close(); openJavaScript(); });
   close.addEventListener('click', () => modal.close());
 }
 
@@ -1711,9 +1731,10 @@ async function openForms() {
         input.type = 'checkbox';
         input.dataset.on = (f.options || []).find((o) => o && o !== 'Off') || 'Yes';
         input.checked = !!f.value && f.value !== 'Off';
-      } else if (f.type === 'choice' && f.options?.length) {
+      } else if ((f.type === 'choice' || f.type === 'radio') && f.options?.length) {
         input = document.createElement('select');
-        for (const o of f.options) {
+        // Radio "options" include the implicit Off (unselected) state — don't offer it as a choice.
+        for (const o of f.options.filter((o) => f.type !== 'radio' || o !== 'Off')) {
           const opt = document.createElement('option');
           opt.value = o;
           opt.textContent = o;
@@ -1759,13 +1780,15 @@ async function applyForms() {
 
 const FIELD_LABELS = {
   text: 'Text field', multiline: 'Text area', checkbox: 'Checkbox', dropdown: 'Dropdown',
-  button: 'Button',
+  radio: 'Option buttons', button: 'Button',
 };
+// Field types that need a list of options.
+const OPTION_TYPES = new Set(['dropdown', 'radio']);
 
 /** Shows only the extra inputs (options / caption+script) the chosen field type needs. */
 function updateFieldTypeRows() {
   const type = $('field-type').value;
-  $('field-options-row').hidden = type !== 'dropdown';
+  $('field-options-row').hidden = !OPTION_TYPES.has(type);
   $('field-caption-row').hidden = type !== 'button';
   $('field-script-row').hidden = type !== 'button';
 }
@@ -1774,11 +1797,15 @@ function updateFieldTypeRows() {
 function beginPlaceField() {
   if (!state.pdf) return;
   const fieldType = $('field-type').value;
-  const options = fieldType === 'dropdown'
+  const options = OPTION_TYPES.has(fieldType)
     ? $('field-options').value.split('\n').map((o) => o.trim()).filter(Boolean)
     : [];
   if (fieldType === 'dropdown' && options.length === 0) {
     toast('Add at least one dropdown option first.');
+    return;
+  }
+  if (fieldType === 'radio' && options.length < 2) {
+    toast('Add at least two options for an option group.');
     return;
   }
   state.pendingField = {
@@ -1926,7 +1953,7 @@ function showOcrRequirement() {
     '<ul class="muted note-list">' +
     '<li><b>Linux:</b> <code>sudo apt install tesseract-ocr tesseract-ocr-eng</code></li>' +
     '<li><b>macOS:</b> <code>brew install tesseract</code></li>' +
-    '<li><b>Windows:</b> the UB-Mannheim installer, then put <code>tesseract</code> on your PATH</li>' +
+    '<li><b>Windows:</b> <code>winget install -e --id tesseract-ocr.tesseract</code></li>' +
     '</ul>';
   const actions = document.createElement('div');
   actions.className = 'actions';

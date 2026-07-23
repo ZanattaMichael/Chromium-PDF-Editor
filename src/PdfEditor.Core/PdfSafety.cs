@@ -43,6 +43,76 @@ public static class PdfSafety
         return new SafetyReport(js, url, samples.Take(12).ToList());
     }
 
+    /// <summary>
+    /// Returns the full source of every embedded JavaScript in the document (document-level name
+    /// tree, open action, additional actions, and annotation actions) — so a warning can point the
+    /// user at the actual code. Never executed; returned purely as text.
+    /// </summary>
+    public static IReadOnlyList<string> JavaScriptSources(byte[] pdf, string? password = null)
+    {
+        using var doc = PdfIo.OpenReadOnly(pdf, password);
+        var sources = new List<string>();
+        var catalog = doc.GetCatalog().GetPdfObject();
+
+        CollectNameTreeJs(catalog.GetAsDictionary(PdfName.Names)?.GetAsDictionary(PdfName.JavaScript), sources);
+        CollectActionJs(catalog.Get(PdfName.OpenAction), sources);
+        CollectAaJs(catalog.GetAsDictionary(PdfName.AA), sources);
+        for (int i = 1; i <= doc.GetNumberOfPages(); i++)
+        {
+            var page = doc.GetPage(i);
+            CollectAaJs(page.GetPdfObject().GetAsDictionary(PdfName.AA), sources);
+            foreach (var annot in page.GetAnnotations())
+            {
+                var ad = annot.GetPdfObject();
+                CollectActionJs(ad.Get(PdfName.A), sources);
+                CollectAaJs(ad.GetAsDictionary(PdfName.AA), sources);
+            }
+        }
+        return sources;
+    }
+
+    private static void CollectActionJs(PdfObject? obj, List<string> sources)
+    {
+        if (obj is PdfArray arr) { foreach (var e in arr) CollectActionJs(e, sources); return; }
+        if (obj is not PdfDictionary a) return;
+        if (a.GetAsName(PdfName.S)?.Equals(PdfName.JavaScript) == true)
+        {
+            string src = JsText(a);
+            if (!string.IsNullOrWhiteSpace(src)) sources.Add(src);
+        }
+        CollectActionJs(a.Get(PdfName.Next), sources); // chained actions
+    }
+
+    private static void CollectAaJs(PdfDictionary? aa, List<string> sources)
+    {
+        if (aa == null) return;
+        foreach (var key in aa.KeySet().ToList()) CollectActionJs(aa.Get(key), sources);
+    }
+
+    private static void CollectNameTreeJs(PdfDictionary? tree, List<string> sources)
+    {
+        if (tree == null) return;
+        var names = tree.GetAsArray(PdfName.Names);
+        if (names != null)
+            for (int i = 1; i < names.Size(); i += 2)
+                if (names.Get(i) is PdfDictionary d)
+                {
+                    string src = JsText(d);
+                    if (!string.IsNullOrWhiteSpace(src)) sources.Add(src);
+                }
+        var kids = tree.GetAsArray(PdfName.Kids);
+        if (kids != null)
+            foreach (var kid in kids)
+                if (kid is PdfDictionary kd) CollectNameTreeJs(kd, sources);
+    }
+
+    private static string JsText(PdfDictionary action) => action.Get(PdfName.JS) switch
+    {
+        PdfString s => s.ToUnicodeString(),
+        PdfStream st => System.Text.Encoding.UTF8.GetString(st.GetBytes()),
+        _ => ""
+    };
+
     /// <summary>Removes all embedded JavaScript and outward-reaching actions (internal links kept).</summary>
     public static EditResult StripActive(byte[] pdf, string? password = null)
         => StripActive(pdf, javaScript: true, urls: true, password);

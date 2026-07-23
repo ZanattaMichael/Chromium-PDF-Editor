@@ -199,6 +199,42 @@ public class FormToolsTests
     }
 
     [Fact]
+    public void AddRadioGroup_InsertsAnOptionGroup_WithTheFirstSelected()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+
+        var result = FormTools.AddRadioGroup(pdf, 1, new RectRegion(1, 100, 500, 160, 80),
+            "size", new[] { "Small", "Medium", "Large" });
+
+        var field = Assert.Single(FormTools.ListFields(result.Pdf));
+        Assert.Equal("size", field.Name);
+        Assert.Equal("radio", field.Type);
+        Assert.Equal("Small", field.Value); // first option selected by default
+        Assert.Contains("Medium", field.Options);
+    }
+
+    [Fact]
+    public void AddRadioGroup_ThenFill_SelectsTheChosenOption()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+        byte[] withField = FormTools.AddRadioGroup(pdf, 1, new RectRegion(1, 100, 500, 160, 80),
+            "size", new[] { "Small", "Medium", "Large" }).Pdf;
+
+        var result = FormTools.FillFields(withField,
+            new Dictionary<string, string> { ["size"] = "Large" });
+
+        Assert.Equal("Large", Assert.Single(FormTools.ListFields(result.Pdf)).Value);
+    }
+
+    [Fact]
+    public void AddRadioGroup_FewerThanTwoOptions_Throws()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+        Assert.Throws<ArgumentException>(() =>
+            FormTools.AddRadioGroup(pdf, 1, new RectRegion(1, 100, 500, 160, 40), "x", new[] { "only" }));
+    }
+
+    [Fact]
     public void AddCheckbox_DefaultsToUnchecked_AndCanBeCheckedByFilling()
     {
         byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
@@ -234,6 +270,22 @@ public class PdfSafetyTests
 
         Assert.True(report.HasUrlActions);
         Assert.Contains(report.Samples, s => s.Contains("example.com"));
+    }
+
+    [Fact]
+    public void JavaScriptSources_ReturnsFullSource_OfDetectedScripts()
+    {
+        byte[] pdf = TestPdfs.WithOpenActionJavaScript("app.alert('the full script body here');");
+
+        var sources = PdfSafety.JavaScriptSources(pdf);
+
+        Assert.Contains(sources, s => s.Contains("the full script body here"));
+    }
+
+    [Fact]
+    public void JavaScriptSources_CleanDocument_IsEmpty()
+    {
+        Assert.Empty(PdfSafety.JavaScriptSources(TestPdfs.WithText(("no scripts", 72, 700, 12))));
     }
 
     [Fact]

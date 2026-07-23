@@ -56,6 +56,7 @@ public sealed class MessageProcessor
         "fill-form" => FillFormAction(p),
         "add-form-field" => AddFormFieldAction(p),
         "scan-safety" => ScanSafetyAction(p),
+        "js-sources" => new { sources = PdfSafety.JavaScriptSources(Pdf(p), Password(p)) },
         "strip-active" => StripActiveAction(p),
         "list-scripts" => ListScriptsAction(p),
         "add-script" => AddScriptAction(p),
@@ -206,6 +207,9 @@ public sealed class MessageProcessor
         {
             "checkbox" => FormTools.AddCheckbox(Pdf(p), region.Page, region, name, password: Password(p)),
             "dropdown" => FormTools.AddDropdown(Pdf(p), region.Page, region, name,
+                (p["options"]?.AsArray() ?? new JsonArray()).Select(o => o!.GetValue<string>()).ToList(),
+                Password(p)),
+            "radio" or "option" => FormTools.AddRadioGroup(Pdf(p), region.Page, region, name,
                 (p["options"]?.AsArray() ?? new JsonArray()).Select(o => o!.GetValue<string>()).ToList(),
                 Password(p)),
             "multiline" => FormTools.AddTextField(Pdf(p), region.Page, region, name,

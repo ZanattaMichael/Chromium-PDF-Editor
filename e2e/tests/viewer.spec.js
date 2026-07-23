@@ -442,35 +442,48 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
-  test('safety: JavaScript is detected, flagged, and stripped on save by default', async () => {
+  test('safety: JavaScript is detected, flagged with its source, and stripped by default', async () => {
     const file = path.join(fixtureDir, 'hasjs.pdf');
-    fs.writeFileSync(file, buildJavaScriptPdf("app.alert('x');"));
+    fs.writeFileSync(file, buildJavaScriptPdf("app.alert('DISTINCTIVE_MARKER_123');"));
     const page = await openViewerWith(file);
 
     // The active-content badge appears and reads "disabled" by default.
-    const badge = page.locator('#badges .badge.warn');
+    const badge = page.locator('#badges .badge.warn', { hasText: 'JavaScript' });
     await expect(badge).toBeVisible();
     await expect(badge).toContainText('disabled');
 
-    // The details dialog lets the user opt in to keeping it.
+    // The details dialog points at the actual script source and lets the user opt in to keeping it.
     await badge.click();
     const dialog = page.locator('dialog#modal');
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText('JavaScript');
+    await expect(dialog.locator('.safety-samples')).toContainText('DISTINCTIVE_MARKER_123');
     await dialog.getByRole('button', { name: /Enable \(keep\)/ }).click();
     await expect(badge).toContainText('kept');
     await page.close();
   });
 
-  test('links: URL scanning is disabled — no Links button or badge', async () => {
-    // The URL/link scanning feature is turned off for now (URL_SCANNING_ENABLED = false):
-    // the backend stays, but the UI is hidden and link URLs are left untouched on save.
+  test('links: a document with URLs warns, disables them, and can list the source', async () => {
+    // Links are detected and disabled by default (a warning badge), with the panel listing every
+    // URL (the source) and an opt-in to keep them.
     const file = path.join(fixtureDir, 'links.pdf');
     fs.writeFileSync(file, buildLinkPdf('https://github.com/example/repo'));
     const page = await openViewerWith(file);
 
-    await expect(page.locator('#btn-links')).toBeHidden();
-    await expect(page.locator('#badges .badge', { hasText: 'links' })).toHaveCount(0);
+    // A warning badge appears reading "disabled".
+    const badge = page.locator('#badges .badge.warn', { hasText: 'links' });
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText('disabled');
+
+    // Clicking it opens the Links panel, which lists the URL and offers to enable it.
+    await badge.click();
+    await expect(page.locator('#panel-links')).toBeVisible();
+    await expect(page.locator('#links-list')).toContainText('github.com/example/repo');
+    await expect(page.locator('#links-enable')).not.toBeChecked();
+
+    // Enabling flips the badge to "enabled".
+    await page.locator('#links-enable').check();
+    await expect(badge).toContainText('enabled');
     await page.close();
   });
 
@@ -879,6 +892,57 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
 
     // The forms panel reopens and lists the new choice field as a <select>.
     await expect(page.locator('#forms-list [data-field="country"]')).toHaveCount(1);
+    await page.close();
+  });
+
+  test('forms: an inserted field is visible on the page (not blank space)', async () => {
+    const file = fixture('visfield.pdf', [[{ text: 'form', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await page.selectOption('#field-type', 'text');
+    await page.fill('#field-name', 'visible_field');
+    await page.click('#field-place');
+    await dragPdfRect(page, { x: 100, y: 600, width: 220, height: 26 });
+    await expect(page.locator('#forms-list [data-field="visible_field"]')).toHaveCount(1);
+
+    // Scan the field's rectangle on the rendered page for non-white pixels (its border/background).
+    const drawn = await page.evaluate(async () => {
+      const img = document.querySelector('.page[data-page="1"] .page-image');
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
+      const s = img.naturalWidth / 595;
+      let nonWhite = 0;
+      for (let py = 600; py <= 626; py++)
+        for (let px = 100; px <= 320; px++) {
+          const d = ctx.getImageData(Math.round(px * s), Math.round((842 - py) * s), 1, 1).data;
+          if (!(d[0] > 248 && d[1] > 248 && d[2] > 248)) nonWhite++;
+        }
+      return nonWhite;
+    });
+    expect(drawn).toBeGreaterThan(0);
+    await page.close();
+  });
+
+  test('forms: insert an option (radio) group', async () => {
+    const file = fixture('radio.pdf', [[{ text: 'choose', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await page.selectOption('#field-type', 'radio');
+    await expect(page.locator('#field-options-row')).toBeVisible();
+    await page.fill('#field-name', 'plan');
+    await page.fill('#field-options', 'Basic\nPro\nEnterprise');
+    await page.click('#field-place');
+    await dragPdfRect(page, { x: 100, y: 560, width: 200, height: 90 });
+
+    // Listed as a single option field, rendered as a <select> of the choices (minus the Off state).
+    const select = page.locator('#forms-list [data-field="plan"]');
+    await expect(select).toHaveCount(1);
+    await expect(select.locator('option', { hasText: 'Enterprise' })).toHaveCount(1);
+    await expect(select.locator('option', { hasText: 'Off' })).toHaveCount(0);
     await page.close();
   });
 

@@ -1,10 +1,13 @@
 using iText.Forms;
 using iText.Forms.Fields;
 using iText.Forms.Fields.Properties;
+using iText.IO.Font.Constants;
 using iText.Kernel.Colors;
+using iText.Kernel.Font;
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Action;
+using iText.Kernel.Pdf.Canvas;
 
 namespace PdfEditor.Core;
 
@@ -29,7 +32,7 @@ public static class FormTools
                 .SetPage(page).CreateText();
             if (multiline) field.SetMultiline(true);
             field.SetValue(value ?? "");
-            field.GetFirstFormAnnotation().SetBorderColor(ColorConstants.GRAY);
+            StyleWidget(field);
             form.AddField(field);
         }
         return EditResult.Of(output.ToArray());
@@ -56,8 +59,53 @@ public static class FormTools
                 .SetWidgetRectangle(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))
                 .SetPage(page).SetOptions(choices).CreateComboBox();
             field.SetValue(choices[0]);
-            field.GetFirstFormAnnotation().SetBorderColor(ColorConstants.GRAY);
+            StyleWidget(field);
             form.AddField(field);
+        }
+        return EditResult.Of(output.ToArray());
+    }
+
+    /// <summary>
+    /// Inserts a radio-button ("option") group: one field with a button per option, stacked
+    /// vertically inside the rectangle with each option's label drawn beside it. Exactly one option
+    /// can be selected; the first is selected by default. Needs at least two options.
+    /// </summary>
+    public static EditResult AddRadioGroup(byte[] pdf, int page, RectRegion rect, string? name,
+        IReadOnlyList<string> options, string? password = null)
+    {
+        var choices = options.Where(o => !string.IsNullOrWhiteSpace(o)).Select(o => o.Trim())
+            .Distinct().ToArray();
+        if (choices.Length < 2)
+            throw new ArgumentException("A radio/option group needs at least two options.", nameof(options));
+
+        using var output = new MemoryStream();
+        using (var doc = PdfIo.Open(pdf, output, password))
+        {
+            if (page < 1 || page > doc.GetNumberOfPages())
+                throw new ArgumentOutOfRangeException(nameof(page), $"Page {page} does not exist.");
+            var pdfPage = doc.GetPage(page);
+            var form = PdfFormCreator.GetAcroForm(doc, true);
+            var builder = new RadioFormFieldBuilder(doc, UniqueName(form, name, "radio"));
+            var group = builder.CreateRadioGroup();
+
+            const float box = 14f;
+            float rowHeight = Math.Max(box + 4f, Math.Min(28f, rect.Height / choices.Length));
+            float top = rect.Y + rect.Height;
+            var canvas = new PdfCanvas(pdfPage);
+            var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+            for (int i = 0; i < choices.Length; i++)
+            {
+                float y = top - (i + 1) * rowHeight + (rowHeight - box) / 2f;
+                var radio = builder.CreateRadioButton(choices[i], new Rectangle(rect.X, y, box, box));
+                radio.SetBorderWidth(1);
+                radio.SetBorderColor(ColorConstants.GRAY);
+                radio.SetBackgroundColor(FieldFill);
+                group.AddKid(radio);
+                canvas.BeginText().SetFontAndSize(font, 11)
+                    .MoveText(rect.X + box + 6, y + 2).ShowText(choices[i]).EndText();
+            }
+            group.SetValue(choices[0]); // first option selected by default
+            form.AddField(group, pdfPage);
         }
         return EditResult.Of(output.ToArray());
     }
@@ -76,6 +124,7 @@ public static class FormTools
                 .SetWidgetRectangle(new Rectangle(rect.X, rect.Y, rect.Width, rect.Height))
                 .SetPage(page).SetCheckType(CheckBoxType.CHECK).CreateCheckBox();
             field.SetValue(isChecked ? "Yes" : "Off");
+            StyleWidget(field);
             form.AddField(field);
         }
         return EditResult.Of(output.ToArray());
@@ -105,6 +154,21 @@ public static class FormTools
             form.AddField(field);
         }
         return EditResult.Of(output.ToArray());
+    }
+
+    // A light fill so an empty field is a visible box on the page (many readers, including the
+    // PDFium-based preview, draw nothing for a borderless, value-less widget).
+    private static readonly DeviceRgb FieldFill = new(240, 244, 250);
+
+    /// <summary>Gives a widget a visible border + light background and generates its appearance so
+    /// it renders as an obvious box (not blank page space) in every viewer.</summary>
+    private static void StyleWidget(PdfFormField field)
+    {
+        var widget = field.GetFirstFormAnnotation();
+        widget.SetBorderWidth(1);
+        widget.SetBorderColor(ColorConstants.GRAY);
+        widget.SetBackgroundColor(FieldFill);
+        field.RegenerateField(); // emit an /AP appearance stream so PDFium actually draws it
     }
 
     /// <summary>A field name that doesn't collide with an existing one.</summary>

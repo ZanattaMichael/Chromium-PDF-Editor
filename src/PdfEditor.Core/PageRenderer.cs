@@ -13,8 +13,12 @@ public static class PageRenderer
         // PDFtoImage annotates ToImage per-platform; every platform this host ships to
         // (Windows, Linux, macOS — see the install scripts) is on its supported list.
 #pragma warning disable CA1416
+        // WithAnnotations + WithFormFill draw the annotation and AcroForm-widget layers, so
+        // inserted form fields (text/checkbox/dropdown/button) and comment annotations are
+        // actually visible in the preview instead of rendering as blank page content.
         using SKBitmap bitmap = Conversion.ToImage(stream, page: (Index)(page - 1),
-            password: password, options: new RenderOptions(Dpi: dpi));
+            password: password,
+            options: new RenderOptions(Dpi: dpi, WithAnnotations: true, WithFormFill: true));
 #pragma warning restore CA1416
         using var image = SKImage.FromBitmap(bitmap);
         using var encoded = image.Encode(SKEncodedImageFormat.Png, 100);

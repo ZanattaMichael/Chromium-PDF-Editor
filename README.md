@@ -33,7 +33,7 @@ clear, actionable message instead of failing silently.
 
 | Capability | Needs | Install |
 | --- | --- | --- |
-| **OCR** (Make searchable) | [Tesseract OCR](https://tesseract-ocr.github.io/) + a language pack | Linux: `sudo apt install tesseract-ocr tesseract-ocr-eng` · macOS: `brew install tesseract` · Windows: [UB-Mannheim installer](https://github.com/UB-Mannheim/tesseract/wiki), then ensure `tesseract` is on `PATH` |
+| **OCR** (Make searchable) | [Tesseract OCR](https://tesseract-ocr.github.io/) + a language pack | Linux: `sudo apt install tesseract-ocr tesseract-ocr-eng` · macOS: `brew install tesseract` · Windows: `winget install -e --id tesseract-ocr.tesseract` |
 | **Merging Word documents** | [LibreOffice](https://www.libreoffice.org/) (the `soffice` command) | Linux: `sudo apt install libreoffice` · macOS: `brew install --cask libreoffice` · Windows: the LibreOffice installer |
 
 The host looks for each tool on `PATH` and in the usual install locations. After installing, restart

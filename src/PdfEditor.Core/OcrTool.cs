@@ -70,8 +70,9 @@ public static class OcrTool
 
     private static string RequireTesseract() =>
         FindTesseract() ?? throw new InvalidOperationException(
-            "OCR needs Tesseract installed (the 'tesseract' command). Install Tesseract OCR " +
-            "(and a language pack such as 'tesseract-ocr-eng') and try again.");
+            "OCR needs Tesseract installed (the 'tesseract' command). Install Tesseract OCR and a " +
+            "language pack, then try again — on Windows: " +
+            "winget install -e --id tesseract-ocr.tesseract");
 
     private static (string StdOut, string StdErr, bool Ok) Run(string exe, string work, params string[] args)
     {

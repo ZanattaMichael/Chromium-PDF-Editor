@@ -136,6 +136,37 @@ public class NewActionsTests
     }
 
     [Fact]
+    public void AddFormField_Radio_InsertsOptionGroup()
+    {
+        var added = Handle("add-form-field", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage()),
+            region = new { page = 1, x = 100, y = 400, width = 160, height = 80 },
+            fieldType = "radio", name = "size", options = new[] { "S", "M", "L" },
+        });
+        Assert.True(Ok(added));
+
+        var list = Handle("form-fields", new { pdf = Result(added)["pdf"]!.GetValue<string>() });
+        var field = Assert.Single(Result(list)["fields"]!.AsArray());
+        Assert.Equal("size", field!["name"]!.GetValue<string>());
+        Assert.Equal("radio", field["type"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void JsSources_ReturnsTheFullScriptText()
+    {
+        string withJs = Result(Handle("add-script", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage()), name = "s", script = "var secret = 42; app.alert(secret);",
+        }))["pdf"]!.GetValue<string>();
+
+        var r = Handle("js-sources", new { pdf = withJs });
+        Assert.True(Ok(r));
+        var sources = Result(r)["sources"]!.AsArray().Select(n => n!.GetValue<string>()).ToList();
+        Assert.Contains(sources, s => s.Contains("var secret = 42"));
+    }
+
+    [Fact]
     public void AddFormField_Multiline_InsertsTextField()
     {
         var added = Handle("add-form-field", new

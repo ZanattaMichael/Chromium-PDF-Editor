@@ -17,6 +17,20 @@ public class UrlExtractionTests
     }
 
     [Fact]
+    public void ExtractLinks_CapturesTheHotspotRectangle()
+    {
+        // WithLinkTo puts the link annotation at Rect [72 700 272 720].
+        byte[] pdf = TestPdfs.WithLinkTo("https://example.com");
+
+        var link = Assert.Single(UrlTools.ExtractLinks(pdf));
+
+        Assert.Equal(72, link.X, 0.5);
+        Assert.Equal(700, link.Y, 0.5);
+        Assert.Equal(200, link.Width, 0.5);
+        Assert.Equal(20, link.Height, 0.5);
+    }
+
+    [Fact]
     public void ExtractLinks_NoLinks_ReturnsEmpty()
     {
         byte[] pdf = TestPdfs.WithText(("no links", 72, 700, 12));

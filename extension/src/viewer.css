@@ -231,6 +231,71 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
 #pages.select-mode .overlay { pointer-events: none; }
 ::selection { background: rgba(79, 142, 247, 0.4); }
 
+/* Clickable link hotspots laid over the rendered page, tinted by risk, with a risk-colour dot.
+   Only clickable in select mode (like the text layer); tools draw over them otherwise. */
+.link-layer { position: absolute; inset: 0; pointer-events: none; }
+.link-hotspot {
+  position: absolute;
+  display: block;
+  box-sizing: border-box;
+  border: 1.5px solid var(--risk);
+  border-radius: 2px;
+  /* Subtle when idle... */
+  background: color-mix(in srgb, var(--risk) 8%, transparent);
+  transition: background 0.12s ease, border-width 0.12s ease;
+}
+#pages.select-mode .link-hotspot { pointer-events: auto; cursor: pointer; }
+/* ...darker and more solid on rollover. */
+#pages.select-mode .link-hotspot:hover {
+  background: color-mix(in srgb, var(--risk) 42%, transparent);
+  border-width: 2px;
+}
+.link-hotspot.risk-green { --risk: #2f9e44; }
+.link-hotspot.risk-yellow { --risk: #e0a800; }
+.link-hotspot.risk-red { --risk: #e5484d; }
+.link-hotspot.risk-unknown { --risk: #7aa2f7; }
+.link-risk-dot {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid var(--bg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+.link-risk-dot.green { background: #2f9e44; }
+.link-risk-dot.yellow { background: #e0a800; }
+.link-risk-dot.red { background: #e5484d; }
+.link-risk-dot.unknown { background: #7aa2f7; }
+
+/* Rollover popup showing the link's URL and its risk rating. */
+#link-popup {
+  position: fixed;
+  z-index: 90;
+  max-width: 380px;
+  padding: 7px 10px;
+  background: var(--surface-2);
+  border: 1px solid #55555e;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  font-size: 12px;
+  pointer-events: none;
+}
+#link-popup[hidden] { display: none; }
+#link-popup .lp-url { color: var(--accent-2); word-break: break-all; }
+#link-popup .lp-risk {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 8px;
+  border-radius: 9px;
+  font-size: 11px;
+}
+.lp-risk.green { background: #1d5c2e; color: #c9f2d4; }
+.lp-risk.yellow { background: #7c5c10; color: #ffe9b0; }
+.lp-risk.red { background: #6e1e20; color: #ffd7d9; }
+.lp-risk.unknown { background: var(--surface); color: var(--muted); }
+
 /* Live freehand-drawing preview; the overlay above it captures the pointer. */
 .ink-layer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 .ink-layer polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }

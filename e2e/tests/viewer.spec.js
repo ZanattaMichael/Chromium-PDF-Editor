@@ -487,6 +487,29 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('links: a clickable hotspot is drawn over the link, coloured by risk', async () => {
+    const file = path.join(fixtureDir, 'linkspot.pdf');
+    fs.writeFileSync(file, buildLinkPdf('https://github.com/example/repo'));
+    const page = await openViewerWith(file);
+
+    // A hotspot is laid over the link's rectangle; github rates yellow (code-hosting heuristic).
+    const hotspot = page.locator('.page[data-page="1"] .link-hotspot');
+    await expect(hotspot).toHaveCount(1, { timeout: 15000 });
+    await expect(hotspot).toHaveClass(/risk-yellow/);
+    await expect(hotspot.locator('.link-risk-dot.yellow')).toHaveCount(1);
+    // It's a real link to the URL, opening in a new tab.
+    await expect(hotspot).toHaveAttribute('href', 'https://github.com/example/repo');
+    await expect(hotspot).toHaveAttribute('target', '_blank');
+
+    // Rolling over shows a popup with the URL and its risk rating.
+    await hotspot.hover();
+    const popup = page.locator('#link-popup');
+    await expect(popup).toBeVisible();
+    await expect(popup.locator('.lp-url')).toHaveText('https://github.com/example/repo');
+    await expect(popup.locator('.lp-risk.yellow')).toBeVisible();
+    await page.close();
+  });
+
   test('undo / redo: a change can be undone and then redone', async () => {
     const file = fixture('undoredo.pdf', [[{ text: 'Keep me', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);

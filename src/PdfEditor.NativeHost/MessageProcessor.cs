@@ -339,7 +339,14 @@ public sealed class MessageProcessor
     private static object ListUrlsAction(JsonObject p)
     {
         var links = UrlTools.ExtractLinks(Pdf(p), Password(p));
-        return new { links = links.Select(l => new { page = l.Page, url = l.Url }) };
+        return new
+        {
+            links = links.Select(l => new
+            {
+                page = l.Page, url = l.Url,
+                x = l.X, y = l.Y, width = l.Width, height = l.Height
+            })
+        };
     }
 
     private static object ScanUrlsAction(JsonObject p)

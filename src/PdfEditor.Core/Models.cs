@@ -68,8 +68,13 @@ public sealed record SafetyReport(int JavaScriptCount, int UrlCount, IReadOnlyLi
     public bool HasActiveContent => HasJavaScript || HasUrlActions;
 }
 
-/// <summary>A link URL found in the document, with the page it appears on.</summary>
-public sealed record PdfLink(int Page, string Url);
+/// <summary>
+/// A link URL found in the document, with the page it appears on and the rectangle of its clickable
+/// hotspot in PDF user space (x/y is the lower-left corner; zero-size when the annotation has no
+/// rectangle).
+/// </summary>
+public sealed record PdfLink(int Page, string Url,
+    float X = 0, float Y = 0, float Width = 0, float Height = 0);
 
 /// <summary>A named document-level JavaScript stored in the /Names /JavaScript tree.</summary>
 public sealed record PdfScript(string Name, string Script);

@@ -204,6 +204,7 @@ async function loadDocument(bytes, fileName, { pushHistory = false, password } =
   Promise.all([refreshSignatures(), refreshSafety()]).then(() => {
     updateChrome();
     if (freshOpen) warnActiveContent();
+    refreshLinks(); // fetch, rate, and draw the clickable link hotspots
   });
 }
 
@@ -409,6 +410,7 @@ async function renderPageEl(pageNum) {
     pe.img.src = `data:image/png;base64,${png}`;
     pe.renderedKey = key;
     ensureTextLayer(pe, pageNum);
+    buildLinkLayer(pe, pageNum); // draw any clickable link hotspots for this page
   } catch {
     /* leave the placeholder blank; it renders again when it next scrolls into view */
   }
@@ -1025,7 +1027,7 @@ function hideContextMenu() { $('context-menu').hidden = true; }
 
 scrollArea.addEventListener('contextmenu', showContextMenu);
 document.addEventListener('click', hideContextMenu);
-document.addEventListener('scroll', hideContextMenu, true);
+document.addEventListener('scroll', () => { hideContextMenu(); hideLinkPopup(); }, true);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideContextMenu(); });
 
 // ----------------------------------------------------------------- panels
@@ -2334,6 +2336,93 @@ function enableCodeEditorTab(textarea) {
 
 // ---------------------------------------------------------------- links / URLs
 
+/** On load, fetch the document's links (with hotspot rects) + their risk ratings and draw them. */
+async function refreshLinks() {
+  if (!URL_SCANNING_ENABLED || !(state.safety?.urlCount > 0)) {
+    state.links = [];
+    state.urlVerdicts = [];
+    drawLinks();
+    return;
+  }
+  try {
+    const result = await host.call('list-urls', { pdf: state.pdfB64, pdfPassword: state.password });
+    state.links = result.links ?? [];
+    try {
+      const creds = await chrome.storage.local.get({ cfAccountId: '', cfApiToken: '' });
+      const scan = await host.call('scan-urls', {
+        pdf: state.pdfB64, pdfPassword: state.password,
+        cfAccountId: creds.cfAccountId, cfApiToken: creds.cfApiToken,
+      });
+      state.urlVerdicts = scan.verdicts ?? [];
+    } catch { /* colour falls back to "unknown" */ }
+    drawLinks();
+  } catch { /* links are a nicety; never block on them */ }
+}
+
+/** (Re)draws the clickable, risk-coloured link hotspots on every laid-out page. */
+function drawLinks() {
+  for (const pe of pageEls) {
+    if (pe.wrap.isConnected) buildLinkLayer(pe, Number(pe.wrap.dataset.page));
+  }
+}
+
+/** Lays clickable link hotspots over one page, each tinted + dotted by its risk rating. */
+function buildLinkLayer(pe, pageNum) {
+  pe.wrap.querySelector('.link-layer')?.remove();
+  const links = (state.links ?? []).filter((l) => l.page === pageNum && l.width > 0 && l.height > 0);
+  if (links.length === 0) return;
+  const layer = document.createElement('div');
+  layer.className = 'link-layer';
+  for (const link of links) {
+    const css = pdfRectToCss(pageNum, pe.img, { x: link.x, y: link.y, width: link.width, height: link.height });
+    if (css.width <= 0 || css.height <= 0) continue;
+    const verdict = state.urlVerdicts.find((v) => v.url === link.url && v.page === link.page);
+    const level = verdict?.level ?? 'unknown';
+    const a = document.createElement('a');
+    a.className = `link-hotspot risk-${level}`;
+    a.href = link.url; // set as a property, never interpolated into HTML
+    a.target = '_blank';
+    a.rel = 'noreferrer nofollow';
+    a.style.cssText = `left:${css.left}px;top:${css.top}px;width:${css.width}px;height:${css.height}px;`;
+    // Rollover shows a popup with the URL and its risk rating (custom, not the native tooltip).
+    a.addEventListener('mouseenter', () => showLinkPopup(a, link.url, level, verdict));
+    a.addEventListener('mouseleave', hideLinkPopup);
+    const dot = document.createElement('span');
+    dot.className = `link-risk-dot ${level}`;
+    a.appendChild(dot);
+    layer.appendChild(a);
+  }
+  pe.wrap.insertBefore(layer, pe.overlay); // above the text layer, below the tool overlay
+}
+
+/** Shows the rollover popup with a link's URL and risk rating, positioned near the hotspot. */
+function showLinkPopup(anchor, url, level, verdict) {
+  const pop = $('link-popup');
+  pop.innerHTML = '';
+  const urlEl = document.createElement('div');
+  urlEl.className = 'lp-url';
+  urlEl.textContent = url; // textContent — the URL is document data, never HTML
+  pop.appendChild(urlEl);
+  const risk = document.createElement('div');
+  risk.className = `lp-risk ${level}`;
+  risk.textContent = level === 'unknown'
+    ? '● Not rated'
+    : `● ${level.toUpperCase()}${verdict?.category ? ` · ${verdict.category}` : ''}` +
+      (verdict?.source === 'cloudflare' ? ' (Cloudflare)' : '');
+  pop.appendChild(risk);
+
+  pop.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let y = r.top - ph - 6;          // prefer above the link...
+  if (y < 4) y = r.bottom + 6;     // ...otherwise below it
+  const x = Math.min(Math.max(4, r.left), window.innerWidth - pw - 6);
+  pop.style.left = `${x}px`;
+  pop.style.top = `${y}px`;
+}
+
+function hideLinkPopup() { $('link-popup').hidden = true; }
+
 async function openLinks() {
   try {
     setStatus('Finding links…', true);
@@ -2342,8 +2431,8 @@ async function openLinks() {
     state.links = result.links ?? [];
     $('links-enable').checked = state.keepLinks;
     showPanel('panel-links');
-    if (state.keepLinks && state.urlVerdicts.length === 0) await scanLinks();
-    else renderLinks();
+    if (state.urlVerdicts.length === 0) await scanLinks();
+    else { renderLinks(); drawLinks(); }
   } catch (e) {
     fail(e);
   }
@@ -2407,6 +2496,7 @@ async function scanLinks() {
     state.urlVerdicts = result.verdicts ?? [];
     setStatus('');
     renderLinks();
+    drawLinks();
     if (!usingCf) toast('Rated links offline. Add a Cloudflare token in Options for live scanning.');
   } catch (e) {
     fail(e);

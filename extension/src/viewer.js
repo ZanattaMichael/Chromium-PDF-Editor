@@ -758,15 +758,15 @@ pagesEl.addEventListener('pointerdown', (e) => {
   if (!pe) return;
   const rect = overlay.getBoundingClientRect();
 
-  // Move tool: pick up the text run under the cursor and drag it to a new spot.
+  // Move tool: pick up the text run (or the image) under the cursor and drag it to a new spot.
   if (state.tool === 'move') {
     const pageNum = Number(pe.wrap.dataset.page);
     const start = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     const startPdf = cssToPdf(pageNum, pe.img, start.x, start.y);
     const spans = spanCache.get(`${state.version}|${pageNum}`) ?? [];
+    // A text run under the cursor moves as text; otherwise the drag tries to move an image there.
     const span = spans.find((s) => startPdf.x >= s.x && startPdf.x <= s.x + s.width &&
-      startPdf.y >= s.y && startPdf.y <= s.y + s.height);
-    if (!span) { toast('Grab a word or line of text to move it.'); return; }
+      startPdf.y >= s.y && startPdf.y <= s.y + s.height) ?? null;
     moveDrag = { pe, pageNum, start, startPdf, span, ghost: null };
     overlay.setPointerCapture(e.pointerId);
     return;
@@ -787,6 +787,7 @@ pagesEl.addEventListener('pointerdown', (e) => {
 
 pagesEl.addEventListener('pointermove', (e) => {
   if (moveDrag) {
+    if (!moveDrag.span) return; // image move: no run box to ghost, result appears on release
     const r = moveDrag.pe.overlay.getBoundingClientRect();
     const dx = (e.clientX - r.left) - moveDrag.start.x;
     const dy = (e.clientY - r.top) - moveDrag.start.y;
@@ -832,7 +833,10 @@ pagesEl.addEventListener('pointerup', async (e) => {
     if (moveDrag.ghost) moveDrag.ghost.remove();
     const md = moveDrag;
     moveDrag = null;
-    if (Math.abs(dx) >= 1 || Math.abs(dy) >= 1) await applyMoveText(md.span, md.pageNum, dx, dy);
+    if (Math.abs(dx) >= 1 || Math.abs(dy) >= 1) {
+      if (md.span) await applyMoveText(md.span, md.pageNum, dx, dy);
+      else await applyMoveImage(md.pageNum, md.startPdf, dx, dy);
+    }
     return;
   }
   if (inkDrag) {
@@ -898,17 +902,116 @@ pagesEl.addEventListener('pointerup', async (e) => {
 });
 
 // Right-click a word (in select mode) to edit that run of text in place.
-pagesEl.addEventListener('contextmenu', (e) => {
-  if (state.tool !== 'select' || !state.pdf) return;
-  const span = e.target.closest('.text-layer span');
-  if (!span?.dataset.region) return;
-  e.preventDefault();
+// ---------------------------------------------------------- right-click menu
+
+const URL_IN_TEXT = /\bhttps?:\/\/[^\s)]+/i;
+
+/** Region (PDF space) of the current text selection, or null if it isn't over a page. */
+function selectionRegion() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return null;
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  for (const pe of pageEls) {
+    const b = pe.img.getBoundingClientRect();
+    if (cx < b.left || cx > b.right || cy < b.top || cy > b.bottom) continue;
+    const pageNum = Number(pe.wrap.dataset.page);
+    const a = cssToPdf(pageNum, pe.img, rect.left - b.left, rect.bottom - b.top);
+    const c = cssToPdf(pageNum, pe.img, rect.right - b.left, rect.top - b.top);
+    const pad = 1.5;
+    return {
+      page: pageNum,
+      x: Math.min(a.x, c.x) - pad, y: Math.min(a.y, c.y) - pad,
+      width: Math.abs(c.x - a.x) + 2 * pad, height: Math.abs(c.y - a.y) + 2 * pad,
+    };
+  }
+  return null;
+}
+
+/** The text run region under a right-clicked span (fallback when nothing is selected). */
+function spanRegion(target) {
+  const span = target.closest?.('.text-layer span');
+  if (!span?.dataset.region) return null;
   const r = JSON.parse(span.dataset.region);
-  const pad = 1; // capture the whole run comfortably
-  const region = { page: r.page, x: r.x - pad, y: r.y - pad, width: r.width + 2 * pad, height: r.height + 2 * pad };
-  state.pendingEditRegion = region;
-  beginTextEdit(region);
-});
+  const pad = 1;
+  return { page: r.page, x: r.x - pad, y: r.y - pad, width: r.width + 2 * pad, height: r.height + 2 * pad };
+}
+
+function ctxItem(label, action, disabled = false) { return { label, action, disabled }; }
+const CTX_SEP = { sep: true };
+
+/** Builds the context-sensitive menu items for a right-click. */
+function buildContextItems(e) {
+  const items = [];
+  const selText = (window.getSelection()?.toString() ?? '').trim();
+  const region = selText ? selectionRegion() : spanRegion(e.target);
+  const runText = !selText && region ? null : selText;
+
+  if (region) {
+    // Text context: act on the selected text / clicked run.
+    items.push(ctxItem('✏ Edit text', () => { state.pendingEditRegion = region; setTool('select'); beginTextEdit(region); }));
+    items.push(ctxItem('⬛ Redact this', () => { state.regions.push(region); setTool('redact'); drawRegions(); toast('Marked for redaction — review and Apply.'); }));
+    items.push(ctxItem('🖍 Highlight', () => applyHighlight(region)));
+    if (runText) items.push(ctxItem('📋 Copy', () => navigator.clipboard?.writeText(runText).catch(() => {})));
+    const url = selText.match(URL_IN_TEXT)?.[0];
+    if (url) { items.push(CTX_SEP); items.push(ctxItem('🔗 Open link', () => window.open(url, '_blank', 'noreferrer'))); }
+    return items;
+  }
+
+  // Nothing selected: document-level actions.
+  items.push(ctxItem('🔎 Make searchable (OCR)', runOcr));
+  items.push(ctxItem('⚙ Show source code', showSourceCode));
+  items.push(CTX_SEP);
+  items.push(ctxItem('💾 Save', save));
+  items.push(ctxItem('🖨 Print', printDocument));
+  items.push(CTX_SEP);
+  items.push(ctxItem('🔍 Zoom in', () => setZoom(state.zoom + 0.25)));
+  items.push(ctxItem('🔎 Zoom out', () => setZoom(state.zoom - 0.25)));
+  items.push(CTX_SEP);
+  items.push(ctxItem('↩ Undo', undo, state.history.length === 0));
+  items.push(ctxItem('↪ Redo', redo, state.future.length === 0));
+  return items;
+}
+
+/** Shows detected JavaScript source (the safety dialog), or the document-script editor. */
+function showSourceCode() {
+  if (state.safety?.javaScriptCount > 0) showSafetyDialog();
+  else openJavaScript();
+}
+
+function showContextMenu(e) {
+  if (!state.pdf) return;
+  const items = buildContextItems(e);
+  if (items.length === 0) return;
+  e.preventDefault();
+  const menu = $('context-menu');
+  menu.innerHTML = '';
+  for (const it of items) {
+    if (it.sep) { const s = document.createElement('div'); s.className = 'ctx-sep'; menu.appendChild(s); continue; }
+    const b = document.createElement('button');
+    b.className = 'ctx-item';
+    b.textContent = it.label;
+    b.disabled = !!it.disabled;
+    if (!it.disabled) b.addEventListener('click', () => { hideContextMenu(); it.action(); });
+    menu.appendChild(b);
+  }
+  menu.hidden = false;
+  // Keep the menu on-screen.
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  const x = Math.min(e.clientX, window.innerWidth - mw - 6);
+  const y = Math.min(e.clientY, window.innerHeight - mh - 6);
+  menu.style.left = `${Math.max(4, x)}px`;
+  menu.style.top = `${Math.max(4, y)}px`;
+}
+
+function hideContextMenu() { $('context-menu').hidden = true; }
+
+scrollArea.addEventListener('contextmenu', showContextMenu);
+document.addEventListener('click', hideContextMenu);
+document.addEventListener('scroll', hideContextMenu, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideContextMenu(); });
 
 // ----------------------------------------------------------------- panels
 
@@ -1168,6 +1271,21 @@ async function applyMoveText(span, pageNum, dx, dy) {
       pdf: state.pdfB64, region, dx, dy, pdfPassword: state.password,
     });
     await applyContentEdit(result.pdf, [pageNum], 'Text moved.');
+  } catch (e) {
+    fail(e);
+  }
+}
+
+/** Moves the image under the grab point by (dx, dy). No-ops (with a hint) if none is there. */
+async function applyMoveImage(pageNum, startPdf, dx, dy) {
+  const region = { page: pageNum, x: startPdf.x - 2, y: startPdf.y - 2, width: 4, height: 4 };
+  try {
+    setStatus('Moving image…', true);
+    const result = await host.call('move-image', {
+      pdf: state.pdfB64, region, dx, dy, pdfPassword: state.password,
+    });
+    if (result.pdf === state.pdfB64) { setStatus(''); toast('Nothing to move there — grab a word or an image.'); return; }
+    await applyContentEdit(result.pdf, [pageNum], 'Image moved.');
   } catch (e) {
     fail(e);
   }

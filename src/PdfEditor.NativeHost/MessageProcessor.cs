@@ -50,6 +50,7 @@ public sealed class MessageProcessor
         "arrange-pages" => ArrangePagesAction(p),
         "add-text" => AddTextAction(p),
         "move-text" => MoveTextAction(p),
+        "move-image" => MoveImageAction(p),
         "add-drawing" => AddDrawingAction(p),
         "add-highlight" => AddHighlightAction(p),
         "form-fields" => FormFieldsAction(p),
@@ -147,6 +148,14 @@ public sealed class MessageProcessor
     private static object MoveTextAction(JsonObject p)
     {
         var result = TextTools.MoveText(Pdf(p), Region(p["region"]!.AsObject()),
+            p["dx"]!.GetValue<float>(), p["dy"]!.GetValue<float>(), Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object MoveImageAction(JsonObject p)
+    {
+        var region = Region(p["region"]!.AsObject());
+        var result = ImageTools.MoveImage(Pdf(p), region.Page, region,
             p["dx"]!.GetValue<float>(), p["dy"]!.GetValue<float>(), Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }

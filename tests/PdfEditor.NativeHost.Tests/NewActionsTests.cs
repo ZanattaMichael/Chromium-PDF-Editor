@@ -43,6 +43,19 @@ public class NewActionsTests
     }
 
     [Fact]
+    public void MoveImage_NoImage_ReturnsPdfUnchanged()
+    {
+        // OnePage has no image; move-image is a clean no-op that returns a valid document.
+        var r = Handle("move-image", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage()),
+            region = new { page = 1, x = 100, y = 100, width = 40, height = 40 }, dx = 20, dy = 20,
+        });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+    }
+
+    [Fact]
     public void AddDrawing_ReturnsPdf()
     {
         var r = Handle("add-drawing", new

@@ -41,7 +41,7 @@
         <button id="tool-draw" class="menu-item tool" role="menuitem" title="Draw freehand on the page">✒ Draw</button>
         <button id="tool-highlight" class="menu-item tool" role="menuitem" title="Drag across text to highlight it">🖍 Highlight</button>
         <button id="tool-edit" class="menu-item tool" role="menuitem" title="Drag a box around text to change it">✏ Edit text</button>
-        <button id="tool-move" class="menu-item tool" role="menuitem" title="Grab a run of text and drag it to a new position">✥ Move text</button>
+        <button id="tool-move" class="menu-item tool" role="menuitem" title="Grab a run of text or an image and drag it to a new position">✥ Move text / image</button>
         <button id="tool-redact" class="menu-item tool" role="menuitem" title="Drag boxes over content to black it out">⬛ Redact</button>
         <button id="tool-sign" class="menu-item tool" role="menuitem" title="Place a signature">🖋 Sign</button>
         <div class="menu-sep" aria-hidden="true"></div>
@@ -298,6 +298,8 @@
       <span id="busy-text"></span>
     </div>
   </div>
+
+  <div id="context-menu" role="menu" hidden></div>
 
   <dialog id="modal"></dialog>
   <input id="file-input" type="file" accept="application/pdf" hidden />

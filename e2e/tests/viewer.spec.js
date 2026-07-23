@@ -656,8 +656,10 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const selected = await page.evaluate(() => window.getSelection().toString());
     expect(selected).toContain('Selectable');
 
-    // Right-clicking a word opens the edit panel pre-filled with that run's text (edit in place).
+    // Right-clicking opens the context menu; "Edit text" opens the edit panel pre-filled with
+    // the selected run's text (edit in place).
     await span.click({ button: 'right' });
+    await page.locator('#context-menu').getByRole('button', { name: /Edit text/ }).click();
     await expect(page.locator('#panel-edit')).toBeVisible();
     await expect(page.locator('#edit-title')).toHaveText('Edit text');
     await expect(page.locator('#edit-text')).toHaveValue(/Selectable Sentence Here/);
@@ -756,6 +758,74 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await ui(page, '#tool-edit');
     await dragPdfRect(page, { x: 60, y: 690, width: 220, height: 36 });
     await expect(page.locator('#edit-text')).not.toHaveValue(/MOVE ME/);
+    await page.close();
+  });
+
+  test('move image: grab an image and drag it to a new position', async () => {
+    const base = fixture('moveimg.pdf', [[{ text: 'Base', x: 72, y: 700 }]]);
+    // Merge a small PNG so page 2 is an image we can grab and move.
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64');
+    const imgFile = path.join(fixtureDir, 'movepic.png');
+    fs.writeFileSync(imgFile, png);
+    const page = await openViewerWith(base);
+
+    const chooser = page.waitForEvent('filechooser');
+    await ui(page, '#btn-merge');
+    await (await chooser).setFiles(imgFile);
+    await page.locator('dialog#modal').getByRole('button', { name: 'Merge' }).click();
+    await expect(page.locator('#page-total')).toHaveText('2');
+
+    // Bring page 2 (the image) into view and grab its centre with the Move tool.
+    await page.evaluate(() =>
+      document.querySelector('.page[data-page="2"]').scrollIntoView({ block: 'start', behavior: 'instant' }));
+    await expect(page.locator('.page[data-page="2"] .page-image')).toHaveAttribute('src', /data:image\/png/);
+    await ui(page, '#tool-move');
+    const box = await page.locator('.page[data-page="2"] .page-image').boundingBox();
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3, { steps: 8 });
+    await page.mouse.up();
+    await expect(page.locator('#status')).toContainText('Image moved');
+    await page.close();
+  });
+
+  test('context menu: right-clicking selected text offers Edit and Redact', async () => {
+    const file = fixture('ctxsel.pdf', [[{ text: 'Right Click Me', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    const span = page.locator('.page[data-page="1"] .text-layer span', { hasText: 'Right' });
+    await span.waitFor({ timeout: 15000 });
+    await span.click({ clickCount: 3 }); // select the run
+    await span.click({ button: 'right' });
+
+    const menu = page.locator('#context-menu');
+    await expect(menu).toBeVisible();
+    await expect(menu).toContainText('Edit text');
+    await expect(menu).toContainText('Redact this');
+    await expect(menu).toContainText('Highlight');
+
+    // "Redact this" marks the selection as a redaction region.
+    await menu.getByRole('button', { name: /Redact this/ }).click();
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+    await page.close();
+  });
+
+  test('context menu: right-clicking with no selection offers document actions', async () => {
+    const file = fixture('ctxdoc.pdf', [[{ text: 'plain', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    // Right-click the visible centre of the scroll area (blank page area, no selection).
+    const sa = await page.locator('#scroll-area').boundingBox();
+    await page.mouse.click(sa.x + sa.width * 0.5, sa.y + sa.height * 0.5, { button: 'right' });
+
+    const menu = page.locator('#context-menu');
+    await expect(menu).toBeVisible();
+    await expect(menu).toContainText('Make searchable');
+    await expect(menu).toContainText('Show source code');
+    await expect(menu).toContainText('Save');
+    await expect(menu).toContainText('Print');
+    await expect(menu).toContainText('Zoom in');
     await page.close();
   });
 

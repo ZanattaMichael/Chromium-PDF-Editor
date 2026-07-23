@@ -457,6 +457,32 @@ textarea.code-editor:focus { outline: 1px solid var(--accent-2); }
 .badge.locked { background: #7c5c10; color: #ffe9b0; }
 .badge.signed { background: #1d5c2e; color: #c9f2d4; }
 
+/* --------------------------------------------------------- right-click menu */
+#context-menu {
+  position: fixed;
+  z-index: 80;
+  min-width: 188px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface-2);
+  border: 1px solid #55555e;
+  border-radius: 8px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.6);
+}
+#context-menu[hidden] { display: none; }
+.ctx-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  padding: 6px 10px;
+}
+.ctx-item:hover:not(:disabled) { background: #55555f; }
+.ctx-sep { border-top: 1px solid #55555e; margin: 4px 2px; }
+
 /* ------------------------------------------------------------------ modal */
 dialog {
   background: var(--surface);

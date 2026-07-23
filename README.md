@@ -18,6 +18,8 @@ so your documents never leave your machine.
 | 🗂 **Organize pages** | Reorder pages by drag or ▲/▼ and delete the ones you don't need. |
 | 🗒 **Fillable forms** | Insert text, multi-line, checkbox, dropdown (choice), and JavaScript **button** fields others can fill in, and fill/flatten existing AcroForm fields. |
 | 🖍 **Annotate** | Highlight text, draw freehand, and add text anywhere. |
+| ✥ **Move text & images** | Grab a run of text or an image with the Move tool and drag it to a new position. |
+| 🖱 **Right-click menu** | Context actions: on selected text — Edit, Redact, Highlight, Copy, Open link; on blank page — Make searchable (OCR), Show source code, Save, Print, Zoom, Undo/Redo. |
 | ⚙ **Interactive JavaScript** | Add document-level scripts in a small code editor for form calculations/validation (runs in Acrobat/Chrome, never inside the viewer). |
 | 🧹 **Remove hidden information** | Scan for and strip metadata, embedded attachments, scripts/actions, comments, bookmarks, and hidden layers before sharing. |
 | 🔀 **Compare versions** | Word-level diff against another version, with a per-page summary of added and removed text. |

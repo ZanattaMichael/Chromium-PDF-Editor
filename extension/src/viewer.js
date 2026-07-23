@@ -606,7 +606,7 @@ function updateNav() {
 function updateChrome() {
   const loaded = !!state.pdf;
   for (const id of ['btn-save', 'btn-print', 'btn-sidebar', 'tool-text', 'tool-draw',
-    'tool-highlight', 'tool-edit', 'tool-redact', 'tool-sign',
+    'tool-highlight', 'tool-edit', 'tool-move', 'tool-redact', 'tool-sign',
     'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-organize', 'btn-js', 'btn-sanitize', 'btn-ocr',
     'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
     'menu-read-trigger', 'menu-edit-trigger', 'btn-compare',
@@ -747,6 +747,8 @@ function addPolyline(svg, points, widthPx) {
 // Drag-to-draw for edit/redact/sign/text tools. Delegated on the page column so a drag is
 // attributed to whichever page it started on.
 let drag = null;
+// Grab-and-drag of an existing run of text with the Move tool.
+let moveDrag = null; // { pe, pageNum, start:{x,y}, startPdf, span, ghost }
 
 pagesEl.addEventListener('pointerdown', (e) => {
   if (state.tool === 'select' || !state.pdf) return;
@@ -755,6 +757,20 @@ pagesEl.addEventListener('pointerdown', (e) => {
   const pe = pageEls.find((p) => p.overlay === overlay);
   if (!pe) return;
   const rect = overlay.getBoundingClientRect();
+
+  // Move tool: pick up the text run under the cursor and drag it to a new spot.
+  if (state.tool === 'move') {
+    const pageNum = Number(pe.wrap.dataset.page);
+    const start = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const startPdf = cssToPdf(pageNum, pe.img, start.x, start.y);
+    const spans = spanCache.get(`${state.version}|${pageNum}`) ?? [];
+    const span = spans.find((s) => startPdf.x >= s.x && startPdf.x <= s.x + s.width &&
+      startPdf.y >= s.y && startPdf.y <= s.y + s.height);
+    if (!span) { toast('Grab a word or line of text to move it.'); return; }
+    moveDrag = { pe, pageNum, start, startPdf, span, ghost: null };
+    overlay.setPointerCapture(e.pointerId);
+    return;
+  }
 
   if (state.tool === 'draw') {
     const pageNum = Number(pe.wrap.dataset.page);
@@ -770,6 +786,20 @@ pagesEl.addEventListener('pointerdown', (e) => {
 });
 
 pagesEl.addEventListener('pointermove', (e) => {
+  if (moveDrag) {
+    const r = moveDrag.pe.overlay.getBoundingClientRect();
+    const dx = (e.clientX - r.left) - moveDrag.start.x;
+    const dy = (e.clientY - r.top) - moveDrag.start.y;
+    if (!moveDrag.ghost) {
+      moveDrag.ghost = document.createElement('div');
+      moveDrag.ghost.className = 'region edit move-ghost';
+      moveDrag.pe.overlay.appendChild(moveDrag.ghost);
+    }
+    const css = pdfRectToCss(moveDrag.pageNum, moveDrag.pe.img, moveDrag.span);
+    moveDrag.ghost.style.cssText =
+      `left:${css.left + dx}px;top:${css.top + dy}px;width:${css.width}px;height:${css.height}px;`;
+    return;
+  }
   if (inkDrag) {
     const rect = inkDrag.pe.overlay.getBoundingClientRect();
     inkDrag.points.push({ x: e.clientX - rect.left, y: e.clientY - rect.top });
@@ -794,6 +824,17 @@ pagesEl.addEventListener('pointermove', (e) => {
 });
 
 pagesEl.addEventListener('pointerup', async (e) => {
+  if (moveDrag) {
+    const r = moveDrag.pe.overlay.getBoundingClientRect();
+    const endPdf = cssToPdf(moveDrag.pageNum, moveDrag.pe.img, e.clientX - r.left, e.clientY - r.top);
+    const dx = endPdf.x - moveDrag.startPdf.x;
+    const dy = endPdf.y - moveDrag.startPdf.y;
+    if (moveDrag.ghost) moveDrag.ghost.remove();
+    const md = moveDrag;
+    moveDrag = null;
+    if (Math.abs(dx) >= 1 || Math.abs(dy) >= 1) await applyMoveText(md.span, md.pageNum, dx, dy);
+    return;
+  }
   if (inkDrag) {
     if (inkDrag.points.length > 0) {
       const list = inkByPage.get(inkDrag.pageNum) ?? [];
@@ -895,6 +936,7 @@ function setTool(tool) {
   for (const pe of pageEls) pe.overlay.classList.toggle('tool-active', tool !== 'select');
   // In select mode the text layer is interactive (select/copy); tools capture the overlay instead.
   pagesEl.classList.toggle('select-mode', tool === 'select');
+  pagesEl.classList.toggle('move-mode', tool === 'move'); // a "move" cursor over the page
   if (tool === 'redact') showPanel('panel-redact');
   else if (tool === 'draw') showPanel('panel-draw');
   else if (tool === 'highlight') showPanel('panel-highlight');
@@ -1106,6 +1148,26 @@ async function applyTextEdit() {
     hidePanels();
     if (adding) setTool('text');
     await applyContentEdit(result.pdf, [region.page], adding ? 'Text added.' : 'Text replaced.');
+  } catch (e) {
+    fail(e);
+  }
+}
+
+// --------------------------------------------------------------- move text
+
+/** Moves a run of existing text by (dx, dy) in PDF space (grabbed with the Move tool). */
+async function applyMoveText(span, pageNum, dx, dy) {
+  const pad = 1; // capture the whole run comfortably
+  const region = {
+    page: pageNum, x: span.x - pad, y: span.y - pad,
+    width: span.width + 2 * pad, height: span.height + 2 * pad,
+  };
+  try {
+    setStatus('Moving text…', true);
+    const result = await host.call('move-text', {
+      pdf: state.pdfB64, region, dx, dy, pdfPassword: state.password,
+    });
+    await applyContentEdit(result.pdf, [pageNum], 'Text moved.');
   } catch (e) {
     fail(e);
   }
@@ -2366,6 +2428,7 @@ function wire() {
   $('tool-draw').addEventListener('click', () => setTool('draw'));
   $('tool-highlight').addEventListener('click', () => setTool('highlight'));
   $('tool-edit').addEventListener('click', () => setTool('edit'));
+  $('tool-move').addEventListener('click', () => setTool('move'));
   $('tool-redact').addEventListener('click', () => setTool('redact'));
   $('tool-sign').addEventListener('click', () => setTool('sign'));
 

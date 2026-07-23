@@ -226,6 +226,8 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
 }
 
 .region.edit { border-color: var(--accent-2); background: rgba(79, 142, 247, 0.25); }
+.region.move-ghost { border-style: dashed; background: rgba(79, 142, 247, 0.18); pointer-events: none; }
+#pages.move-mode .overlay { cursor: move; }
 .region.sign { border-color: #2f9e44; background: rgba(47, 158, 68, 0.22); }
 .region.highlight { border-color: #e0a800; background: rgba(255, 235, 59, 0.35); }
 

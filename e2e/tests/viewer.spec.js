@@ -728,6 +728,37 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('move text: grab a run of text and drag it to a new position', async () => {
+    const file = fixture('movetext.pdf', [[{ text: 'MOVE ME', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    // Let the selectable text layer (span cache) build so the grab snaps to the run.
+    await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
+
+    await ui(page, '#tool-move');
+    const box = await page.locator(pageImageSel(1)).boundingBox();
+    const scale = box.width / 595;
+    const cx = (px) => box.x + px * scale;
+    const cy = (py) => box.y + (842 - py) * scale;
+    // Grab the word (~90, 705) and drop it ~150 pt lower.
+    await page.mouse.move(cx(90), cy(705));
+    await page.mouse.down();
+    await page.mouse.move(cx(110), cy(555), { steps: 8 });
+    await page.mouse.up();
+    await expect(page.locator('#status')).toContainText('Text moved');
+
+    // The text now reads at the lower position...
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 540, width: 220, height: 42 });
+    await expect(page.locator('#edit-text')).toHaveValue(/MOVE ME/);
+    await page.click('#edit-cancel');
+
+    // ...and is gone from where it started.
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 690, width: 220, height: 36 });
+    await expect(page.locator('#edit-text')).not.toHaveValue(/MOVE ME/);
+    await page.close();
+  });
+
   test('text edit: change the font family, size, and style', async () => {
     const file = fixture('font-edit.pdf', [[{ text: 'Plain Heading', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);

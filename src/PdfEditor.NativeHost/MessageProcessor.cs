@@ -69,6 +69,7 @@ public sealed class MessageProcessor
         "ocr-text" => OcrTextAction(p),
         "ocr-searchable" => OcrSearchableAction(p),
         "list-urls" => ListUrlsAction(p),
+        "list-link-hotspots" => ListLinkHotspotsAction(p),
         "scan-urls" => ScanUrlsAction(p),
         "get-region-text" => GetRegionText(p),
         "replace-region-text" => ReplaceRegionText(p),
@@ -344,6 +345,19 @@ public sealed class MessageProcessor
             links = links.Select(l => new
             {
                 page = l.Page, url = l.Url,
+                x = l.X, y = l.Y, width = l.Width, height = l.Height
+            })
+        };
+    }
+
+    private static object ListLinkHotspotsAction(JsonObject p)
+    {
+        var links = UrlTools.ExtractLinkAnnotations(Pdf(p), Password(p));
+        return new
+        {
+            links = links.Select(l => new
+            {
+                page = l.Page, url = l.Url, kind = l.Kind,
                 x = l.X, y = l.Y, width = l.Width, height = l.Height
             })
         };

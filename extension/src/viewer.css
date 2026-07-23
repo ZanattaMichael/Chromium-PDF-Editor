@@ -244,7 +244,8 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
   background: color-mix(in srgb, var(--risk) 8%, transparent);
   transition: background 0.12s ease, border-width 0.12s ease;
 }
-#pages.select-mode .link-hotspot { pointer-events: auto; cursor: pointer; }
+#pages.select-mode a.link-hotspot { pointer-events: auto; cursor: pointer; }
+#pages.select-mode div.link-hotspot { pointer-events: auto; cursor: help; } /* non-web action: shown, not navigable */
 /* ...darker and more solid on rollover. */
 #pages.select-mode .link-hotspot:hover {
   background: color-mix(in srgb, var(--risk) 42%, transparent);

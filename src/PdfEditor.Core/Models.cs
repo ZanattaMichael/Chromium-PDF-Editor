@@ -69,11 +69,13 @@ public sealed record SafetyReport(int JavaScriptCount, int UrlCount, IReadOnlyLi
 }
 
 /// <summary>
-/// A link URL found in the document, with the page it appears on and the rectangle of its clickable
-/// hotspot in PDF user space (x/y is the lower-left corner; zero-size when the annotation has no
-/// rectangle).
+/// A link annotation found in the document. <paramref name="Kind"/> is the action type
+/// (<c>uri</c>/<c>javascript</c>/<c>goto</c>/<c>remote-goto</c>/<c>launch</c>/<c>named</c>/
+/// <c>submit</c>/<c>link</c>); <paramref name="Url"/> is the target URL for <c>uri</c> links (empty
+/// otherwise). The rectangle is the clickable hotspot in PDF user space (x/y is the lower-left
+/// corner; zero-size when the annotation has no rectangle).
 /// </summary>
-public sealed record PdfLink(int Page, string Url,
+public sealed record PdfLink(int Page, string Url, string Kind = "uri",
     float X = 0, float Y = 0, float Width = 0, float Height = 0);
 
 /// <summary>A named document-level JavaScript stored in the /Names /JavaScript tree.</summary>

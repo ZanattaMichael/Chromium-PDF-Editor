@@ -2,9 +2,10 @@ using iText.Kernel.Pdf;
 
 namespace PdfEditor.Core;
 
-/// <summary>Extracts the link URLs embedded in a document's annotations.</summary>
+/// <summary>Extracts the link annotations embedded in a document.</summary>
 public static class UrlTools
 {
+    /// <summary>The web (URI) links only — used for URL safety scanning and the Links panel.</summary>
     public static IReadOnlyList<PdfLink> ExtractLinks(byte[] pdf, string? password = null)
     {
         using var doc = PdfIo.OpenReadOnly(pdf, password);
@@ -16,6 +17,49 @@ public static class UrlTools
                 CollectUri(annot.GetPdfObject().Get(PdfName.A), i, rect, links);
             }
         return links;
+    }
+
+    /// <summary>
+    /// Every <c>/Link</c> annotation, whatever its action (URI, JavaScript, go-to, launch, submit,
+    /// …), with its clickable rectangle — so the viewer can draw a hotspot over each one. URI links
+    /// carry their URL and get a risk rating; the rest are highlighted by kind.
+    /// </summary>
+    public static IReadOnlyList<PdfLink> ExtractLinkAnnotations(byte[] pdf, string? password = null)
+    {
+        using var doc = PdfIo.OpenReadOnly(pdf, password);
+        var links = new List<PdfLink>();
+        for (int i = 1; i <= doc.GetNumberOfPages(); i++)
+            foreach (var annot in doc.GetPage(i).GetAnnotations())
+            {
+                if (!PdfName.Link.Equals(annot.GetSubtype())) continue;
+                var ad = annot.GetPdfObject();
+                var (kind, url) = ClassifyLink(ad);
+                var rect = annot.GetRectangle()?.ToRectangle();
+                links.Add(rect == null
+                    ? new PdfLink(i, url, kind)
+                    : new PdfLink(i, url, kind, rect.GetX(), rect.GetY(), rect.GetWidth(), rect.GetHeight()));
+            }
+        return links;
+    }
+
+    /// <summary>Classifies a link annotation's action into (kind, url).</summary>
+    private static (string Kind, string Url) ClassifyLink(PdfDictionary annot)
+    {
+        var a = annot.GetAsDictionary(PdfName.A);
+        var s = a?.GetAsName(PdfName.S);
+        if (s != null)
+        {
+            if (s.Equals(PdfName.URI)) return ("uri", a!.GetAsString(PdfName.URI)?.ToUnicodeString() ?? "");
+            if (s.Equals(PdfName.JavaScript)) return ("javascript", "");
+            if (s.Equals(PdfName.GoTo)) return ("goto", "");
+            if (s.Equals(PdfName.GoToR)) return ("remote-goto", "");
+            if (s.Equals(PdfName.Launch)) return ("launch", "");
+            if (s.Equals(PdfName.Named)) return ("named", a!.GetAsName(PdfName.N)?.GetValue() ?? "");
+            if (s.Equals(PdfName.SubmitForm)) return ("submit", "");
+            return ("link", "");
+        }
+        // A destination-only link (internal page jump) has /Dest instead of an /A action.
+        return annot.Get(PdfName.Dest) != null ? ("goto", "") : ("link", "");
     }
 
     private static void CollectUri(PdfObject? obj, int page, iText.Kernel.Geom.Rectangle? rect,
@@ -33,7 +77,7 @@ public static class UrlTools
             if (!string.IsNullOrWhiteSpace(uri))
                 links.Add(rect == null
                     ? new PdfLink(page, uri)
-                    : new PdfLink(page, uri, rect.GetX(), rect.GetY(), rect.GetWidth(), rect.GetHeight()));
+                    : new PdfLink(page, uri, "uri", rect.GetX(), rect.GetY(), rect.GetWidth(), rect.GetHeight()));
         }
         CollectUri(a.Get(PdfName.Next), page, rect, links); // chained actions
     }

@@ -36,6 +36,41 @@ public class UrlExtractionTests
         byte[] pdf = TestPdfs.WithText(("no links", 72, 700, 12));
         Assert.Empty(UrlTools.ExtractLinks(pdf));
     }
+
+    [Fact]
+    public void ExtractLinkAnnotations_IncludesUriAndNonUriLinks()
+    {
+        // A doc with a web link and a JavaScript link (like Salesforce "Close Window").
+        byte[] pdf = WithLinks();
+
+        var all = UrlTools.ExtractLinkAnnotations(pdf);
+
+        // Both link annotations are returned, each with its hotspot rectangle...
+        Assert.Equal(2, all.Count);
+        Assert.Contains(all, l => l.Kind == "uri" && l.Url == "https://example.com" && l.Width > 0);
+        Assert.Contains(all, l => l.Kind == "javascript" && l.Url == "" && l.Width > 0);
+
+        // ...while URI-only extraction (used for scanning) still returns just the web link.
+        var uris = UrlTools.ExtractLinks(pdf);
+        Assert.Equal("https://example.com", Assert.Single(uris).Url);
+    }
+
+    /// <summary>A page with one URI link and one JavaScript-action link annotation.</summary>
+    private static byte[] WithLinks()
+    {
+        using var output = new MemoryStream();
+        using (var doc = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new iText.Kernel.Geom.PageSize(595, 842));
+            var uri = new iText.Kernel.Pdf.Annot.PdfLinkAnnotation(new iText.Kernel.Geom.Rectangle(72, 700, 200, 20));
+            uri.SetAction(iText.Kernel.Pdf.Action.PdfAction.CreateURI("https://example.com"));
+            page.AddAnnotation(uri);
+            var js = new iText.Kernel.Pdf.Annot.PdfLinkAnnotation(new iText.Kernel.Geom.Rectangle(72, 660, 200, 20));
+            js.SetAction(iText.Kernel.Pdf.Action.PdfAction.CreateJavaScript("window.close();"));
+            page.AddAnnotation(js);
+        }
+        return output.ToArray();
+    }
 }
 
 public class UrlClassifierTests

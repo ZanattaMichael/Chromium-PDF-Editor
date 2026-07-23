@@ -141,6 +141,20 @@ function buildLinkPdf(url = 'https://github.com/example/repo') {
   ]);
 }
 
+/** A page with a JavaScript-action link annotation (like Salesforce "Close Window"). */
+function buildJsLinkPdf(script = 'window.close();') {
+  const content = 'BT /F1 14 Tf 72 704 Td (Close Window) Tj ET';
+  return assemble([
+    `<< /Type /Catalog /Pages 2 0 R >>`,
+    `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R ` +
+      `/Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>`,
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`,
+    `<< /Type /Annot /Subtype /Link /Rect [72 700 200 718] /A << /S /JavaScript /JS (${script}) >> >>`,
+  ]);
+}
+
 module.exports = {
-  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf, buildLinkPdf,
+  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf, buildLinkPdf, buildJsLinkPdf,
 };

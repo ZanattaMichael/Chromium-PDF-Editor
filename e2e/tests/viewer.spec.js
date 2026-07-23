@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { launchExtension } = require('../helpers/harness');
 const {
-  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf, buildLinkPdf,
+  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf, buildLinkPdf, buildJsLinkPdf,
 } = require('../helpers/pdf');
 
 /** @type {Awaited<ReturnType<typeof launchExtension>>} */
@@ -507,6 +507,22 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(popup).toBeVisible();
     await expect(popup.locator('.lp-url')).toHaveText('https://github.com/example/repo');
     await expect(popup.locator('.lp-risk.yellow')).toBeVisible();
+    await page.close();
+  });
+
+  test('links: non-URL (JavaScript) link annotations are highlighted too', async () => {
+    // Salesforce-style "Close Window" links are JavaScript actions, not web URLs.
+    const file = path.join(fixtureDir, 'jslink.pdf');
+    fs.writeFileSync(file, buildJsLinkPdf('window.close();'));
+    const page = await openViewerWith(file);
+
+    // A hotspot is still drawn over it (rendered as a non-navigable div, neutral colour).
+    const hotspot = page.locator('.page[data-page="1"] .link-hotspot');
+    await expect(hotspot).toHaveCount(1, { timeout: 15000 });
+    await expect(hotspot).toHaveJSProperty('tagName', 'DIV');
+    // Rollover explains the action instead of a URL.
+    await hotspot.hover();
+    await expect(page.locator('#link-popup .lp-url')).toHaveText('JavaScript action');
     await page.close();
   });
 

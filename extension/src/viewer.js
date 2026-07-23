@@ -2336,25 +2336,40 @@ function enableCodeEditorTab(textarea) {
 
 // ---------------------------------------------------------------- links / URLs
 
-/** On load, fetch the document's links (with hotspot rects) + their risk ratings and draw them. */
+// Human labels for non-URL link actions (URL links show the URL instead).
+const LINK_KIND_LABELS = {
+  javascript: 'JavaScript action',
+  goto: 'Go to a place in this document',
+  'remote-goto': 'Open another document',
+  launch: 'Open a file or program',
+  named: 'Named action',
+  submit: 'Submit form data',
+  link: 'Link',
+};
+
+/** On load, fetch every link annotation (with hotspot rects), rate the web ones, and draw them. */
 async function refreshLinks() {
-  if (!URL_SCANNING_ENABLED || !(state.safety?.urlCount > 0)) {
+  if (!URL_SCANNING_ENABLED) {
     state.links = [];
     state.urlVerdicts = [];
     drawLinks();
     return;
   }
   try {
-    const result = await host.call('list-urls', { pdf: state.pdfB64, pdfPassword: state.password });
+    const result = await host.call('list-link-hotspots', { pdf: state.pdfB64, pdfPassword: state.password });
     state.links = result.links ?? [];
-    try {
-      const creds = await chrome.storage.local.get({ cfAccountId: '', cfApiToken: '' });
-      const scan = await host.call('scan-urls', {
-        pdf: state.pdfB64, pdfPassword: state.password,
-        cfAccountId: creds.cfAccountId, cfApiToken: creds.cfApiToken,
-      });
-      state.urlVerdicts = scan.verdicts ?? [];
-    } catch { /* colour falls back to "unknown" */ }
+    if (state.links.some((l) => l.kind === 'uri')) {
+      try {
+        const creds = await chrome.storage.local.get({ cfAccountId: '', cfApiToken: '' });
+        const scan = await host.call('scan-urls', {
+          pdf: state.pdfB64, pdfPassword: state.password,
+          cfAccountId: creds.cfAccountId, cfApiToken: creds.cfApiToken,
+        });
+        state.urlVerdicts = scan.verdicts ?? [];
+      } catch { /* colour falls back to "unknown" */ }
+    } else {
+      state.urlVerdicts = [];
+    }
     drawLinks();
   } catch { /* links are a nicety; never block on them */ }
 }
@@ -2376,39 +2391,47 @@ function buildLinkLayer(pe, pageNum) {
   for (const link of links) {
     const css = pdfRectToCss(pageNum, pe.img, { x: link.x, y: link.y, width: link.width, height: link.height });
     if (css.width <= 0 || css.height <= 0) continue;
-    const verdict = state.urlVerdicts.find((v) => v.url === link.url && v.page === link.page);
-    const level = verdict?.level ?? 'unknown';
-    const a = document.createElement('a');
-    a.className = `link-hotspot risk-${level}`;
-    a.href = link.url; // set as a property, never interpolated into HTML
-    a.target = '_blank';
-    a.rel = 'noreferrer nofollow';
-    a.style.cssText = `left:${css.left}px;top:${css.top}px;width:${css.width}px;height:${css.height}px;`;
-    // Rollover shows a popup with the URL and its risk rating (custom, not the native tooltip).
-    a.addEventListener('mouseenter', () => showLinkPopup(a, link.url, level, verdict));
-    a.addEventListener('mouseleave', hideLinkPopup);
+    const isUri = link.kind === 'uri' && link.url;
+    const verdict = isUri ? state.urlVerdicts.find((v) => v.url === link.url && v.page === link.page) : null;
+    const level = isUri ? (verdict?.level ?? 'unknown') : 'unknown';
+    // Web links are real anchors that open in a new tab; other actions are shown but not navigable.
+    const el = document.createElement(isUri ? 'a' : 'div');
+    el.className = `link-hotspot risk-${level}`;
+    if (isUri) {
+      el.href = link.url; // set as a property, never interpolated into HTML
+      el.target = '_blank';
+      el.rel = 'noreferrer nofollow';
+    }
+    el.style.cssText = `left:${css.left}px;top:${css.top}px;width:${css.width}px;height:${css.height}px;`;
+    // Rollover popup: the URL + risk for web links, or the action kind for the rest.
+    el.addEventListener('mouseenter', () => showLinkPopup(el, link, level, verdict));
+    el.addEventListener('mouseleave', hideLinkPopup);
     const dot = document.createElement('span');
     dot.className = `link-risk-dot ${level}`;
-    a.appendChild(dot);
-    layer.appendChild(a);
+    el.appendChild(dot);
+    layer.appendChild(el);
   }
   pe.wrap.insertBefore(layer, pe.overlay); // above the text layer, below the tool overlay
 }
 
-/** Shows the rollover popup with a link's URL and risk rating, positioned near the hotspot. */
-function showLinkPopup(anchor, url, level, verdict) {
+/** Shows the rollover popup with a link's URL/action and risk rating, positioned near the hotspot. */
+function showLinkPopup(anchor, link, level, verdict) {
   const pop = $('link-popup');
   pop.innerHTML = '';
+  const isUri = link.kind === 'uri' && link.url;
   const urlEl = document.createElement('div');
   urlEl.className = 'lp-url';
-  urlEl.textContent = url; // textContent — the URL is document data, never HTML
+  // textContent — URL / action label is document data, never HTML.
+  urlEl.textContent = isUri ? link.url : (LINK_KIND_LABELS[link.kind] ?? 'Link');
   pop.appendChild(urlEl);
   const risk = document.createElement('div');
   risk.className = `lp-risk ${level}`;
-  risk.textContent = level === 'unknown'
-    ? '● Not rated'
-    : `● ${level.toUpperCase()}${verdict?.category ? ` · ${verdict.category}` : ''}` +
-      (verdict?.source === 'cloudflare' ? ' (Cloudflare)' : '');
+  risk.textContent = isUri
+    ? (level === 'unknown'
+        ? '● Not rated'
+        : `● ${level.toUpperCase()}${verdict?.category ? ` · ${verdict.category}` : ''}` +
+          (verdict?.source === 'cloudflare' ? ' (Cloudflare)' : ''))
+    : '● In-document action — opens nothing on the web';
   pop.appendChild(risk);
 
   pop.hidden = false;

@@ -118,7 +118,7 @@ install_from_dir() {
   echo "Installing host from $src..."
   echo "  (will be copied to $PUBLISH_DIR and registered as $HOST_NAME.json)"
   src="$(cd "$src" && pwd)"
-  if [[ ! -d "$src/PdfEditor.NativeHost" ]]; then
+  if [[ ! -f "$src/PdfEditor.NativeHost" ]]; then
     echo "error: no PdfEditor.NativeHost found in $src ($src/PdfEditor.NativeHost)" >&2
     exit 1
   fi

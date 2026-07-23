@@ -135,12 +135,29 @@ npx playwright install chromium   # once
 npx playwright test               # 10 scenarios
 ```
 
+### Performance guards
+
+A separate test project (`tests/PdfEditor.Perf.Tests`) puts time budgets on the core
+operations behind the editor and checks their algorithmic scaling, so a regression that
+made something quadratic — or reprocessed the whole document where it shouldn't — fails a
+build rather than a user noticing lag.
+
+```bash
+dotnet test tests/PdfEditor.Perf.Tests   # absolute-time budgets + scaling checks
+```
+
+The budgets are generous backstops (many times the observed local time); the scaling tests
+compare small vs large inputs so they hold regardless of machine speed. Set
+`PDF_EDITOR_PERF_SLACK` (a multiplier, e.g. `3`) to relax every budget uniformly on a slow
+host — CI runs this project as its own `perf` job with extra slack. It is intentionally
+outside the coverage-gated projects so timing runs never affect the coverage number.
+
 ### CI on pull requests
 
-Every push and PR runs `.github/workflows/ci.yml`'s three jobs: `test` (build + full
-.NET suite with the 90% coverage gate), `e2e` (the Playwright suite above, headless),
-and `package-dry-run` (actually runs `scripts/package-extension.sh` and uploads the
-resulting zip). That last job exists because the release pipeline below
+Every push and PR runs `.github/workflows/ci.yml`'s jobs: `test` (build + full
+.NET suite with the 90% coverage gate), `perf` (the performance guards above),
+`e2e` (the Playwright suite, headless), and `package-dry-run` (actually runs
+`scripts/package-extension.sh` and uploads the resulting zip). That last job exists because the release pipeline below
 (`release-candidate.yml`, `release-extension.yml`) only triggers on merges to `main` or
 published Releases — without a PR-time dry run, a regression in the packaging script
 itself would only surface once someone actually tried to cut a release.

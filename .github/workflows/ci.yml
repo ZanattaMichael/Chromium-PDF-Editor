@@ -23,6 +23,25 @@ jobs:
           name: coverage-report
           path: coverage-report/
 
+  perf:
+    # Performance guards: absolute-time budgets and algorithmic-scaling checks for the core
+    # operations behind the editor. Budgets are generous backstops that catch gross regressions
+    # (an accidental O(n²), a broken cache, a full-document reprocess) rather than micro-changes.
+    # PDF_EDITOR_PERF_SLACK relaxes every budget uniformly to absorb the variance of shared CI
+    # runners, so this stays a reliable signal, not a flaky gate.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build
+        run: dotnet build tests/PdfEditor.Perf.Tests --configuration Release
+      - name: Performance guards
+        run: dotnet test tests/PdfEditor.Perf.Tests --configuration Release --no-build
+        env:
+          PDF_EDITOR_PERF_SLACK: "3"
+
   e2e:
     runs-on: ubuntu-latest
     steps:

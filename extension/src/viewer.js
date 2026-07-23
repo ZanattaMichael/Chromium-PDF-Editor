@@ -198,9 +198,24 @@ async function loadDocument(bytes, fileName, { pushHistory = false, password } =
   // run in the background and light up their badges a moment later rather than delaying first paint.
   state.signatures = [];
   state.safety = null;
+  const freshOpen = !!fileName; // only warn about active content when a document is first opened
   await showDocument();
   updateChrome();
-  Promise.all([refreshSignatures(), refreshSafety()]).then(updateChrome);
+  Promise.all([refreshSignatures(), refreshSafety()]).then(() => {
+    updateChrome();
+    if (freshOpen) warnActiveContent();
+  });
+}
+
+/** On opening a document, tell the user if it carries JavaScript or links (disabled by default). */
+function warnActiveContent() {
+  const s = state.safety;
+  const bits = [];
+  if (s?.javaScriptCount > 0) bits.push(`JavaScript (${s.javaScriptCount})`);
+  if (URL_SCANNING_ENABLED && s?.urlCount > 0) bits.push(`${s.urlCount} link${s.urlCount === 1 ? '' : 's'}`);
+  if (bits.length === 0) return;
+  toast(`⚠ This document contains ${bits.join(' and ')} — disabled and removed when you save. ` +
+    'Click the badge above to review or keep it.');
 }
 
 async function applyResult(base64Pdf, message) {
@@ -865,10 +880,10 @@ pagesEl.addEventListener('pointerup', async (e) => {
     beginAddText({ page: pageNum, x: at.x, y: at.y - h, width: 240, height: h });
     return;
   }
-  // A highlight swipe is naturally thin (dragging along a line of text), so it only needs enough
-  // horizontal travel — the tiny check below (which wants a 2-D box) would otherwise reject it.
+  // Highlight is a box drag: draw a rectangle over text (a swipe along a line also works). Any
+  // real drag counts — every run the box covers gets highlighted.
   if (state.tool === 'highlight') {
-    if (Math.abs(x1 - x0) < 6) return;
+    if (Math.abs(x1 - x0) < 5 && Math.abs(y1 - y0) < 5) return; // ignore a click
     const a = cssToPdf(pageNum, pe.img, Math.min(x0, x1), Math.max(y0, y1));
     const b = cssToPdf(pageNum, pe.img, Math.max(x0, x1), Math.min(y0, y1));
     applyHighlight({ page: pageNum, x: a.x, y: a.y, width: b.x - a.x, height: Math.max(b.y - a.y, 1) });
@@ -1300,7 +1315,18 @@ function rectsIntersect(a, b) {
 
 /** Highlights the text runs a dragged box covers (or the box itself if the page has no text). */
 async function applyHighlight(region) {
-  const spans = spanCache.get(`${state.version}|${region.page}`) ?? [];
+  // Use the cached text runs; if the text layer hasn't built yet, fetch this page's runs now so a
+  // highlight drawn immediately still snaps to the words instead of colouring the whole box.
+  let spans = spanCache.get(`${state.version}|${region.page}`);
+  if (!spans) {
+    try {
+      const r = await host.call('page-text', {
+        pdf: state.pdfB64, page: region.page, pdfPassword: state.password,
+      });
+      spans = r.spans ?? [];
+      spanCache.set(`${state.version}|${region.page}`, spans);
+    } catch { spans = []; }
+  }
   const covered = spans.filter((s) => rectsIntersect(s, region))
     .map((s) => ({ x: s.x, y: s.y, width: s.width, height: s.height }));
   const rects = covered.length > 0
@@ -2025,12 +2051,12 @@ async function placeField(region) {
 
 // --------------------------------------------------------- document JavaScript
 
-/** Opens the JavaScript panel: a list of the document's scripts plus a small code editor. */
+/** Opens the JavaScript editor: a ¾-screen window listing the document's scripts plus a code editor. */
 async function openJavaScript() {
   if (!state.pdf) return;
   $('js-name').value = '';
   $('js-source').value = '';
-  showPanel('panel-js');
+  if (!$('js-dialog').open) $('js-dialog').showModal();
   try {
     setStatus('Reading scripts…', true);
     await refreshScripts();
@@ -2579,7 +2605,7 @@ function wire() {
     $('js-name').value = ''; $('js-source').value = '';
     for (const el of $('js-list').querySelectorAll('.organize-item')) el.classList.remove('active');
   });
-  $('js-close').addEventListener('click', () => hidePanels());
+  $('js-close').addEventListener('click', () => $('js-dialog').close());
   enableCodeEditorTab($('js-source'));
 
   $('btn-sanitize').addEventListener('click', openSanitize);

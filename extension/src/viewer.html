@@ -25,7 +25,6 @@
         aria-expanded="false" title="Reading tools" disabled>📖 Read ▾</button>
       <div class="menu-panel" role="menu">
         <button id="btn-find" class="menu-item" role="menuitem">🔍 Find &amp; replace</button>
-        <button id="btn-forms" class="menu-item" role="menuitem">🗒 Fill &amp; build forms</button>
         <button id="btn-compare" class="menu-item" role="menuitem" title="Compare with another version">🔀 Compare versions…</button>
         <button id="btn-links" class="menu-item" role="menuitem">🔗 Review links</button>
       </div>
@@ -44,6 +43,9 @@
         <button id="tool-move" class="menu-item tool" role="menuitem" title="Grab a run of text or an image and drag it to a new position">✥ Move text / image</button>
         <button id="tool-redact" class="menu-item tool" role="menuitem" title="Drag boxes over content to black it out">⬛ Redact</button>
         <button id="tool-sign" class="menu-item tool" role="menuitem" title="Place a signature">🖋 Sign</button>
+        <div class="menu-sep" aria-hidden="true"></div>
+        <div class="menu-label">Forms</div>
+        <button id="btn-forms" class="menu-item" role="menuitem" title="Fill existing fields and build new ones">🗒 Fill &amp; build forms</button>
         <div class="menu-sep" aria-hidden="true"></div>
         <div class="menu-label">Pages</div>
         <button id="btn-rotate-left" class="menu-item" role="menuitem">⟲ Rotate left</button>
@@ -76,6 +78,9 @@
       <button id="btn-zoom-in" title="Zoom in" disabled>＋</button>
     </div>
   </header>
+
+  <!-- Document status (encryption, JavaScript, links, signatures) sits directly under the menu. -->
+  <div id="badge-bar"><span id="badges"></span></div>
 
   <main id="workspace">
     <aside id="thumbnails" hidden></aside>
@@ -188,24 +193,6 @@
         </div>
       </div>
 
-      <div id="panel-js" class="panel-section" hidden>
-        <h2>Document JavaScript</h2>
-        <p class="muted">Add interactive JavaScript that runs when the PDF is opened in Acrobat or
-          another PDF reader — for form calculations, validation, and the like. Scripts are
-          <strong>never executed inside this editor</strong>; the viewer only renders pages.</p>
-        <ul id="js-list" class="reorder-list"></ul>
-        <label>Script name <input id="js-name" type="text" placeholder="e.g. calculateTotal" /></label>
-        <label>Source
-          <textarea id="js-source" class="code-editor" rows="10" spellcheck="false"
-            placeholder="// Runs at document level.&#10;var total = this.getField('a').value * 1;&#10;this.getField('b').value = total;"></textarea>
-        </label>
-        <div class="actions">
-          <button id="js-add">Add / update</button>
-          <button id="js-clear">New</button>
-          <button id="js-close">Close</button>
-        </div>
-      </div>
-
       <div id="panel-organize" class="panel-section" hidden>
         <h2>Organize pages</h2>
         <p class="muted">Drag pages to reorder them, or remove pages you don't need. Changes apply
@@ -289,7 +276,6 @@
 
   <footer id="statusbar">
     <span id="status"></span>
-    <span id="badges"></span>
   </footer>
 
   <div id="busy-overlay" hidden>
@@ -300,6 +286,26 @@
   </div>
 
   <div id="context-menu" role="menu" hidden></div>
+
+  <dialog id="js-dialog">
+    <div class="js-dialog-body">
+      <h2>Document JavaScript</h2>
+      <p class="muted">Add interactive JavaScript that runs when the PDF is opened in Acrobat or
+        another reader — form calculations, validation, and the like. Scripts are
+        <strong>never executed inside this editor</strong>; the viewer only renders pages.</p>
+      <ul id="js-list" class="reorder-list"></ul>
+      <label>Script name <input id="js-name" type="text" placeholder="e.g. calculateTotal" /></label>
+      <label class="js-source-label">Source
+        <textarea id="js-source" class="code-editor" spellcheck="false"
+          placeholder="// Runs at document level.&#10;var total = this.getField('a').value * 1;&#10;this.getField('b').value = total;"></textarea>
+      </label>
+      <div class="actions">
+        <button id="js-add">Add / update</button>
+        <button id="js-clear">New</button>
+        <button id="js-close">Close</button>
+      </div>
+    </div>
+  </dialog>
 
   <dialog id="modal"></dialog>
   <input id="file-input" type="file" accept="application/pdf" hidden />

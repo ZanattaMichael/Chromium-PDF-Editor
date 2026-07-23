@@ -709,6 +709,37 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('highlight: drawing a box over text highlights the covered words', async () => {
+    const file = fixture('highlightbox.pdf', [[{ text: 'BOX HIGHLIGHT LINE', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
+
+    await ui(page, '#tool-highlight');
+    // Draw a rectangle over the line (not a thin swipe).
+    await dragPdfRect(page, { x: 66, y: 694, width: 250, height: 22 });
+    await expect(page.locator('#status')).toContainText('Highlighted');
+
+    const scan = await page.evaluate(async () => {
+      const img = document.querySelector('.page[data-page="1"] .page-image');
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
+      const scale = img.naturalWidth / 595;
+      let yellow = false, dark = false;
+      for (let py = 697; py <= 711; py++)
+        for (let px = 74; px <= 250; px++) {
+          const d = ctx.getImageData(Math.round(px * scale), Math.round((842 - py) * scale), 1, 1).data;
+          if (d[0] > 200 && d[1] > 180 && d[2] < 140) yellow = true;
+          if (d[0] < 120 && d[1] < 120 && d[2] < 120) dark = true;
+        }
+      return { yellow, dark };
+    });
+    expect(scan.yellow).toBe(true);
+    expect(scan.dark).toBe(true);
+    await page.close();
+  });
+
   test('text edit: reads existing text, replaces it in place', async () => {
     const file = fixture('edit.pdf', [[{ text: 'Amount Due: $500', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
@@ -1052,7 +1083,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(file);
 
     await ui(page, '#btn-js');
-    await expect(page.locator('#panel-js')).toBeVisible();
+    await expect(page.locator('#js-dialog')).toBeVisible();
     await page.fill('#js-name', 'greet');
     await page.fill('#js-source', "app.alert('hello from the PDF');");
     await page.click('#js-add');
@@ -1161,6 +1192,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.fill('#js-source', "app.alert('phone home');");
     await page.click('#js-add');
     await expect(page.locator('#js-list .organize-label', { hasText: 'tracker' })).toHaveCount(1);
+    await page.click('#js-close'); // the editor is a modal window — close it before the menu
 
     // Open the sanitiser: it should report the script and pre-check that category.
     await ui(page, '#btn-sanitize');

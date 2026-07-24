@@ -5,7 +5,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { launchExtension } = require('../helpers/harness');
-const { buildPdf, buildLeftoverCtmPdf } = require('../helpers/pdf');
+const {
+  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf, buildLinkPdf, buildJsLinkPdf,
+  buildLinkOnPage2Pdf, buildLinkOverTextPdf,
+} = require('../helpers/pdf');
 
 /** @type {Awaited<ReturnType<typeof launchExtension>>} */
 let ext;
@@ -29,6 +32,17 @@ function fixture(name, pages, opts) {
 
 // In the continuous-scroll layout each page is `.page[data-page="N"]` with its own image.
 const pageImageSel = (n = 1) => `.page[data-page="${n}"] .page-image`;
+
+/** Clicks a toolbar control, first opening its Reading/Editing dropdown when it lives in one. */
+async function ui(page, sel) {
+  const triggerId = await page.evaluate((s) => {
+    const el = document.querySelector(s);
+    const menu = el && el.closest('.menu-group');
+    return menu ? menu.querySelector('.menu-trigger').id : null;
+  }, sel);
+  if (triggerId) await page.click('#' + triggerId);
+  await page.click(sel);
+}
 
 /** Opens a fresh viewer page and loads the given fixture through the Open button. */
 async function openViewerWith(file) {
@@ -98,7 +112,8 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
   test('opens a PDF and renders the first page', async () => {
     const file = fixture('render.pdf', [[{ text: 'Hello Playwright', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
-    await expect(page.locator('#page-label')).toHaveText('1 / 1');
+    await expect(page.locator('#page-input')).toHaveValue('1');
+    await expect(page.locator('#page-total')).toHaveText('1');
     // The rendered page is white paper, not a blank/black failure.
     expect(await pixelAt(page, 300, 400)).toEqual([255, 255, 255, 255]);
     await page.close();
@@ -111,7 +126,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     ]]);
     const page = await openViewerWith(file);
 
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     await dragPdfRect(page, { x: 60, y: 690, width: 260, height: 34 });
     await expect(page.locator('#redact-list li')).toHaveCount(1);
 
@@ -144,7 +159,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(file);
 
     // The Redact panel is shown by the redact tool; the search box lives inside it.
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     await page.fill('#redact-search-text', 'CONFIDENTIAL');
     await page.click('#redact-search-btn');
 
@@ -198,7 +213,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     expect(before.n).toBeGreaterThan(50);
 
     // Search + mark + apply through the real UI / native host.
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     await page.fill('#redact-search-text', 'SECRET');
     await page.click('#redact-search-btn');
     await expect(page.locator('#redact-list li')).toHaveCount(1);
@@ -226,7 +241,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('search-none.pdf', [[{ text: 'nothing to hide here', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     await page.fill('#redact-search-text', 'MISSING');
     await page.click('#redact-search-btn');
 
@@ -244,21 +259,365 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(file);
 
     await expect(page.locator('.page')).toHaveCount(3); // every page laid out in the column
-    await expect(page.locator('#page-label')).toHaveText('1 / 3');
+    await expect(page.locator('#page-input')).toHaveValue('1');
+    await expect(page.locator('#page-total')).toHaveText('3');
     await expect(page.locator('#btn-prev')).toBeDisabled();
 
     // Paging forward scrolls the next page into view; the counter follows what's visible,
     // and that page renders lazily once it's near the viewport.
     await page.click('#btn-next');
-    await expect(page.locator('#page-label')).toHaveText('2 / 3');
+    await expect(page.locator('#page-input')).toHaveValue('2');
     await expect(page.locator(pageImageSel(2))).toHaveAttribute('src', /data:image\/png/);
 
     await page.click('#btn-next');
-    await expect(page.locator('#page-label')).toHaveText('3 / 3');
+    await expect(page.locator('#page-input')).toHaveValue('3');
     await expect(page.locator('#btn-next')).toBeDisabled();
 
     await page.click('#btn-prev');
-    await expect(page.locator('#page-label')).toHaveText('2 / 3');
+    await expect(page.locator('#page-input')).toHaveValue('2');
+    await page.close();
+  });
+
+  test('editable page counter: typing a number jumps to that page', async () => {
+    const file = fixture('jump.pdf', [
+      [{ text: 'One', x: 72, y: 700 }],
+      [{ text: 'Two', x: 72, y: 700 }],
+      [{ text: 'Three', x: 72, y: 700 }],
+    ]);
+    const page = await openViewerWith(file);
+
+    await page.fill('#page-input', '3');
+    await page.press('#page-input', 'Enter');
+    await expect(page.locator('#page-input')).toHaveValue('3');
+    await expect(page.locator('#btn-next')).toBeDisabled();
+
+    // Out-of-range input is clamped/rejected rather than navigating off the end.
+    await page.fill('#page-input', '99');
+    await page.press('#page-input', 'Enter');
+    await expect(page.locator('#page-input')).toHaveValue('3');
+    await page.close();
+  });
+
+  test('thumbnail sidebar: toggles, lists every page, and navigates on click', async () => {
+    const file = fixture('thumbs.pdf', [
+      [{ text: 'Alpha', x: 72, y: 700 }],
+      [{ text: 'Beta', x: 72, y: 700 }],
+      [{ text: 'Gamma', x: 72, y: 700 }],
+    ]);
+    const page = await openViewerWith(file);
+
+    await expect(page.locator('#thumbnails')).toBeHidden();
+    await page.click('#btn-sidebar');
+    await expect(page.locator('#thumbnails')).toBeVisible();
+    await expect(page.locator('#thumbnails .thumb')).toHaveCount(3);
+    // The first thumbnail renders an image, and page 1 is marked current.
+    await expect(page.locator('#thumbnails .thumb[data-page="1"] img')).toHaveAttribute('src', /data:image\/png/);
+    await expect(page.locator('#thumbnails .thumb[data-page="1"]')).toHaveClass(/current/);
+
+    // Clicking a thumbnail navigates to that page.
+    await page.click('#thumbnails .thumb[data-page="3"]');
+    await expect(page.locator('#page-input')).toHaveValue('3');
+    await expect(page.locator('#thumbnails .thumb[data-page="3"]')).toHaveClass(/current/);
+
+    await page.click('#btn-sidebar');
+    await expect(page.locator('#thumbnails')).toBeHidden();
+    await page.close();
+  });
+
+  test('rotate: turns the current page a quarter turn (portrait -> landscape)', async () => {
+    const file = fixture('rotate.pdf', [[{ text: 'Portrait', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    const portrait = await page.locator('.page[data-page="1"]').boundingBox();
+    expect(portrait.height).toBeGreaterThan(portrait.width); // A4 starts portrait
+
+    await ui(page, '#btn-rotate-right');
+    await expect(page.locator('#status')).toContainText('Rotated page 1');
+
+    // After a 90° turn the laid-out page is landscape (width/height swapped).
+    await expect.poll(async () => {
+      const b = await page.locator('.page[data-page="1"]').boundingBox();
+      return b.width > b.height;
+    }).toBe(true);
+    await page.close();
+  });
+
+  test('add text: click to place a text box, type, and stamp it onto the page', async () => {
+    const file = fixture('addtext.pdf', [[{ text: 'background', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-text');
+    // Click (no drag) on the page to drop a default text box near the top.
+    const box = await page.locator(pageImageSel(1)).boundingBox();
+    const scale = box.width / 595;
+    await page.mouse.click(box.x + 120 * scale, box.y + (842 - 700) * scale);
+
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-title')).toHaveText('Add text');
+    await page.fill('#edit-text', 'STAMPED CAPTION');
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text added');
+
+    // The new text is really in the document (and the original still there).
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 675, width: 320, height: 45 });
+    await expect(page.locator('#edit-text')).toHaveValue(/STAMPED CAPTION/);
+    await page.close();
+  });
+
+  test('draw: freehand strokes are baked onto the page in the chosen colour', async () => {
+    const file = fixture('draw.pdf', [[{ text: 'canvas', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-draw');
+    await expect(page.locator('#panel-draw')).toBeVisible();
+    // Use a pure-green pen so we can detect it unambiguously.
+    await page.fill('#draw-color', '#00ff00');
+    await page.fill('#draw-width', '8');
+
+    // Draw a stroke straight across the middle of the page (display coordinates).
+    const box = await page.locator(pageImageSel(1)).boundingBox();
+    const midY = box.y + box.height * 0.5;
+    await page.mouse.move(box.x + box.width * 0.2, midY);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.4, midY, { steps: 6 });
+    await page.mouse.move(box.x + box.width * 0.7, midY, { steps: 6 });
+    await page.mouse.up();
+
+    await page.click('#draw-apply');
+    await expect(page.locator('#status')).toContainText('stroke');
+
+    // A green pixel is now baked into the rendered page along the stroke.
+    const green = await page.evaluate(async () => {
+      const img = document.querySelector('.page[data-page="1"] .page-image');
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] < 120 && data[i + 1] > 150 && data[i + 2] < 120) return true;
+      }
+      return false;
+    });
+    expect(green).toBe(true);
+    await page.close();
+  });
+
+  test('forms: lists AcroForm fields, fills a value, and reads it back', async () => {
+    const file = path.join(fixtureDir, 'form.pdf');
+    fs.writeFileSync(file, buildFormPdf('fullName', ''));
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await expect(page.locator('#panel-forms')).toBeVisible();
+    const field = page.locator('#forms-list [data-field="fullName"]');
+    await expect(field).toHaveCount(1);
+
+    await field.fill('Alan Turing');
+    await page.click('#forms-apply');
+    await expect(page.locator('#status')).toContainText('Form filled');
+
+    // Re-opening the forms panel shows the value persisted into the document.
+    await ui(page, '#btn-forms');
+    await expect(page.locator('#forms-list [data-field="fullName"]')).toHaveValue('Alan Turing');
+    await page.close();
+  });
+
+  test('forms: insert a new text field by drawing a box', async () => {
+    const file = fixture('insertfield.pdf', [[{ text: 'blank form', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await expect(page.locator('#panel-forms')).toBeVisible();
+    await page.selectOption('#field-type', 'text');
+    await page.fill('#field-name', 'signature_name');
+    await page.click('#field-place');
+    await expect(page.locator('#status')).toContainText('Drag a box');
+
+    await dragPdfRect(page, { x: 100, y: 600, width: 220, height: 24 });
+
+    // The forms panel reopens and lists the newly inserted field.
+    await expect(page.locator('#forms-list [data-field="signature_name"]')).toHaveCount(1);
+    await page.close();
+  });
+
+  test('safety: JavaScript is detected, flagged with its source, and stripped by default', async () => {
+    const file = path.join(fixtureDir, 'hasjs.pdf');
+    fs.writeFileSync(file, buildJavaScriptPdf("app.alert('DISTINCTIVE_MARKER_123');"));
+    const page = await openViewerWith(file);
+
+    // The active-content badge appears and reads "disabled" by default.
+    const badge = page.locator('#badges .badge.warn', { hasText: 'JavaScript' });
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText('disabled');
+
+    // The details dialog points at the actual script source and lets the user opt in to keeping it.
+    await badge.click();
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('JavaScript');
+    await expect(dialog.locator('.safety-samples')).toContainText('DISTINCTIVE_MARKER_123');
+    await dialog.getByRole('button', { name: /Enable \(keep\)/ }).click();
+    await expect(badge).toContainText('kept');
+    await page.close();
+  });
+
+  test('links: a document with URLs warns, disables them, and can list the source', async () => {
+    // Links are detected and disabled by default (a warning badge), with the panel listing every
+    // URL (the source) and an opt-in to keep them.
+    const file = path.join(fixtureDir, 'links.pdf');
+    fs.writeFileSync(file, buildLinkPdf('https://github.com/example/repo'));
+    const page = await openViewerWith(file);
+
+    // A warning badge appears reading "disabled".
+    const badge = page.locator('#badges .badge.warn', { hasText: 'links' });
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText('disabled');
+
+    // Clicking it opens the Links panel, which lists the URL and offers to enable it.
+    await badge.click();
+    await expect(page.locator('#panel-links')).toBeVisible();
+    await expect(page.locator('#links-list')).toContainText('github.com/example/repo');
+    await expect(page.locator('#links-enable')).not.toBeChecked();
+
+    // Enabling flips the badge to "enabled".
+    await page.locator('#links-enable').check();
+    await expect(badge).toContainText('enabled');
+    await page.close();
+  });
+
+  test('links: a hotspot is drawn over the link, coloured by risk, inert until enabled', async () => {
+    const file = path.join(fixtureDir, 'linkspot.pdf');
+    fs.writeFileSync(file, buildLinkPdf('https://github.com/example/repo'));
+    const page = await openViewerWith(file);
+
+    // A hotspot is laid over the link's rectangle; github rates yellow (code-hosting heuristic).
+    const hotspot = page.locator('.page[data-page="1"] .link-hotspot');
+    await expect(hotspot).toHaveCount(1, { timeout: 15000 });
+    await expect(hotspot).toHaveClass(/risk-yellow/);
+    await expect(hotspot.locator('.link-risk-dot.yellow')).toHaveCount(1);
+
+    // Links are disabled by default, so the hotspot is shown but NOT navigable (a plain div, no href).
+    await expect(hotspot).toHaveJSProperty('tagName', 'DIV');
+    await expect(hotspot).not.toHaveAttribute('href', /.*/);
+    await hotspot.hover();
+    const popup = page.locator('#link-popup');
+    await expect(popup).toBeVisible();
+    await expect(popup.locator('.lp-url')).toHaveText('https://github.com/example/repo');
+    await expect(popup.locator('.lp-risk.yellow')).toBeVisible();
+    await expect(popup.locator('.lp-note')).toContainText('enable links');
+
+    // Enabling links turns the hotspot into a real anchor that opens in a new tab.
+    await ui(page, '#btn-links');
+    await page.locator('#links-enable').check();
+    await expect(hotspot).toHaveJSProperty('tagName', 'A');
+    await expect(hotspot).toHaveAttribute('href', 'https://github.com/example/repo');
+    await expect(hotspot).toHaveAttribute('target', '_blank');
+    await page.close();
+  });
+
+  test('links: non-URL (JavaScript) link annotations are highlighted too', async () => {
+    // Salesforce-style "Close Window" links are JavaScript actions, not web URLs.
+    const file = path.join(fixtureDir, 'jslink.pdf');
+    fs.writeFileSync(file, buildJsLinkPdf('window.close();'));
+    const page = await openViewerWith(file);
+
+    // A hotspot is still drawn over it (rendered as a non-navigable div, neutral colour).
+    const hotspot = page.locator('.page[data-page="1"] .link-hotspot');
+    await expect(hotspot).toHaveCount(1, { timeout: 15000 });
+    await expect(hotspot).toHaveJSProperty('tagName', 'DIV');
+    // Rollover explains the action instead of a URL.
+    await hotspot.hover();
+    await expect(page.locator('#link-popup .lp-url')).toHaveText('JavaScript action');
+    await page.close();
+  });
+
+  test('links: the overlay is drawn on a later page after scrolling to it', async () => {
+    // Regression: scrolling to a page whose image comes from the render cache must still draw
+    // its link hotspots (the overlay used to be skipped on the cached-render path).
+    const file = path.join(fixtureDir, 'link-p2.pdf');
+    fs.writeFileSync(file, buildLinkOnPage2Pdf('https://github.com/example/repo'));
+    const page = await openViewerWith(file);
+
+    // Page 1 carries no links; jump to page 2, where the annotation lives.
+    await expect(page.locator('.page[data-page="1"] .link-hotspot')).toHaveCount(0);
+    await page.fill('#page-input', '2');
+    await page.press('#page-input', 'Enter');
+    await expect(page.locator(pageImageSel(2))).toHaveAttribute('src', /data:image\/png/);
+
+    const hotspot = page.locator('.page[data-page="2"] .link-hotspot');
+    await expect(hotspot).toHaveCount(1, { timeout: 15000 });
+    await expect(hotspot).toHaveClass(/risk-yellow/);
+    await page.close();
+  });
+
+  test('links: the hotspot sits above the text layer so hover/click reach it', async () => {
+    // Regression: the selectable text layer used to stack above the link layer (its async build
+    // could insert it last), swallowing link hover/clicks. Explicit z-index pins the order.
+    const file = path.join(fixtureDir, 'link-over-text.pdf');
+    fs.writeFileSync(file, buildLinkOverTextPdf('https://github.com/example/repo'));
+    const page = await openViewerWith(file);
+
+    const hotspot = page.locator('.page[data-page="1"] .link-hotspot');
+    await expect(hotspot).toHaveCount(1, { timeout: 15000 });
+
+    // The topmost element at the hotspot's centre must be the hotspot itself, not the text layer.
+    const hitsHotspot = await hotspot.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return !!(top && top.closest('.link-hotspot'));
+    });
+    expect(hitsHotspot).toBe(true);
+
+    // And hovering actually shows the rollover popup.
+    await hotspot.hover();
+    await expect(page.locator('#link-popup')).toBeVisible();
+    await expect(page.locator('#link-popup .lp-url')).toHaveText('https://github.com/example/repo');
+    await page.close();
+  });
+
+  test('forms: fields are outlined on the page and the rollover shows their value', async () => {
+    const file = path.join(fixtureDir, 'formoverlay.pdf');
+    fs.writeFileSync(file, buildFormPdf('fullName', 'Ada'));
+    const page = await openViewerWith(file);
+
+    // The field's widget rectangle is outlined so an otherwise-invisible field is locatable.
+    const marker = page.locator('.page[data-page="1"] .field-marker');
+    await expect(marker).toHaveCount(1, { timeout: 15000 });
+    await expect(marker.locator('.field-tag')).toHaveText('abc'); // text-field icon
+
+    // Rolling over reveals the field's name, type, and current value.
+    await marker.hover();
+    const popup = page.locator('#link-popup');
+    await expect(popup).toBeVisible();
+    await expect(popup.locator('.lp-url')).toHaveText('fullName');
+    await expect(popup.locator('.lp-risk')).toContainText('text');
+    await expect(popup.locator('.lp-risk')).toContainText('Ada');
+    await page.close();
+  });
+
+  test('undo / redo: a change can be undone and then redone', async () => {
+    const file = fixture('undoredo.pdf', [[{ text: 'Keep me', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await expect(page.locator('#btn-undo')).toBeDisabled();
+    await expect(page.locator('#btn-redo')).toBeDisabled();
+
+    // Make a change (find & replace), then undo and redo it.
+    await ui(page, '#btn-find');
+    await fillDialog(page, ['Keep me', 'Changed'], 'Replace all');
+    await expect(page.locator('#status')).toContainText('Replaced 1 occurrence');
+    await expect(page.locator('#btn-undo')).toBeEnabled();
+
+    await page.click('#btn-undo');
+    await expect(page.locator('#status')).toContainText('Undid last change');
+    await expect(page.locator('#btn-redo')).toBeEnabled();
+
+    await page.click('#btn-redo');
+    await expect(page.locator('#status')).toContainText('Redid change');
+    await expect(page.locator('#btn-redo')).toBeDisabled();
     await page.close();
   });
 
@@ -270,13 +629,14 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     ]);
     const page = await openViewerWith(file);
 
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     // Top-align page 2 *instantly* (no smooth-scroll animation, so boundingBox() below is
     // settled and the drag can't land on stale coordinates), then let it render.
     await page.evaluate(() =>
       document.querySelector('.page[data-page="2"]').scrollIntoView({ block: 'start', behavior: 'instant' }));
     await expect(page.locator(pageImageSel(2))).toHaveAttribute('src', /data:image\/png/);
-    await expect(page.locator('#page-label')).toHaveText('2 / 2');
+    await expect(page.locator('#page-input')).toHaveValue('2');
+    await expect(page.locator('#page-total')).toHaveText('2');
 
     // Draw on page 2's own overlay, in that page's A4 user-space (near its top).
     const box = await page.locator(pageImageSel(2)).boundingBox();
@@ -318,7 +678,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
       [[{ text: 'OFFSET SECRET', x: 150, y: 900 }]], { mediaBox: box });
     const page = await openViewerWith(file);
 
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     await dragPdfRect(page, { x: 140, y: 892, width: 240, height: 30 }, box);
     await expect(page.locator('#redact-list li')).toHaveCount(1);
 
@@ -345,7 +705,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
       { mediaBox: [0, 0, 595, 842], cropBox: [0, 0, 595, 1002] });
     const page = await openViewerWith(file);
 
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     await dragPdfRect(page, { x: 60, y: 492, width: 220, height: 30 });
     await expect(page.locator('#redact-list li')).toHaveCount(1);
     await page.click('#redact-apply');
@@ -365,7 +725,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('rotated.pdf', [[{ text: 'rotated secret', x: 120, y: 400 }]], { rotate: 90 });
     const page = await openViewerWith(file);
 
-    await page.click('#tool-redact');
+    await ui(page, '#tool-redact');
     const box = await page.locator(pageImageSel(1)).boundingBox();
     // Landscape image (rotated): draw a rectangle across the middle in display coordinates.
     await page.mouse.move(box.x + box.width * 0.30, box.y + box.height * 0.40);
@@ -394,11 +754,108 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('text layer: real text can be selected/copied and right-clicked to edit', async () => {
+    const file = fixture('selecttext.pdf', [[{ text: 'Selectable Sentence Here', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    // The invisible selectable text layer builds over the rendered page.
+    const span = page.locator('.page[data-page="1"] .text-layer span', { hasText: 'Selectable' });
+    await expect(span).toHaveCount(1);
+
+    // Selecting it yields the real text (so Ctrl/Cmd+C copies actual characters, not an image).
+    await span.click({ clickCount: 3 });
+    const selected = await page.evaluate(() => window.getSelection().toString());
+    expect(selected).toContain('Selectable');
+
+    // Right-clicking opens the context menu; "Edit text" opens the edit panel pre-filled with
+    // the selected run's text (edit in place).
+    await span.click({ button: 'right' });
+    await page.locator('#context-menu').getByRole('button', { name: /Edit text/ }).click();
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-title')).toHaveText('Edit text');
+    await expect(page.locator('#edit-text')).toHaveValue(/Selectable Sentence Here/);
+    await page.close();
+  });
+
+  test('highlight: dragging across text marks it, keeping the text readable', async () => {
+    const file = fixture('highlight.pdf', [[{ text: 'HIGHLIGHT THIS LINE', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    // Let the text layer (span cache) build so the highlight snaps to the text run.
+    await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
+
+    await ui(page, '#tool-highlight');
+    // Swipe horizontally across the text line.
+    const box = await page.locator(pageImageSel(1)).boundingBox();
+    const scale = box.width / 595;
+    const cy = box.y + (842 - 707) * scale;
+    await page.mouse.move(box.x + 60 * scale, cy);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 300 * scale, cy, { steps: 8 });
+    await page.mouse.up();
+    await expect(page.locator('#status')).toContainText('Highlighted');
+
+    // Scan the highlighted line band for a yellow pixel (paper under the highlight) and a dark
+    // one (the text is still legible through the multiply blend).
+    const scan = await page.evaluate(async () => {
+      const img = document.querySelector('.page[data-page="1"] .page-image');
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const scale = img.naturalWidth / 595;
+      let yellow = false, dark = false;
+      // The line sits around PDF y≈697..711 (text drawn at baseline 700).
+      for (let py = 697; py <= 711; py++) {
+        for (let px = 74; px <= 235; px++) {
+          const d = ctx.getImageData(Math.round(px * scale), Math.round((842 - py) * scale), 1, 1).data;
+          if (d[0] > 200 && d[1] > 180 && d[2] < 140) yellow = true;
+          if (d[0] < 120 && d[1] < 120 && d[2] < 120) dark = true;
+        }
+      }
+      return { yellow, dark };
+    });
+    expect(scan.yellow).toBe(true);
+    expect(scan.dark).toBe(true);
+    await page.close();
+  });
+
+  test('highlight: drawing a box over text highlights the covered words', async () => {
+    const file = fixture('highlightbox.pdf', [[{ text: 'BOX HIGHLIGHT LINE', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
+
+    await ui(page, '#tool-highlight');
+    // Draw a rectangle over the line (not a thin swipe).
+    await dragPdfRect(page, { x: 66, y: 694, width: 250, height: 22 });
+    await expect(page.locator('#status')).toContainText('Highlighted');
+
+    const scan = await page.evaluate(async () => {
+      const img = document.querySelector('.page[data-page="1"] .page-image');
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
+      const scale = img.naturalWidth / 595;
+      let yellow = false, dark = false;
+      for (let py = 697; py <= 711; py++)
+        for (let px = 74; px <= 250; px++) {
+          const d = ctx.getImageData(Math.round(px * scale), Math.round((842 - py) * scale), 1, 1).data;
+          if (d[0] > 200 && d[1] > 180 && d[2] < 140) yellow = true;
+          if (d[0] < 120 && d[1] < 120 && d[2] < 120) dark = true;
+        }
+      return { yellow, dark };
+    });
+    expect(scan.yellow).toBe(true);
+    expect(scan.dark).toBe(true);
+    await page.close();
+  });
+
   test('text edit: reads existing text, replaces it in place', async () => {
     const file = fixture('edit.pdf', [[{ text: 'Amount Due: $500', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#tool-edit');
+    await ui(page, '#tool-edit');
     await dragPdfRect(page, { x: 60, y: 690, width: 250, height: 34 });
     await expect(page.locator('#panel-edit')).toBeVisible();
     await expect(page.locator('#edit-text')).toHaveValue('Amount Due: $500');
@@ -408,10 +865,109 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#status')).toContainText('Text replaced');
 
     // Re-selecting the same region proves the old text is gone from the file.
-    await page.click('#tool-edit');
+    await ui(page, '#tool-edit');
     await dragPdfRect(page, { x: 60, y: 685, width: 300, height: 40 });
     await expect(page.locator('#edit-text')).toHaveValue(/\$750 \(revised\)/);
     await expect(page.locator('#edit-text')).not.toHaveValue(/\$500/);
+    await page.close();
+  });
+
+  test('move text: grab a run of text and drag it to a new position', async () => {
+    const file = fixture('movetext.pdf', [[{ text: 'MOVE ME', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    // Let the selectable text layer (span cache) build so the grab snaps to the run.
+    await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
+
+    await ui(page, '#tool-move');
+    const box = await page.locator(pageImageSel(1)).boundingBox();
+    const scale = box.width / 595;
+    const cx = (px) => box.x + px * scale;
+    const cy = (py) => box.y + (842 - py) * scale;
+    // Grab the word (~90, 705) and drop it ~150 pt lower.
+    await page.mouse.move(cx(90), cy(705));
+    await page.mouse.down();
+    await page.mouse.move(cx(110), cy(555), { steps: 8 });
+    await page.mouse.up();
+    await expect(page.locator('#status')).toContainText('Text moved');
+
+    // The text now reads at the lower position...
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 540, width: 220, height: 42 });
+    await expect(page.locator('#edit-text')).toHaveValue(/MOVE ME/);
+    await page.click('#edit-cancel');
+
+    // ...and is gone from where it started.
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 690, width: 220, height: 36 });
+    await expect(page.locator('#edit-text')).not.toHaveValue(/MOVE ME/);
+    await page.close();
+  });
+
+  test('move image: grab an image and drag it to a new position', async () => {
+    const base = fixture('moveimg.pdf', [[{ text: 'Base', x: 72, y: 700 }]]);
+    // Merge a small PNG so page 2 is an image we can grab and move.
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64');
+    const imgFile = path.join(fixtureDir, 'movepic.png');
+    fs.writeFileSync(imgFile, png);
+    const page = await openViewerWith(base);
+
+    const chooser = page.waitForEvent('filechooser');
+    await ui(page, '#btn-merge');
+    await (await chooser).setFiles(imgFile);
+    await page.locator('dialog#modal').getByRole('button', { name: 'Merge' }).click();
+    await expect(page.locator('#page-total')).toHaveText('2');
+
+    // Bring page 2 (the image) into view and grab its centre with the Move tool.
+    await page.evaluate(() =>
+      document.querySelector('.page[data-page="2"]').scrollIntoView({ block: 'start', behavior: 'instant' }));
+    await expect(page.locator('.page[data-page="2"] .page-image')).toHaveAttribute('src', /data:image\/png/);
+    await ui(page, '#tool-move');
+    const box = await page.locator('.page[data-page="2"] .page-image').boundingBox();
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3, { steps: 8 });
+    await page.mouse.up();
+    await expect(page.locator('#status')).toContainText('Image moved');
+    await page.close();
+  });
+
+  test('context menu: right-clicking selected text offers Edit and Redact', async () => {
+    const file = fixture('ctxsel.pdf', [[{ text: 'Right Click Me', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    const span = page.locator('.page[data-page="1"] .text-layer span', { hasText: 'Right' });
+    await span.waitFor({ timeout: 15000 });
+    await span.click({ clickCount: 3 }); // select the run
+    await span.click({ button: 'right' });
+
+    const menu = page.locator('#context-menu');
+    await expect(menu).toBeVisible();
+    await expect(menu).toContainText('Edit text');
+    await expect(menu).toContainText('Redact this');
+    await expect(menu).toContainText('Highlight');
+
+    // "Redact this" marks the selection as a redaction region.
+    await menu.getByRole('button', { name: /Redact this/ }).click();
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+    await page.close();
+  });
+
+  test('context menu: right-clicking with no selection offers document actions', async () => {
+    const file = fixture('ctxdoc.pdf', [[{ text: 'plain', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    // Right-click the visible centre of the scroll area (blank page area, no selection).
+    const sa = await page.locator('#scroll-area').boundingBox();
+    await page.mouse.click(sa.x + sa.width * 0.5, sa.y + sa.height * 0.5, { button: 'right' });
+
+    const menu = page.locator('#context-menu');
+    await expect(menu).toBeVisible();
+    await expect(menu).toContainText('Make searchable');
+    await expect(menu).toContainText('Show source code');
+    await expect(menu).toContainText('Save');
+    await expect(menu).toContainText('Print');
+    await expect(menu).toContainText('Zoom in');
     await page.close();
   });
 
@@ -419,7 +975,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('font-edit.pdf', [[{ text: 'Plain Heading', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#tool-edit');
+    await ui(page, '#tool-edit');
     await dragPdfRect(page, { x: 60, y: 690, width: 260, height: 34 });
     await expect(page.locator('#panel-edit')).toBeVisible();
     await expect(page.locator('#edit-text')).toHaveValue('Plain Heading');
@@ -437,7 +993,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#status')).toContainText('Text replaced');
 
     // Re-selecting the region shows the new text, and the detected font/style round-trips.
-    await page.click('#tool-edit');
+    await ui(page, '#tool-edit');
     await dragPdfRect(page, { x: 55, y: 685, width: 300, height: 45 });
     await expect(page.locator('#edit-text')).toHaveValue(/Styled Heading/);
     await expect(page.locator('#edit-font')).toHaveValue('times');
@@ -452,9 +1008,47 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     ]]);
     const page = await openViewerWith(file);
 
-    await page.click('#btn-find');
+    await ui(page, '#btn-find');
     await fillDialog(page, ['OldCorp', 'NewCorp'], 'Replace all');
     await expect(page.locator('#status')).toContainText('Replaced 2 occurrences');
+    await page.close();
+  });
+
+  test('print: defers to the browser by loading the real PDF for printing', async () => {
+    const file = fixture('print.pdf', [[{ text: 'Print me', x: 72, y: 700 }]]);
+    const page = await ext.context.newPage();
+    // Record any new-tab fallback so the test never actually spawns a tab.
+    await page.addInitScript(() => { window.__opened = []; window.open = (u) => { window.__opened.push(u); return null; }; });
+    await page.goto(ext.viewerUrl);
+    const chooser = page.waitForEvent('filechooser');
+    await page.click('#btn-open-empty');
+    await (await chooser).setFiles(file);
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+
+    // Printing hands the actual PDF to the browser via an off-screen blob iframe (vector print,
+    // with "Save as PDF" available in the browser's dialog).
+    await page.click('#btn-print');
+    await expect(page.locator('iframe[src^="blob:"]')).toHaveCount(1);
+    await page.close();
+  });
+
+  test('merge appends an image as a new page', async () => {
+    const base = fixture('merge-img-base.pdf', [[{ text: 'Base page', x: 72, y: 700 }]]);
+    // A minimal 1x1 PNG written to disk for the merge picker.
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64');
+    const imgFile = path.join(fixtureDir, 'stamp.png');
+    fs.writeFileSync(imgFile, png);
+    const page = await openViewerWith(base);
+
+    const chooser = page.waitForEvent('filechooser');
+    await ui(page, '#btn-merge');
+    await (await chooser).setFiles(imgFile);
+    // The merge dialog lets you arrange the files; confirm to combine them.
+    await page.locator('dialog#modal').getByRole('button', { name: 'Merge' }).click();
+    await expect(page.locator('#status')).toContainText('Merged 1 file');
+    await expect(page.locator('#page-total')).toHaveText('2'); // image became a second page
     await page.close();
   });
 
@@ -467,10 +1061,273 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(one);
 
     const chooser = page.waitForEvent('filechooser');
-    await page.click('#btn-merge');
+    await ui(page, '#btn-merge');
     await (await chooser).setFiles(two);
-    await expect(page.locator('#status')).toContainText('Merged 1 document');
-    await expect(page.locator('#page-label')).toHaveText('1 / 3');
+    await page.locator('dialog#modal').getByRole('button', { name: 'Merge' }).click();
+    await expect(page.locator('#status')).toContainText('Merged 1 file');
+    await expect(page.locator('#page-input')).toHaveValue('1');
+    await expect(page.locator('#page-total')).toHaveText('3');
+    await page.close();
+  });
+
+  test('merge & arrange: dropping the current document keeps only the appended file', async () => {
+    const one = fixture('merge-drop-base.pdf', [[{ text: 'Base only', x: 72, y: 700 }]]);
+    const two = fixture('merge-drop-extra.pdf', [
+      [{ text: 'Extra A', x: 72, y: 700 }],
+      [{ text: 'Extra B', x: 72, y: 700 }],
+    ]);
+    const page = await openViewerWith(one);
+
+    const chooser = page.waitForEvent('filechooser');
+    await ui(page, '#btn-merge');
+    await (await chooser).setFiles(two);
+
+    // The dialog lists "This document" first; remove it so only the two appended pages remain.
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog.locator('.organize-item')).toHaveCount(2);
+    await dialog.locator('.organize-item').first().getByRole('button', { name: 'Remove' }).click();
+    await expect(dialog.locator('.organize-item')).toHaveCount(1);
+    await dialog.getByRole('button', { name: 'Merge' }).click();
+
+    await expect(page.locator('#status')).toContainText('Merged 1 file');
+    await expect(page.locator('#page-total')).toHaveText('2'); // base dropped, 2 extra pages kept
+    await page.close();
+  });
+
+  test('organize pages: remove a page from the document', async () => {
+    const file = fixture('organize.pdf', [
+      [{ text: 'Keep one', x: 72, y: 700 }],
+      [{ text: 'Delete two', x: 72, y: 700 }],
+      [{ text: 'Keep three', x: 72, y: 700 }],
+    ]);
+    const page = await openViewerWith(file);
+    await expect(page.locator('#page-total')).toHaveText('3');
+
+    await ui(page, '#btn-organize');
+    await expect(page.locator('#panel-organize')).toBeVisible();
+    await expect(page.locator('#organize-list .organize-item')).toHaveCount(3);
+
+    // Remove the middle page, then apply.
+    await page.locator('#organize-list .organize-item').nth(1)
+      .getByRole('button', { name: 'Remove page' }).click();
+    await expect(page.locator('#organize-list .organize-item')).toHaveCount(2);
+    await page.click('#organize-apply');
+
+    await expect(page.locator('#status')).toContainText('reorganized');
+    await expect(page.locator('#page-total')).toHaveText('2');
+    await page.close();
+  });
+
+  test('forms: insert a dropdown (choice) field with options', async () => {
+    const file = fixture('dropdown.pdf', [[{ text: 'pick one', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await expect(page.locator('#panel-forms')).toBeVisible();
+    await page.selectOption('#field-type', 'dropdown');
+    await expect(page.locator('#field-options-row')).toBeVisible();
+    await page.fill('#field-name', 'country');
+    await page.fill('#field-options', 'Australia\nCanada\nDenmark');
+    await page.click('#field-place');
+    await expect(page.locator('#status')).toContainText('Drag a box');
+
+    await dragPdfRect(page, { x: 100, y: 600, width: 220, height: 24 });
+
+    // The forms panel reopens and lists the new choice field as a <select>.
+    await expect(page.locator('#forms-list [data-field="country"]')).toHaveCount(1);
+    await page.close();
+  });
+
+  test('forms: an inserted field is visible on the page (not blank space)', async () => {
+    const file = fixture('visfield.pdf', [[{ text: 'form', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await page.selectOption('#field-type', 'text');
+    await page.fill('#field-name', 'visible_field');
+    await page.click('#field-place');
+    await dragPdfRect(page, { x: 100, y: 600, width: 220, height: 26 });
+    await expect(page.locator('#forms-list [data-field="visible_field"]')).toHaveCount(1);
+
+    // Scan the field's rectangle on the rendered page for non-white pixels (its border/background).
+    const drawn = await page.evaluate(async () => {
+      const img = document.querySelector('.page[data-page="1"] .page-image');
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
+      const s = img.naturalWidth / 595;
+      let nonWhite = 0;
+      for (let py = 600; py <= 626; py++)
+        for (let px = 100; px <= 320; px++) {
+          const d = ctx.getImageData(Math.round(px * s), Math.round((842 - py) * s), 1, 1).data;
+          if (!(d[0] > 248 && d[1] > 248 && d[2] > 248)) nonWhite++;
+        }
+      return nonWhite;
+    });
+    expect(drawn).toBeGreaterThan(0);
+    await page.close();
+  });
+
+  test('forms: insert an option (radio) group', async () => {
+    const file = fixture('radio.pdf', [[{ text: 'choose', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await page.selectOption('#field-type', 'radio');
+    await expect(page.locator('#field-options-row')).toBeVisible();
+    await page.fill('#field-name', 'plan');
+    await page.fill('#field-options', 'Basic\nPro\nEnterprise');
+    await page.click('#field-place');
+    await dragPdfRect(page, { x: 100, y: 560, width: 200, height: 90 });
+
+    // Listed as a single option field, rendered as a <select> of the choices (minus the Off state).
+    const select = page.locator('#forms-list [data-field="plan"]');
+    await expect(select).toHaveCount(1);
+    await expect(select.locator('option', { hasText: 'Enterprise' })).toHaveCount(1);
+    await expect(select.locator('option', { hasText: 'Off' })).toHaveCount(0);
+    await page.close();
+  });
+
+  test('javascript: author a document script in the code editor, kept on save', async () => {
+    const file = fixture('addjs.pdf', [[{ text: 'form doc', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-js');
+    await expect(page.locator('#js-dialog')).toBeVisible();
+    await page.fill('#js-name', 'greet');
+    await page.fill('#js-source', "app.alert('hello from the PDF');");
+    await page.click('#js-add');
+    await expect(page.locator('#status')).toContainText('added');
+
+    // The script is now listed in the panel...
+    await expect(page.locator('#js-list .organize-label', { hasText: 'greet' })).toHaveCount(1);
+    // ...and the active-content badge shows it is being kept (not stripped) on save.
+    const badge = page.locator('#badges .badge.warn');
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText('kept');
+    await page.close();
+  });
+
+  test('javascript: a document script can be removed again', async () => {
+    const file = fixture('rmjs.pdf', [[{ text: 'doc', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-js');
+    await page.fill('#js-name', 'temp');
+    await page.fill('#js-source', 'console.println("x");');
+    await page.click('#js-add');
+    await expect(page.locator('#js-list .organize-label', { hasText: 'temp' })).toHaveCount(1);
+
+    await page.locator('#js-list .organize-item').first()
+      .getByRole('button', { name: 'Remove script' }).click();
+    await expect(page.locator('#status')).toContainText('removed');
+    await expect(page.locator('#js-list .organize-item')).toHaveCount(0);
+    await page.close();
+  });
+
+  test('forms: insert a JavaScript push-button', async () => {
+    const file = fixture('jsbutton.pdf', [[{ text: 'form', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await page.selectOption('#field-type', 'button');
+    await expect(page.locator('#field-caption-row')).toBeVisible();
+    await expect(page.locator('#field-script-row')).toBeVisible();
+    await page.fill('#field-name', 'submitBtn');
+    await page.fill('#field-caption', 'Submit');
+    await page.fill('#field-script', "app.alert('submitted');");
+    await page.click('#field-place');
+    await expect(page.locator('#status')).toContainText('Drag a box');
+
+    await dragPdfRect(page, { x: 100, y: 600, width: 120, height: 28 });
+
+    // The button is listed as a form field, and the script it carries is kept on save.
+    await expect(page.locator('#forms-list [data-field="submitBtn"]')).toHaveCount(1);
+    await expect(page.locator('#badges .badge.warn')).toContainText('kept');
+    await page.close();
+  });
+
+  test('ocr: make searchable runs, or reports Tesseract is required', async () => {
+    const file = fixture('ocr.pdf', [[{ text: 'Scanned document', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-ocr');
+    // Deterministic across environments: OCR either succeeds (status confirms "searchable") or,
+    // when Tesseract is not installed, an in-app note naming it appears — never a silent failure.
+    await expect.poll(async () => {
+      const dialog = page.locator('dialog#modal');
+      if (await dialog.isVisible() && /Tesseract/i.test((await dialog.textContent()) || '')) return 'note';
+      if (/searchable/i.test((await page.locator('#status').textContent()) || '')) return 'done';
+      return 'pending';
+    }, { timeout: 60000 }).not.toBe('pending');
+    await page.close();
+  });
+
+  test('compare versions: summarises added and removed words', async () => {
+    const current = fixture('compare-new.pdf', [[{ text: 'Amount Due 750 dollars', x: 72, y: 700 }]]);
+    const older = fixture('compare-old.pdf', [[{ text: 'Amount Due 500 dollars', x: 72, y: 700 }]]);
+    const page = await openViewerWith(current);
+
+    const chooser = page.waitForEvent('filechooser');
+    await ui(page, '#btn-compare');
+    await (await chooser).setFiles(older);
+
+    await expect(page.locator('#panel-compare')).toBeVisible();
+    await expect(page.locator('#compare-summary')).toContainText('1 page');
+    // The changed page lists 750 as added and 500 as removed.
+    await expect(page.locator('#compare-list .w-add', { hasText: '750' })).toHaveCount(1);
+    await expect(page.locator('#compare-list .w-del', { hasText: '500' })).toHaveCount(1);
+    await page.close();
+  });
+
+  test('compare versions: identical documents report no differences', async () => {
+    const same = fixture('compare-same.pdf', [[{ text: 'Unchanged content here', x: 72, y: 700 }]]);
+    const page = await openViewerWith(same);
+
+    const chooser = page.waitForEvent('filechooser');
+    await ui(page, '#btn-compare');
+    await (await chooser).setFiles(same);
+
+    await expect(page.locator('#compare-summary')).toContainText('no text differences');
+    await page.close();
+  });
+
+  test('remove hidden info: detects and strips a document script', async () => {
+    const file = fixture('sanitize.pdf', [[{ text: 'shareable', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    // Seed some hidden data: add a document-level script.
+    await ui(page, '#btn-js');
+    await page.fill('#js-name', 'tracker');
+    await page.fill('#js-source', "app.alert('phone home');");
+    await page.click('#js-add');
+    await expect(page.locator('#js-list .organize-label', { hasText: 'tracker' })).toHaveCount(1);
+    await page.click('#js-close'); // the editor is a modal window — close it before the menu
+
+    // Open the sanitiser: it should report the script and pre-check that category.
+    await ui(page, '#btn-sanitize');
+    await expect(page.locator('#panel-sanitize')).toBeVisible();
+    const scriptRow = page.locator('#sanitize-items [data-opt="scriptsAndActions"]');
+    await expect(scriptRow).toBeChecked();
+    await expect(page.locator('#sanitize-items')).toContainText('JavaScript & actions — 1 found');
+
+    await page.click('#sanitize-apply');
+    await expect(page.locator('#status')).toContainText('Hidden information removed');
+
+    // Re-opening the JavaScript panel shows the script is gone.
+    await ui(page, '#btn-js');
+    await expect(page.locator('#js-list .organize-item')).toHaveCount(0);
+    await page.close();
+  });
+
+  test('remove hidden info: reports a clean document', async () => {
+    const file = fixture('clean.pdf', [[{ text: 'nothing hidden', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-sanitize');
+    await expect(page.locator('#sanitize-clean')).toBeVisible();
+    await expect(page.locator('#sanitize-apply')).toBeDisabled();
     await page.close();
   });
 
@@ -478,7 +1335,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('protect.pdf', [[{ text: 'classified', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#btn-protect');
+    await ui(page, '#btn-protect');
     await fillDialog(page, ['s3cret', null], 'Encrypt');
     await expect(page.locator('#status')).toContainText('encrypted');
     await expect(page.locator('#badges .badge.locked')).toBeVisible();
@@ -496,7 +1353,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('sign-image.pdf', [[{ text: 'Sign here:', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#tool-sign');
+    await ui(page, '#tool-sign');
     await dragPdfRect(page, { x: 200, y: 640, width: 160, height: 50 });
     await expect(page.locator('#panel-sign')).toBeVisible();
 
@@ -517,7 +1374,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('sign-digital.pdf', [[{ text: 'Agreement', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
 
-    await page.click('#btn-digital');
+    await ui(page, '#btn-digital');
     await fillDialog(page, ['Approval', '', 'certpw'], 'Continue');
 
     const dialog = page.locator('dialog#modal');
@@ -542,7 +1399,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
 
     // Make one change so there is something to save/undo.
-    await page.click('#btn-find');
+    await ui(page, '#btn-find');
     await fillDialog(page, ['Original', 'Changed'], 'Replace all');
     await expect(page.locator('#status')).toContainText('Replaced 1 occurrence');
 

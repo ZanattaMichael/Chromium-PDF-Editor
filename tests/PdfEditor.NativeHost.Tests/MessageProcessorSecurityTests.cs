@@ -133,6 +133,131 @@ public class MessageProcessorSecurityTests
         Assert.False(Ok(r));
     }
 
+    // ---------------------------------------------- page/form actions reject bad input
+
+    [Fact]
+    public void ArrangePages_EmptyOrder_ReturnsError_NotCrash()
+    {
+        string pdf = Convert.ToBase64String(TestPdf.ManyPages(3));
+        Assert.False(Ok(HandleOne(Request("arrange-pages", new { pdf, order = Array.Empty<int>() }))));
+    }
+
+    [Fact]
+    public void ArrangePages_PageBeyondDocument_ReturnsError_NotCrash()
+    {
+        string pdf = Convert.ToBase64String(TestPdf.ManyPages(2));
+        Assert.False(Ok(HandleOne(Request("arrange-pages", new { pdf, order = new[] { 1, 999 } }))));
+    }
+
+    [Fact]
+    public void ArrangePages_MissingOrder_ReturnsError_NotCrash()
+    {
+        string pdf = Convert.ToBase64String(TestPdf.ManyPages(2));
+        Assert.False(Ok(HandleOne(Request("arrange-pages", new { pdf }))));
+    }
+
+    [Fact]
+    public void AddFormField_DropdownWithNoOptions_ReturnsError_NotCrash()
+    {
+        var r = HandleOne(Request("add-form-field", new
+        {
+            pdf = Convert.ToBase64String(TestPdf.OnePage()),
+            region = new { page = 1, x = 100, y = 500, width = 200, height = 24 },
+            fieldType = "dropdown", name = "empty", options = Array.Empty<string>(),
+        }));
+        Assert.False(Ok(r));
+    }
+
+    [Fact]
+    public void AddFormField_PageBeyondDocument_ReturnsError_NotCrash()
+    {
+        var r = HandleOne(Request("add-form-field", new
+        {
+            pdf = Convert.ToBase64String(TestPdf.OnePage()),
+            region = new { page = 42, x = 100, y = 500, width = 200, height = 24 },
+            fieldType = "text", name = "n",
+        }));
+        Assert.False(Ok(r));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void AddScript_EmptyName_ReturnsError_NotCrash(string name)
+    {
+        var r = HandleOne(Request("add-script", new
+        {
+            pdf = Convert.ToBase64String(TestPdf.OnePage()), name, script = "app.alert('x');",
+        }));
+        Assert.False(Ok(r));
+    }
+
+    [Fact]
+    public void AddScript_EmptyBody_ReturnsError_NotCrash()
+    {
+        var r = HandleOne(Request("add-script", new
+        {
+            pdf = Convert.ToBase64String(TestPdf.OnePage()), name = "n", script = "",
+        }));
+        Assert.False(Ok(r));
+    }
+
+    [Fact]
+    public void ListScripts_OnGarbageBytes_ReturnsError_NotCrash()
+    {
+        string garbage = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes("not a pdf"));
+        Assert.False(Ok(HandleOne(Request("list-scripts", new { pdf = garbage }))));
+    }
+
+    [Theory]
+    [InlineData("inspect-hidden")]
+    [InlineData("sanitize")]
+    public void HiddenDataActions_OnGarbageBytes_ReturnError_NotCrash(string action)
+    {
+        string garbage = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes("not a pdf at all"));
+        Assert.False(Ok(HandleOne(Request(action, new { pdf = garbage }))));
+    }
+
+    [Theory]
+    [InlineData("inspect-hidden")]
+    [InlineData("sanitize")]
+    public void HiddenDataActions_EmptyPayload_ReturnError_NotCrash(string action)
+    {
+        Assert.False(Ok(HandleOne(Request(action, new { }))));
+    }
+
+    [Fact]
+    public void Compare_MissingOtherDocument_ReturnsError_NotCrash()
+    {
+        Assert.False(Ok(HandleOne(Request("compare", new { pdf = Convert.ToBase64String(TestPdf.OnePage()) }))));
+    }
+
+    [Fact]
+    public void Compare_GarbageOtherDocument_ReturnsError_NotCrash()
+    {
+        string good = Convert.ToBase64String(TestPdf.OnePage());
+        string garbage = Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes("not a pdf"));
+        Assert.False(Ok(HandleOne(Request("compare", new { pdf = good, other = garbage }))));
+    }
+
+    [Fact]
+    public void AddScript_HostileScriptSource_IsStoredAsInertData_NeverEmittedRaw()
+    {
+        // The script body is attacker-controlled text. The host stores and returns it as a JSON
+        // string value; it must never break out of the JSON envelope on the wire.
+        const string hostile = "</script><svg onload=alert(1)>\"'\\";
+        string withJs = HandleOne(Request("add-script", new
+        {
+            pdf = Convert.ToBase64String(TestPdf.OnePage()), name = "x", script = hostile,
+        }))["result"]!["pdf"]!.GetValue<string>();
+
+        var (response, rawFrame) = Handle(Request("list-scripts", new { pdf = withJs }));
+
+        Assert.True(Ok(response));
+        Assert.Equal(hostile, response["result"]!["scripts"]![0]!["script"]!.GetValue<string>());
+        Assert.DoesNotContain("</script><svg", rawFrame); // escaped in the emitted JSON
+    }
+
     // --------------------------------------------------------------- no secret leak
 
     [Fact]

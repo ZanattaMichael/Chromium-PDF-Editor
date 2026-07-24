@@ -14,8 +14,32 @@ so your documents never leave your machine.
 | 💾 **Save changes** | Save the edited document via the file picker or the downloads bar. Undo history while editing. |
 | 🧭 **Sits on top of browser PDF viewing** | Navigating to a `.pdf` opens the editor automatically (toggleable). Embedded PDF viewers on web pages get an “Edit in PDF Editor” overlay button, plus a toolbar button and right-click menu. Adobe sites and viewers are always left alone. |
 | 🔒 **Password protection** | AES-256 encryption with user/owner passwords; open, edit, and decrypt protected files. |
-| ➕ **Merge** | Append any number of PDFs to the open document, including encrypted sources. |
+| ➕ **Merge & arrange** | Append PDFs, images, or Word documents; a **Merge & arrange** dialog lets you set the combine order (or drop files) before merging. Images are laid onto standard A4 pages. |
+| 🗂 **Organize pages** | Reorder pages by drag or ▲/▼ and delete the ones you don't need. |
+| 🗒 **Fillable forms** | Insert text, multi-line, checkbox, dropdown (choice), and JavaScript **button** fields others can fill in, and fill/flatten existing AcroForm fields. |
+| 🖍 **Annotate** | Highlight text, draw freehand, and add text anywhere. |
+| ✥ **Move text & images** | Grab a run of text or an image with the Move tool and drag it to a new position. |
+| 🖱 **Right-click menu** | Context actions: on selected text — Edit, Redact, Highlight, Copy, Open link; on blank page — Make searchable (OCR), Show source code, Save, Print, Zoom, Undo/Redo. |
+| ⚙ **Interactive JavaScript** | Add document-level scripts in a small code editor for form calculations/validation (runs in Acrobat/Chrome, never inside the viewer). |
+| 🧹 **Remove hidden information** | Scan for and strip metadata, embedded attachments, scripts/actions, comments, bookmarks, and hidden layers before sharing. |
+| 🔀 **Compare versions** | Word-level diff against another version, with a per-page summary of added and removed text. |
+| 🔎 **OCR** | Turn a scanned document into searchable, selectable text. Requires Tesseract — see [Optional external tools](#optional-external-tools). |
+| 🔒 **Password protection** | AES-256 encryption with user/owner passwords; open, edit, and decrypt protected files. |
 | 🖋 **Electronic signatures** | Draw a signature on a pad (or upload an image) and place it anywhere; or apply a cryptographic **digital signature** from a PKCS#12 certificate — the editor can also generate a self-signed certificate for you. Signature validity is verified and shown in the status bar. |
+
+## Optional external tools
+
+Most features work out of the box. Two optional capabilities shell out to a tool you install
+separately on the machine that runs the native host; when the tool is absent the editor reports a
+clear, actionable message instead of failing silently.
+
+| Capability | Needs | Install |
+| --- | --- | --- |
+| **OCR** (Make searchable) | [Tesseract OCR](https://tesseract-ocr.github.io/) + a language pack | Linux: `sudo apt install tesseract-ocr tesseract-ocr-eng` · macOS: `brew install tesseract` · Windows: `winget install -e --id tesseract-ocr.tesseract` |
+| **Merging Word documents** | [LibreOffice](https://www.libreoffice.org/) (the `soffice` command) | Linux: `sudo apt install libreoffice` · macOS: `brew install --cask libreoffice` · Windows: the LibreOffice installer |
+
+The host looks for each tool on `PATH` and in the usual install locations. After installing, restart
+the browser (so the native host is respawned) and the capability lights up automatically.
 
 ## Architecture
 
@@ -113,12 +137,29 @@ npx playwright install chromium   # once
 npx playwright test               # 10 scenarios
 ```
 
+### Performance guards
+
+A separate test project (`tests/PdfEditor.Perf.Tests`) puts time budgets on the core
+operations behind the editor and checks their algorithmic scaling, so a regression that
+made something quadratic — or reprocessed the whole document where it shouldn't — fails a
+build rather than a user noticing lag.
+
+```bash
+dotnet test tests/PdfEditor.Perf.Tests   # absolute-time budgets + scaling checks
+```
+
+The budgets are generous backstops (many times the observed local time); the scaling tests
+compare small vs large inputs so they hold regardless of machine speed. Set
+`PDF_EDITOR_PERF_SLACK` (a multiplier, e.g. `3`) to relax every budget uniformly on a slow
+host — CI runs this project as its own `perf` job with extra slack. It is intentionally
+outside the coverage-gated projects so timing runs never affect the coverage number.
+
 ### CI on pull requests
 
-Every push and PR runs `.github/workflows/ci.yml`'s three jobs: `test` (build + full
-.NET suite with the 90% coverage gate), `e2e` (the Playwright suite above, headless),
-and `package-dry-run` (actually runs `scripts/package-extension.sh` and uploads the
-resulting zip). That last job exists because the release pipeline below
+Every push and PR runs `.github/workflows/ci.yml`'s jobs: `test` (build + full
+.NET suite with the 90% coverage gate), `perf` (the performance guards above),
+`e2e` (the Playwright suite, headless), and `package-dry-run` (actually runs
+`scripts/package-extension.sh` and uploads the resulting zip). That last job exists because the release pipeline below
 (`release-candidate.yml`, `release-extension.yml`) only triggers on merges to `main` or
 published Releases — without a PR-time dry run, a regression in the packaging script
 itself would only surface once someone actually tried to cut a release.

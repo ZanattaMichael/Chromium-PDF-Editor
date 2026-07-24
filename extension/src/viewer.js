@@ -36,7 +36,8 @@ const state = {
   safety: null,         // { hasActiveContent, javaScriptCount, urlCount, samples }
   keepActiveContent: false, // false = strip JavaScript on save until the user opts in
   keepLinks: false,     // false = strip link URLs on save until the user enables them
-  links: [],            // extracted { page, url }
+  links: [],            // extracted { page, url } — the side panel's list
+  linkHotspots: [],     // [{ page, url, kind, x, y, width, height }] — the on-page overlay (all link types)
   formFields: [],       // [{ name, type, value, readOnly, page, x, y, width, height }] once listed
   urlVerdicts: [],      // [{ page, url, level, category, source, detail }] once scanned
   scripts: [],          // document-level JavaScript { name, script } once listed
@@ -199,6 +200,11 @@ async function loadDocument(bytes, fileName, { pushHistory = false, password } =
   // run in the background and light up their badges a moment later rather than delaying first paint.
   state.signatures = [];
   state.safety = null;
+  // Clear the on-page overlays so a reload never shows the previous document's links/fields; the
+  // background scans below repopulate them for the new document a moment later.
+  state.linkHotspots = [];
+  state.urlVerdicts = [];
+  state.formFields = [];
   const freshOpen = !!fileName; // only warn about active content when a document is first opened
   await showDocument();
   updateChrome();
@@ -404,6 +410,8 @@ async function renderPageEl(pageNum) {
     pe.img.src = `data:image/png;base64,${cached}`;
     pe.renderedKey = key;
     ensureTextLayer(pe, pageNum);
+    buildLinkLayer(pe, pageNum); // a cached page still needs its overlays (re)built for this page
+    buildFieldLayer(pe, pageNum);
     return;
   }
   try {
@@ -412,7 +420,7 @@ async function renderPageEl(pageNum) {
     pe.img.src = `data:image/png;base64,${png}`;
     pe.renderedKey = key;
     ensureTextLayer(pe, pageNum);
-    buildLinkLayer(pe, pageNum); // draw any clickable link hotspots for this page
+    buildLinkLayer(pe, pageNum); // draw any link hotspots for this page
     buildFieldLayer(pe, pageNum); // outline any form fields for this page
   } catch {
     /* leave the placeholder blank; it renders again when it next scrolls into view */
@@ -2353,15 +2361,15 @@ const LINK_KIND_LABELS = {
 /** On load, fetch every link annotation (with hotspot rects), rate the web ones, and draw them. */
 async function refreshLinks() {
   if (!URL_SCANNING_ENABLED) {
-    state.links = [];
+    state.linkHotspots = [];
     state.urlVerdicts = [];
     drawLinks();
     return;
   }
   try {
     const result = await host.call('list-link-hotspots', { pdf: state.pdfB64, pdfPassword: state.password });
-    state.links = result.links ?? [];
-    if (state.links.some((l) => l.kind === 'uri')) {
+    state.linkHotspots = result.links ?? [];
+    if (state.linkHotspots.some((l) => l.kind === 'uri')) {
       try {
         const creds = await chrome.storage.local.get({ cfAccountId: '', cfApiToken: '' });
         const scan = await host.call('scan-urls', {
@@ -2384,30 +2392,32 @@ function drawLinks() {
   }
 }
 
-/** Lays clickable link hotspots over one page, each tinted + dotted by its risk rating. */
+/** Lays link hotspots over one page, each tinted + dotted by its risk rating. */
 function buildLinkLayer(pe, pageNum) {
   pe.wrap.querySelector('.link-layer')?.remove();
-  const links = (state.links ?? []).filter((l) => l.page === pageNum && l.width > 0 && l.height > 0);
+  const links = (state.linkHotspots ?? []).filter((l) => l.page === pageNum && l.width > 0 && l.height > 0);
   if (links.length === 0) return;
   const layer = document.createElement('div');
   layer.className = 'link-layer';
   for (const link of links) {
     const css = pdfRectToCss(pageNum, pe.img, { x: link.x, y: link.y, width: link.width, height: link.height });
     if (css.width <= 0 || css.height <= 0) continue;
-    const isUri = link.kind === 'uri' && link.url;
+    const isUri = link.kind === 'uri' && !!link.url;
     const verdict = isUri ? state.urlVerdicts.find((v) => v.url === link.url && v.page === link.page) : null;
     const level = isUri ? (verdict?.level ?? 'unknown') : 'unknown';
-    // Web links are real anchors that open in a new tab; other actions are shown but not navigable.
-    const el = document.createElement(isUri ? 'a' : 'div');
-    el.className = `link-hotspot risk-${level}`;
-    if (isUri) {
+    // A web link becomes a real, clickable anchor only once the user has enabled links; until then
+    // (and for in-document actions) it's shown, risk-coloured, but inert — never auto-navigable.
+    const navigable = isUri && state.keepLinks;
+    const el = document.createElement(navigable ? 'a' : 'div');
+    el.className = `link-hotspot risk-${level}${!navigable && isUri ? ' link-inert' : ''}`;
+    if (navigable) {
       el.href = link.url; // set as a property, never interpolated into HTML
       el.target = '_blank';
       el.rel = 'noreferrer nofollow';
     }
     el.style.cssText = `left:${css.left}px;top:${css.top}px;width:${css.width}px;height:${css.height}px;`;
     // Rollover popup: the URL + risk for web links, or the action kind for the rest.
-    el.addEventListener('mouseenter', () => showLinkPopup(el, link, level, verdict));
+    el.addEventListener('mouseenter', () => showLinkPopup(el, link, level, verdict, navigable));
     el.addEventListener('mouseleave', hideLinkPopup);
     const dot = document.createElement('span');
     dot.className = `link-risk-dot ${level}`;
@@ -2418,10 +2428,10 @@ function buildLinkLayer(pe, pageNum) {
 }
 
 /** Shows the rollover popup with a link's URL/action and risk rating, positioned near the hotspot. */
-function showLinkPopup(anchor, link, level, verdict) {
+function showLinkPopup(anchor, link, level, verdict, navigable) {
   const pop = $('link-popup');
   pop.innerHTML = '';
-  const isUri = link.kind === 'uri' && link.url;
+  const isUri = link.kind === 'uri' && !!link.url;
   const urlEl = document.createElement('div');
   urlEl.className = 'lp-url';
   // textContent — URL / action label is document data, never HTML.
@@ -2436,6 +2446,12 @@ function showLinkPopup(anchor, link, level, verdict) {
           (verdict?.source === 'cloudflare' ? ' (Cloudflare)' : ''))
     : '● In-document action — opens nothing on the web';
   pop.appendChild(risk);
+  if (isUri && !navigable) {
+    const note = document.createElement('div');
+    note.className = 'lp-note';
+    note.textContent = 'Disabled — enable links to open';
+    pop.appendChild(note);
+  }
 
   placePopupNear(pop, anchor);
 }
@@ -2603,6 +2619,7 @@ async function toggleLinks() {
   state.keepLinks = $('links-enable').checked;
   if (state.keepLinks && state.urlVerdicts.length === 0) await scanLinks();
   else renderLinks();
+  drawLinks();      // enabling/disabling flips the on-page hotspots between clickable and inert
   updateChrome();
 }
 

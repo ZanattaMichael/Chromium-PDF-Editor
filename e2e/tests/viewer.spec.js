@@ -7,6 +7,7 @@ const path = require('node:path');
 const { launchExtension } = require('../helpers/harness');
 const {
   buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf, buildLinkPdf, buildJsLinkPdf,
+  buildLinkOnPage2Pdf,
 } = require('../helpers/pdf');
 
 /** @type {Awaited<ReturnType<typeof launchExtension>>} */
@@ -487,7 +488,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
-  test('links: a clickable hotspot is drawn over the link, coloured by risk', async () => {
+  test('links: a hotspot is drawn over the link, coloured by risk, inert until enabled', async () => {
     const file = path.join(fixtureDir, 'linkspot.pdf');
     fs.writeFileSync(file, buildLinkPdf('https://github.com/example/repo'));
     const page = await openViewerWith(file);
@@ -497,16 +498,23 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(hotspot).toHaveCount(1, { timeout: 15000 });
     await expect(hotspot).toHaveClass(/risk-yellow/);
     await expect(hotspot.locator('.link-risk-dot.yellow')).toHaveCount(1);
-    // It's a real link to the URL, opening in a new tab.
-    await expect(hotspot).toHaveAttribute('href', 'https://github.com/example/repo');
-    await expect(hotspot).toHaveAttribute('target', '_blank');
 
-    // Rolling over shows a popup with the URL and its risk rating.
+    // Links are disabled by default, so the hotspot is shown but NOT navigable (a plain div, no href).
+    await expect(hotspot).toHaveJSProperty('tagName', 'DIV');
+    await expect(hotspot).not.toHaveAttribute('href', /.*/);
     await hotspot.hover();
     const popup = page.locator('#link-popup');
     await expect(popup).toBeVisible();
     await expect(popup.locator('.lp-url')).toHaveText('https://github.com/example/repo');
     await expect(popup.locator('.lp-risk.yellow')).toBeVisible();
+    await expect(popup.locator('.lp-note')).toContainText('enable links');
+
+    // Enabling links turns the hotspot into a real anchor that opens in a new tab.
+    await ui(page, '#btn-links');
+    await page.locator('#links-enable').check();
+    await expect(hotspot).toHaveJSProperty('tagName', 'A');
+    await expect(hotspot).toHaveAttribute('href', 'https://github.com/example/repo');
+    await expect(hotspot).toHaveAttribute('target', '_blank');
     await page.close();
   });
 
@@ -523,6 +531,25 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // Rollover explains the action instead of a URL.
     await hotspot.hover();
     await expect(page.locator('#link-popup .lp-url')).toHaveText('JavaScript action');
+    await page.close();
+  });
+
+  test('links: the overlay is drawn on a later page after scrolling to it', async () => {
+    // Regression: scrolling to a page whose image comes from the render cache must still draw
+    // its link hotspots (the overlay used to be skipped on the cached-render path).
+    const file = path.join(fixtureDir, 'link-p2.pdf');
+    fs.writeFileSync(file, buildLinkOnPage2Pdf('https://github.com/example/repo'));
+    const page = await openViewerWith(file);
+
+    // Page 1 carries no links; jump to page 2, where the annotation lives.
+    await expect(page.locator('.page[data-page="1"] .link-hotspot')).toHaveCount(0);
+    await page.fill('#page-input', '2');
+    await page.press('#page-input', 'Enter');
+    await expect(page.locator(pageImageSel(2))).toHaveAttribute('src', /data:image\/png/);
+
+    const hotspot = page.locator('.page[data-page="2"] .link-hotspot');
+    await expect(hotspot).toHaveCount(1, { timeout: 15000 });
+    await expect(hotspot).toHaveClass(/risk-yellow/);
     await page.close();
   });
 

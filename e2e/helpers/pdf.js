@@ -141,6 +141,22 @@ function buildLinkPdf(url = 'https://github.com/example/repo') {
   ]);
 }
 
+/**
+ * A two-page document with a link annotation on the SECOND page. Regression fixture for the
+ * on-page link overlay: the hotspot must still be drawn once you scroll down to a later page
+ * (even when that page's image comes from the render cache).
+ */
+function buildLinkOnPage2Pdf(url = 'https://github.com/example/repo') {
+  return assemble([
+    `<< /Type /Catalog /Pages 2 0 R >>`,
+    `<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Annots [5 0 R] >>`,
+    `<< /Type /Annot /Subtype /Link /Rect [72 700 272 720] /Border [0 0 1] ` +
+      `/A << /S /URI /URI (${url}) >> >>`,
+  ]);
+}
+
 /** A page with a JavaScript-action link annotation (like Salesforce "Close Window"). */
 function buildJsLinkPdf(script = 'window.close();') {
   const content = 'BT /F1 14 Tf 72 704 Td (Close Window) Tj ET';
@@ -157,4 +173,5 @@ function buildJsLinkPdf(script = 'window.close();') {
 
 module.exports = {
   buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf, buildLinkPdf, buildJsLinkPdf,
+  buildLinkOnPage2Pdf,
 };

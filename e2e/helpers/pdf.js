@@ -157,6 +157,25 @@ function buildLinkOnPage2Pdf(url = 'https://github.com/example/repo') {
   ]);
 }
 
+/**
+ * A single page with a line of TEXT and a URI link annotation laid directly over that text.
+ * Regression fixture for layer stacking: the (invisible, selectable) text layer must not cover
+ * the link hotspot — the hotspot has to stay hoverable/clickable even though text sits under it.
+ */
+function buildLinkOverTextPdf(url = 'https://github.com/example/repo') {
+  const content = 'BT /F1 14 Tf 72 704 Td (Visit our website now for details) Tj ET';
+  return assemble([
+    `<< /Type /Catalog /Pages 2 0 R >>`,
+    `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R ` +
+      `/Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>`,
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`,
+    `<< /Type /Annot /Subtype /Link /Rect [72 700 320 720] /Border [0 0 1] ` +
+      `/A << /S /URI /URI (${url}) >> >>`,
+  ]);
+}
+
 /** A page with a JavaScript-action link annotation (like Salesforce "Close Window"). */
 function buildJsLinkPdf(script = 'window.close();') {
   const content = 'BT /F1 14 Tf 72 704 Td (Close Window) Tj ET';
@@ -173,5 +192,5 @@ function buildJsLinkPdf(script = 'window.close();') {
 
 module.exports = {
   buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf, buildLinkPdf, buildJsLinkPdf,
-  buildLinkOnPage2Pdf,
+  buildLinkOnPage2Pdf, buildLinkOverTextPdf,
 };

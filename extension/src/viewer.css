@@ -207,7 +207,11 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
 
 .page-image { display: block; width: 100%; height: 100%; }
 
-.overlay { position: absolute; inset: 0; }
+/* Per-page layer stacking (all absolute/inset:0 over the image). Pinned with explicit z-index so
+   the order never depends on which layer's builder (some async) inserted last: text at the bottom,
+   then link hotspots, then form-field markers, then the tool-drawing overlay on top. Without this,
+   the async text layer could land above the link layer and swallow link hover/clicks. */
+.overlay { position: absolute; inset: 0; z-index: 4; }
 .overlay.tool-active { cursor: crosshair; }
 
 /* Invisible, selectable text laid over the rendered page so real text can be selected/copied.
@@ -215,6 +219,7 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
 .text-layer {
   position: absolute;
   inset: 0;
+  z-index: 1;
   overflow: hidden;
   line-height: 1;
   pointer-events: none;
@@ -233,7 +238,7 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
 
 /* Clickable link hotspots laid over the rendered page, tinted by risk, with a risk-colour dot.
    Only clickable in select mode (like the text layer); tools draw over them otherwise. */
-.link-layer { position: absolute; inset: 0; pointer-events: none; }
+.link-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .link-hotspot {
   position: absolute;
   display: block;
@@ -301,7 +306,7 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
 .link-hotspot.link-inert { cursor: help; }
 
 /* Form-field markers: outline every AcroForm field so empty/borderless fields are still visible. */
-.field-layer { position: absolute; inset: 0; pointer-events: none; }
+.field-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 .field-marker {
   --field: #38bdf8;
   position: absolute;

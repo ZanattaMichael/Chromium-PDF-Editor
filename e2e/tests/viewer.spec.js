@@ -7,7 +7,7 @@ const path = require('node:path');
 const { launchExtension } = require('../helpers/harness');
 const {
   buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf, buildLinkPdf, buildJsLinkPdf,
-  buildLinkOnPage2Pdf,
+  buildLinkOnPage2Pdf, buildLinkOverTextPdf,
 } = require('../helpers/pdf');
 
 /** @type {Awaited<ReturnType<typeof launchExtension>>} */
@@ -550,6 +550,31 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const hotspot = page.locator('.page[data-page="2"] .link-hotspot');
     await expect(hotspot).toHaveCount(1, { timeout: 15000 });
     await expect(hotspot).toHaveClass(/risk-yellow/);
+    await page.close();
+  });
+
+  test('links: the hotspot sits above the text layer so hover/click reach it', async () => {
+    // Regression: the selectable text layer used to stack above the link layer (its async build
+    // could insert it last), swallowing link hover/clicks. Explicit z-index pins the order.
+    const file = path.join(fixtureDir, 'link-over-text.pdf');
+    fs.writeFileSync(file, buildLinkOverTextPdf('https://github.com/example/repo'));
+    const page = await openViewerWith(file);
+
+    const hotspot = page.locator('.page[data-page="1"] .link-hotspot');
+    await expect(hotspot).toHaveCount(1, { timeout: 15000 });
+
+    // The topmost element at the hotspot's centre must be the hotspot itself, not the text layer.
+    const hitsHotspot = await hotspot.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return !!(top && top.closest('.link-hotspot'));
+    });
+    expect(hitsHotspot).toBe(true);
+
+    // And hovering actually shows the rollover popup.
+    await hotspot.hover();
+    await expect(page.locator('#link-popup')).toBeVisible();
+    await expect(page.locator('#link-popup .lp-url')).toHaveText('https://github.com/example/repo');
     await page.close();
   });
 

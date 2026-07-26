@@ -52,6 +52,37 @@ public static class TextTools
         return new EditResult(stamped, removed.Warnings);
     }
 
+    /// <summary>
+    /// Moves the text found in <paramref name="source"/> by (<paramref name="dx"/>,
+    /// <paramref name="dy"/>) in PDF user space: the original text is removed and re-stamped at the
+    /// shifted position, preserving its detected font, size, and style. A no-op if the region holds
+    /// no text.
+    /// </summary>
+    public static EditResult MoveText(byte[] pdf, RectRegion source, float dx, float dy, string? password = null)
+    {
+        var found = GetTextInRegion(pdf, source, password);
+        if (string.IsNullOrWhiteSpace(found.Text)) return EditResult.Of(pdf);
+
+        var removed = Redactor.RemoveContent(pdf, new[] { source }, password);
+        var dest = new RectRegion(source.Page, source.X + dx, source.Y + dy, source.Width, source.Height);
+        var stamped = StampText(removed.Pdf, dest, found.Text, found.FontSize, password,
+            fontName: ResolveFont(found.FontFamily, found.Bold, found.Italic), wrap: false);
+        return new EditResult(stamped, removed.Warnings);
+    }
+
+    /// <summary>
+    /// Adds new text on top of the page inside <paramref name="region"/> (wrapped to its width),
+    /// without touching any existing content. Used by the "add text anywhere" tool.
+    /// </summary>
+    public static EditResult AddText(byte[] pdf, RectRegion region, string text, float fontSize,
+        string? fontFamily = null, bool bold = false, bool italic = false,
+        string? colorHex = null, string? password = null)
+    {
+        var stamped = StampText(pdf, region, text, fontSize, password,
+            fontName: ResolveFont(fontFamily, bold, italic), color: ParseColor(colorHex));
+        return EditResult.Of(stamped);
+    }
+
     /// <summary>Maps a family name (helvetica/times/courier) + style to a standard-14 PDF font.</summary>
     internal static string ResolveFont(string? family, bool bold, bool italic)
     {
@@ -91,7 +122,7 @@ public static class TextTools
         return (family, bold, italic);
     }
 
-    private static iText.Kernel.Colors.Color? ParseColor(string? hex)
+    internal static iText.Kernel.Colors.Color? ParseColor(string? hex)
     {
         if (string.IsNullOrWhiteSpace(hex)) return null;
         string h = hex.Trim().TrimStart('#');
@@ -178,6 +209,41 @@ public static class TextTools
             }
         }
         return output.ToArray();
+    }
+
+    /// <summary>
+    /// Returns each run of text on a page with its bounding box in PDF user space. Used to build
+    /// the viewer's selectable text layer. Runs (not individual glyphs) keep the layer light.
+    /// </summary>
+    public static IReadOnlyList<TextSpan> GetTextSpans(byte[] pdf, int page, string? password = null)
+    {
+        using var doc = PdfIo.OpenReadOnly(pdf, password);
+        if (page < 1 || page > doc.GetNumberOfPages()) return Array.Empty<TextSpan>();
+        var spans = new List<TextSpan>();
+        new PdfCanvasProcessor(new SpanListener(spans)).ProcessPageContent(doc.GetPage(page));
+        return spans;
+    }
+
+    private sealed class SpanListener : IEventListener
+    {
+        private readonly List<TextSpan> _spans;
+        public SpanListener(List<TextSpan> spans) => _spans = spans;
+
+        public void EventOccurred(IEventData data, EventType type)
+        {
+            if (data is not TextRenderInfo t) return;
+            string text = t.GetText();
+            if (string.IsNullOrWhiteSpace(text)) return;
+            var asc = t.GetAscentLine();
+            var desc = t.GetDescentLine();
+            float x0 = desc.GetStartPoint().Get(0), x1 = desc.GetEndPoint().Get(0);
+            float yBottom = desc.GetStartPoint().Get(1), yTop = asc.GetStartPoint().Get(1);
+            float minX = Math.Min(x0, x1), maxX = Math.Max(x0, x1);
+            if (maxX <= minX || yTop <= yBottom) return; // skip zero-area / vertical runs
+            _spans.Add(new TextSpan(text, minX, yBottom, maxX - minX, yTop - yBottom));
+        }
+
+        public ICollection<EventType>? GetSupportedEvents() => null;
     }
 
     // ------------------------------------------------------------ extraction

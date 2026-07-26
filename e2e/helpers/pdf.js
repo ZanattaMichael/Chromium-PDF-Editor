@@ -87,4 +87,110 @@ function buildLeftoverCtmPdf(word = 'SECRET') {
   return Buffer.from(body, 'latin1');
 }
 
-module.exports = { buildPdf, buildLeftoverCtmPdf };
+/** Serialises a 1-indexed list of object bodies into a valid PDF with an xref table. */
+function assemble(objects) {
+  let body = '%PDF-1.4\n';
+  const offsets = [0];
+  objects.forEach((obj, i) => {
+    offsets.push(body.length);
+    body += `${i + 1} 0 obj\n${obj}\nendobj\n`;
+  });
+  const xrefStart = body.length;
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (let i = 1; i <= objects.length; i++) {
+    body += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+  }
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
+  return Buffer.from(body, 'latin1');
+}
+
+/** A single-page document with one AcroForm text field. */
+function buildFormPdf(fieldName = 'fullName', value = '') {
+  return assemble([
+    `<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] /DA (/Helv 0 Tf 0 g) /NeedAppearances true >> >>`,
+    `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Annots [5 0 R] /Resources << /Font << /Helv 6 0 R >> >> >>`,
+    `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`,
+    `<< /FT /Tx /T (${fieldName}) /V (${value}) /Type /Annot /Subtype /Widget ` +
+      `/Rect [100 700 300 724] /P 3 0 R /DA (/Helv 12 Tf 0 g) >>`,
+    `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`,
+  ]);
+}
+
+/** A single-page document that runs JavaScript on open (document-level active content). */
+function buildJavaScriptPdf(script = "app.alert('hello from the pdf');") {
+  const content = 'BT /F1 18 Tf 72 700 Td (Has script) Tj ET';
+  return assemble([
+    `<< /Type /Catalog /Pages 2 0 R /OpenAction << /S /JavaScript /JS (${script}) >> >>`,
+    `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R ` +
+      `/Resources << /Font << /F1 5 0 R >> >> >>`,
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`,
+  ]);
+}
+
+/** A single-page document with a link annotation pointing at the given URL. */
+function buildLinkPdf(url = 'https://github.com/example/repo') {
+  return assemble([
+    `<< /Type /Catalog /Pages 2 0 R >>`,
+    `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Annots [4 0 R] >>`,
+    `<< /Type /Annot /Subtype /Link /Rect [72 700 272 720] /Border [0 0 1] ` +
+      `/A << /S /URI /URI (${url}) >> >>`,
+  ]);
+}
+
+/**
+ * A two-page document with a link annotation on the SECOND page. Regression fixture for the
+ * on-page link overlay: the hotspot must still be drawn once you scroll down to a later page
+ * (even when that page's image comes from the render cache).
+ */
+function buildLinkOnPage2Pdf(url = 'https://github.com/example/repo') {
+  return assemble([
+    `<< /Type /Catalog /Pages 2 0 R >>`,
+    `<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Annots [5 0 R] >>`,
+    `<< /Type /Annot /Subtype /Link /Rect [72 700 272 720] /Border [0 0 1] ` +
+      `/A << /S /URI /URI (${url}) >> >>`,
+  ]);
+}
+
+/**
+ * A single page with a line of TEXT and a URI link annotation laid directly over that text.
+ * Regression fixture for layer stacking: the (invisible, selectable) text layer must not cover
+ * the link hotspot — the hotspot has to stay hoverable/clickable even though text sits under it.
+ */
+function buildLinkOverTextPdf(url = 'https://github.com/example/repo') {
+  const content = 'BT /F1 14 Tf 72 704 Td (Visit our website now for details) Tj ET';
+  return assemble([
+    `<< /Type /Catalog /Pages 2 0 R >>`,
+    `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R ` +
+      `/Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>`,
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`,
+    `<< /Type /Annot /Subtype /Link /Rect [72 700 320 720] /Border [0 0 1] ` +
+      `/A << /S /URI /URI (${url}) >> >>`,
+  ]);
+}
+
+/** A page with a JavaScript-action link annotation (like Salesforce "Close Window"). */
+function buildJsLinkPdf(script = 'window.close();') {
+  const content = 'BT /F1 14 Tf 72 704 Td (Close Window) Tj ET';
+  return assemble([
+    `<< /Type /Catalog /Pages 2 0 R >>`,
+    `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R ` +
+      `/Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>`,
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`,
+    `<< /Type /Annot /Subtype /Link /Rect [72 700 200 718] /A << /S /JavaScript /JS (${script}) >> >>`,
+  ]);
+}
+
+module.exports = {
+  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf, buildLinkPdf, buildJsLinkPdf,
+  buildLinkOnPage2Pdf, buildLinkOverTextPdf,
+};

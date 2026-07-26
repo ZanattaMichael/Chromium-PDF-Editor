@@ -42,6 +42,30 @@ public class PageRendererTests
     }
 
     [Fact]
+    public void RendersInsertedFormField_AsAVisibleBox()
+    {
+        // Regression: inserted AcroForm fields used to render as blank page space because the
+        // renderer drew neither the annotation nor the form-widget layer. A field must now show as
+        // a visible box (non-white pixels where it sits).
+        byte[] pdf = FormTools.AddTextField(
+            TestPdfs.WithText(("blank", 72, 100, 12)), 1,
+            new RectRegion(1, 100, 400, 220, 26), "email").Pdf;
+
+        using var bitmap = SKBitmap.Decode(PageRenderer.RenderPagePng(pdf, 1, 150));
+        float scale = 150f / 72f;
+        int nonWhite = 0;
+        for (int py = 400; py <= 426; py++)
+            for (int px = 100; px <= 320; px++)
+            {
+                var c = bitmap.GetPixel(
+                    Math.Clamp((int)(px * scale), 0, bitmap.Width - 1),
+                    Math.Clamp((int)((842 - py) * scale), 0, bitmap.Height - 1));
+                if (!(c.Red > 248 && c.Green > 248 && c.Blue > 248)) nonWhite++;
+            }
+        Assert.True(nonWhite > 0, "the inserted text field rendered as blank page space (invisible)");
+    }
+
+    [Fact]
     public void PdfInspector_ReportsPageGeometry()
     {
         byte[] pdf = TestPdfs.MultiPage(4);

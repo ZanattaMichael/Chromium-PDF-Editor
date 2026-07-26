@@ -27,6 +27,17 @@ public class MalformedPdfSecurityTests
         Assert.ThrowsAny<Exception>(() => Encryptor.Encrypt(input, "pw"));
         // A single-element merge short-circuits without parsing; two copies force the read path.
         Assert.ThrowsAny<Exception>(() => Merger.Merge(new[] { input, input }));
+        // Newer editor operations must be just as hostile-input-safe as the originals.
+        Assert.ThrowsAny<Exception>(() => PageTools.Arrange(input, new[] { 1 }));
+        Assert.ThrowsAny<Exception>(() => PageTools.Rotate(input, new[] { 1 }, 90));
+        Assert.ThrowsAny<Exception>(() => FormTools.ListFields(input));
+        Assert.ThrowsAny<Exception>(() => FormTools.AddTextField(input, 1, new RectRegion(1, 0, 0, 10, 10)));
+        Assert.ThrowsAny<Exception>(() =>
+            FormTools.AddDropdown(input, 1, new RectRegion(1, 0, 0, 40, 12), "f", new[] { "a" }));
+        Assert.ThrowsAny<Exception>(() =>
+            HighlightTool.AddHighlight(input, 1, new[] { new RectRegion(1, 0, 0, 10, 10) }, null));
+        Assert.ThrowsAny<Exception>(() =>
+            InkTools.AddInk(input, 1, new[] { (IReadOnlyList<(float, float)>)new[] { (0f, 0f), (5f, 5f) } }, null, 2f));
     }
 
     [Fact]

@@ -129,6 +129,52 @@ public class TextToolsTests
     }
 
     [Fact]
+    public void MoveText_RelocatesTheRun_ByTheGivenDelta()
+    {
+        byte[] pdf = TestPdfs.WithText(("MOVEME", 100, 500, 14));
+        var before = Assert.Single(TextTools.FindText(pdf, "MOVEME"));
+        var region = new RectRegion(1, before.X, before.Y, before.Width, before.Height);
+
+        var result = TextTools.MoveText(pdf, region, dx: 130, dy: -90);
+
+        var after = Assert.Single(TextTools.FindText(result.Pdf, "MOVEME"));
+        Assert.True(after.X > before.X + 100, $"expected x to move right (was {before.X}, now {after.X})");
+        Assert.True(after.Y < before.Y - 60, $"expected y to move down (was {before.Y}, now {after.Y})");
+    }
+
+    [Fact]
+    public void MoveText_EmptyRegion_IsANoOp()
+    {
+        byte[] pdf = TestPdfs.WithText(("hello", 72, 700, 12));
+        var result = TextTools.MoveText(pdf, new RectRegion(1, 300, 300, 40, 20), 10, 10);
+        Assert.Equal(pdf, result.Pdf);
+    }
+
+    [Fact]
+    public void GetTextSpans_ReturnsRuns_WithPositions()
+    {
+        byte[] pdf = TestPdfs.WithText(("Selectable Text Here", 72, 700, 14));
+
+        var spans = TextTools.GetTextSpans(pdf, 1);
+
+        var span = Assert.Single(spans);
+        Assert.Contains("Selectable", span.Text);
+        Assert.True(span.Width > 0 && span.Height > 0);
+        // Roughly where it was drawn (baseline near y=700).
+        Assert.InRange(span.X, 60, 90);
+        Assert.InRange(span.Y, 690, 705);
+    }
+
+    [Fact]
+    public void GetTextSpans_EmptyPage_ReturnsEmpty()
+    {
+        using var ms = new MemoryStream();
+        using (var doc = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfWriter(ms)))
+            doc.AddNewPage();
+        Assert.Empty(TextTools.GetTextSpans(ms.ToArray(), 1));
+    }
+
+    [Fact]
     public void FindText_LocatesPhraseOnCorrectPage()
     {
         byte[] pdf = TestPdfs.MultiPage(3, "Chapter");

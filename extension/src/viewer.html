@@ -7,34 +7,83 @@
 </head>
 <body>
   <header id="toolbar">
-    <div class="group">
+    <!-- Always-visible essentials: open/save/print, history, and the default hand tool. -->
+    <div class="group" role="group" aria-label="Document">
+      <button id="btn-sidebar" title="Toggle the page thumbnails sidebar" disabled>☰</button>
       <button id="btn-open" title="Open a PDF file">📂 Open</button>
       <button id="btn-save" title="Save the edited PDF" disabled>💾 Save</button>
-      <button id="btn-undo" title="Undo last applied change" disabled>↩ Undo</button>
+      <button id="btn-print" title="Print the document" disabled>🖨 Print</button>
+      <button id="btn-undo" title="Undo last change" disabled>↩</button>
+      <button id="btn-redo" title="Redo last undone change" disabled>↪</button>
+      <button id="tool-select" class="tool active" title="Pan / select text">🖐</button>
     </div>
-    <div class="group" id="tools">
-      <button id="tool-select" class="tool active" title="Pan / select">🖐</button>
-      <button id="tool-edit" class="tool" title="Edit text: drag a box around the text to change" disabled>✏ Edit text</button>
-      <button id="tool-redact" class="tool" title="Redact: drag boxes over content to black out" disabled>⬛ Redact</button>
-      <button id="tool-sign" class="tool" title="Place a signature: drag where it should go" disabled>🖋 Sign</button>
+    <span class="sep" aria-hidden="true"></span>
+
+    <!-- Reading tools: inspect and fill, without changing the page content. -->
+    <div class="menu-group" id="menu-read">
+      <button class="menu-trigger" id="menu-read-trigger" aria-haspopup="true"
+        aria-expanded="false" title="Reading tools" disabled>📖 Read ▾</button>
+      <div class="menu-panel" role="menu">
+        <button id="btn-find" class="menu-item" role="menuitem">🔍 Find &amp; replace</button>
+        <button id="btn-compare" class="menu-item" role="menuitem" title="Compare with another version">🔀 Compare versions…</button>
+        <button id="btn-links" class="menu-item" role="menuitem">🔗 Review links</button>
+      </div>
     </div>
-    <div class="group">
-      <button id="btn-find" title="Find &amp; replace text" disabled>🔍 Replace</button>
-      <button id="btn-merge" title="Append other PDFs to this one" disabled>➕ Merge</button>
-      <button id="btn-protect" title="Password-protect (AES-256)" disabled>🔒 Protect</button>
-      <button id="btn-digital" title="Digitally sign with a certificate" disabled>🪪 Certify</button>
+
+    <!-- Editing tools: everything that changes the document. -->
+    <div class="menu-group" id="menu-edit">
+      <button class="menu-trigger" id="menu-edit-trigger" aria-haspopup="true"
+        aria-expanded="false" title="Editing tools" disabled>✏️ Edit ▾</button>
+      <div class="menu-panel" role="menu">
+        <div class="menu-label">Annotate</div>
+        <button id="tool-text" class="menu-item tool" role="menuitem" title="Add text: click anywhere to type">🅣 Add text</button>
+        <button id="tool-draw" class="menu-item tool" role="menuitem" title="Draw freehand on the page">✒ Draw</button>
+        <button id="tool-highlight" class="menu-item tool" role="menuitem" title="Drag across text to highlight it">🖍 Highlight</button>
+        <button id="tool-edit" class="menu-item tool" role="menuitem" title="Drag a box around text to change it">✏ Edit text</button>
+        <button id="tool-move" class="menu-item tool" role="menuitem" title="Grab a run of text or an image and drag it to a new position">✥ Move text / image</button>
+        <button id="tool-redact" class="menu-item tool" role="menuitem" title="Drag boxes over content to black it out">⬛ Redact</button>
+        <button id="tool-sign" class="menu-item tool" role="menuitem" title="Place a signature">🖋 Sign</button>
+        <div class="menu-sep" aria-hidden="true"></div>
+        <div class="menu-label">Forms</div>
+        <button id="btn-forms" class="menu-item" role="menuitem" title="Fill existing fields and build new ones">🗒 Fill &amp; build forms</button>
+        <div class="menu-sep" aria-hidden="true"></div>
+        <div class="menu-label">Pages</div>
+        <button id="btn-rotate-left" class="menu-item" role="menuitem">⟲ Rotate left</button>
+        <button id="btn-rotate-right" class="menu-item" role="menuitem">⟳ Rotate right</button>
+        <button id="btn-organize" class="menu-item" role="menuitem" title="Reorder or delete pages">🗂 Organize pages…</button>
+        <button id="btn-merge" class="menu-item" role="menuitem" title="Append PDFs, images, or Word documents">➕ Merge files…</button>
+        <div class="menu-sep" aria-hidden="true"></div>
+        <div class="menu-label">Advanced</div>
+        <button id="btn-js" class="menu-item" role="menuitem" title="Add interactive JavaScript to the document">⚙ JavaScript…</button>
+        <button id="btn-ocr" class="menu-item" role="menuitem" title="Recognise text in a scanned document (OCR)">🔎 Make searchable (OCR)</button>
+        <button id="btn-sanitize" class="menu-item" role="menuitem" title="Remove hidden data before sharing">🧹 Remove hidden info…</button>
+        <div class="menu-sep" aria-hidden="true"></div>
+        <div class="menu-label">Secure</div>
+        <button id="btn-protect" class="menu-item" role="menuitem" title="Password-protect (AES-256)">🔒 Protect</button>
+        <button id="btn-digital" class="menu-item" role="menuitem" title="Digitally sign with a certificate">🪪 Certify</button>
+      </div>
     </div>
-    <div class="group" id="nav">
+
+    <!-- Navigation + zoom (pushed to the right) -->
+    <div class="group" id="nav" role="group" aria-label="Navigation">
       <button id="btn-prev" title="Previous page" disabled>◀</button>
-      <span id="page-label">– / –</span>
+      <span id="page-counter">
+        <input id="page-input" type="text" inputmode="numeric" value="–" disabled
+          title="Type a page number and press Enter" /> / <span id="page-total">–</span>
+      </span>
       <button id="btn-next" title="Next page" disabled>▶</button>
+      <span class="sep" aria-hidden="true"></span>
       <button id="btn-zoom-out" title="Zoom out" disabled>−</button>
       <span id="zoom-label">100%</span>
       <button id="btn-zoom-in" title="Zoom in" disabled>＋</button>
     </div>
   </header>
 
+  <!-- Document status (encryption, JavaScript, links, signatures) sits directly under the menu. -->
+  <div id="badge-bar"><span id="badges"></span></div>
+
   <main id="workspace">
+    <aside id="thumbnails" hidden></aside>
     <div id="scroll-area">
       <div id="pages"></div>
       <div id="empty-state">
@@ -62,9 +111,128 @@
         </div>
       </div>
 
+      <div id="panel-links" class="panel-section" hidden>
+        <h2>Links</h2>
+        <p class="muted" id="links-empty" hidden>This document contains no links.</p>
+        <label id="links-enable-row" hidden>
+          <input id="links-enable" type="checkbox" style="width:auto;margin-right:6px" />
+          Enable links (keep them when saving)
+        </label>
+        <p class="muted" id="links-hint" hidden>Links are disabled. Enable them to keep them on
+          save and rate each with the Cloudflare URL Scanner.</p>
+        <ul id="links-list"></ul>
+        <div class="actions">
+          <button id="links-rescan" hidden>Re-scan</button>
+          <button id="links-close">Close</button>
+        </div>
+      </div>
+
+      <div id="panel-forms" class="panel-section" hidden>
+        <h2>Form fields</h2>
+        <p class="muted" id="forms-empty" hidden>This document has no fillable form fields.</p>
+        <div id="forms-list"></div>
+        <label id="forms-flatten-row" hidden>
+          <input id="forms-flatten" type="checkbox" style="width:auto;margin-right:6px" />
+          Flatten (bake values in; fields no longer editable)
+        </label>
+        <div class="actions">
+          <button id="forms-apply">Apply</button>
+          <button id="forms-cancel">Close</button>
+        </div>
+        <hr class="panel-rule" />
+        <h2>Insert a fillable field</h2>
+        <p class="muted">Add fields other people can fill in when they open the PDF.</p>
+        <label>Type
+          <select id="field-type">
+            <option value="text">Text field</option>
+            <option value="multiline">Text area (multi-line)</option>
+            <option value="checkbox">Checkbox</option>
+            <option value="dropdown">Dropdown (choose one)</option>
+            <option value="radio">Option buttons (choose one)</option>
+            <option value="button">Button (runs JavaScript)</option>
+          </select>
+        </label>
+        <label>Name <input id="field-name" type="text" placeholder="e.g. fullName" /></label>
+        <label id="field-options-row" hidden>Options (one per line)
+          <textarea id="field-options" rows="4" placeholder="Australia&#10;Canada&#10;Denmark"></textarea>
+        </label>
+        <label id="field-caption-row" hidden>Button label
+          <input id="field-caption" type="text" placeholder="e.g. Submit" />
+        </label>
+        <label id="field-script-row" hidden>JavaScript to run on click
+          <textarea id="field-script" class="code-editor" rows="4" spellcheck="false"
+            placeholder="app.alert('Thanks!');"></textarea>
+        </label>
+        <div class="actions">
+          <button id="field-place">Place on page…</button>
+        </div>
+      </div>
+
+      <div id="panel-compare" class="panel-section" hidden>
+        <h2>Compare versions</h2>
+        <p class="muted">Differences between the document you pick (the earlier version) and the one
+          open now. Comparison is text-based.</p>
+        <div id="compare-summary" class="compare-summary"></div>
+        <ul id="compare-list" class="reorder-list"></ul>
+        <div class="actions">
+          <button id="compare-pick">Pick a file to compare…</button>
+          <button id="compare-close">Close</button>
+        </div>
+      </div>
+
+      <div id="panel-sanitize" class="panel-section" hidden>
+        <h2>Remove hidden information</h2>
+        <p class="muted">Documents often carry data that never shows on the page — author names,
+          software and timestamps, embedded files, scripts, comments, bookmarks and layers. Choose
+          what to strip before sharing.</p>
+        <div id="sanitize-items"></div>
+        <p class="muted" id="sanitize-clean" hidden>✓ No hidden information was found in this document.</p>
+        <div class="actions">
+          <button id="sanitize-apply" class="danger">Remove selected</button>
+          <button id="sanitize-cancel">Close</button>
+        </div>
+      </div>
+
+      <div id="panel-organize" class="panel-section" hidden>
+        <h2>Organize pages</h2>
+        <p class="muted">Drag pages to reorder them, or remove pages you don't need. Changes apply
+          when you click Apply.</p>
+        <ol id="organize-list" class="reorder-list"></ol>
+        <div class="actions">
+          <button id="organize-apply">Apply</button>
+          <button id="organize-reset">Reset</button>
+          <button id="organize-cancel">Close</button>
+        </div>
+      </div>
+
+      <div id="panel-highlight" class="panel-section" hidden>
+        <h2>Highlight</h2>
+        <p class="muted">Drag across text to highlight it. The text stays readable underneath.</p>
+        <div id="edit-style">
+          <label class="color-field" title="Highlight colour">Colour <input id="highlight-color" type="color" value="#ffeb3b" /></label>
+        </div>
+        <div class="actions">
+          <button id="highlight-done">Done</button>
+        </div>
+      </div>
+
+      <div id="panel-draw" class="panel-section" hidden>
+        <h2>Draw</h2>
+        <p class="muted">Draw freehand anywhere on the page, then apply to bake the strokes in.</p>
+        <div id="edit-style">
+          <label class="color-field" title="Pen colour">Colour <input id="draw-color" type="color" value="#e53935" /></label>
+          <label>Width <input id="draw-width" type="number" min="0.5" max="40" step="0.5" value="2.5" /></label>
+        </div>
+        <div class="actions">
+          <button id="draw-apply">Apply drawing</button>
+          <button id="draw-clear">Clear</button>
+          <button id="draw-cancel">Cancel</button>
+        </div>
+      </div>
+
       <div id="panel-edit" class="panel-section" hidden>
-        <h2>Edit text</h2>
-        <p class="muted">Text found in the selected region:</p>
+        <h2 id="edit-title">Edit text</h2>
+        <p class="muted" id="edit-hint">Text found in the selected region:</p>
         <textarea id="edit-text" rows="5"></textarea>
         <label>Font
           <select id="edit-font">
@@ -108,7 +276,6 @@
 
   <footer id="statusbar">
     <span id="status"></span>
-    <span id="badges"></span>
   </footer>
 
   <div id="busy-overlay" hidden>
@@ -118,10 +285,35 @@
     </div>
   </div>
 
+  <div id="context-menu" role="menu" hidden></div>
+  <div id="link-popup" hidden></div>
+
+  <dialog id="js-dialog">
+    <div class="js-dialog-body">
+      <h2>Document JavaScript</h2>
+      <p class="muted">Add interactive JavaScript that runs when the PDF is opened in Acrobat or
+        another reader — form calculations, validation, and the like. Scripts are
+        <strong>never executed inside this editor</strong>; the viewer only renders pages.</p>
+      <ul id="js-list" class="reorder-list"></ul>
+      <label>Script name <input id="js-name" type="text" placeholder="e.g. calculateTotal" /></label>
+      <label class="js-source-label">Source
+        <textarea id="js-source" class="code-editor" spellcheck="false"
+          placeholder="// Runs at document level.&#10;var total = this.getField('a').value * 1;&#10;this.getField('b').value = total;"></textarea>
+      </label>
+      <div class="actions">
+        <button id="js-add">Add / update</button>
+        <button id="js-clear">New</button>
+        <button id="js-close">Close</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="modal"></dialog>
   <input id="file-input" type="file" accept="application/pdf" hidden />
-  <input id="merge-input" type="file" accept="application/pdf" multiple hidden />
+  <input id="merge-input" type="file" multiple hidden
+    accept="application/pdf,.pdf,image/png,image/jpeg,image/*,.docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
   <input id="pfx-input" type="file" accept=".p12,.pfx" hidden />
+  <input id="compare-input" type="file" accept="application/pdf,.pdf" hidden />
 
   <script type="module" src="viewer.js"></script>
 </body>

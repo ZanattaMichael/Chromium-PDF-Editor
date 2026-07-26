@@ -26,3 +26,23 @@ async function test() {
 
 document.getElementById('test').addEventListener('click', test);
 test();
+
+// -------------------------------------------------------- Cloudflare scanner
+const cfAccount = document.getElementById('cf-account');
+const cfToken = document.getElementById('cf-token');
+const cfStatus = document.getElementById('cf-status');
+
+chrome.storage.local.get({ cfAccountId: '', cfApiToken: '' }).then((v) => {
+  cfAccount.value = v.cfAccountId;
+  cfToken.value = v.cfApiToken;
+});
+
+document.getElementById('cf-save').addEventListener('click', async () => {
+  await chrome.storage.local.set({
+    cfAccountId: cfAccount.value.trim(),
+    cfApiToken: cfToken.value.trim(),
+  });
+  cfStatus.textContent = '✓ saved';
+  cfStatus.className = 'ok';
+  setTimeout(() => { cfStatus.textContent = ''; }, 2500);
+});

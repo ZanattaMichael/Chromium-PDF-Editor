@@ -46,11 +46,38 @@ public sealed class MessageProcessor
         "info" => Info(p),
         "render" => Render(p),
         "redact" => Redact(p),
+        "rotate" => RotateAction(p),
+        "arrange-pages" => ArrangePagesAction(p),
+        "add-text" => AddTextAction(p),
+        "move-text" => MoveTextAction(p),
+        "move-image" => MoveImageAction(p),
+        "add-drawing" => AddDrawingAction(p),
+        "add-highlight" => AddHighlightAction(p),
+        "form-fields" => FormFieldsAction(p),
+        "fill-form" => FillFormAction(p),
+        "add-form-field" => AddFormFieldAction(p),
+        "scan-safety" => ScanSafetyAction(p),
+        "js-sources" => new { sources = PdfSafety.JavaScriptSources(Pdf(p), Password(p)) },
+        "strip-active" => StripActiveAction(p),
+        "list-scripts" => ListScriptsAction(p),
+        "add-script" => AddScriptAction(p),
+        "remove-script" => RemoveScriptAction(p),
+        "inspect-hidden" => InspectHiddenAction(p),
+        "sanitize" => SanitizeAction(p),
+        "compare" => CompareAction(p),
+        "ocr-available" => new { available = OcrTool.CanOcr },
+        "ocr-text" => OcrTextAction(p),
+        "ocr-searchable" => OcrSearchableAction(p),
+        "list-urls" => ListUrlsAction(p),
+        "list-link-hotspots" => ListLinkHotspotsAction(p),
+        "scan-urls" => ScanUrlsAction(p),
         "get-region-text" => GetRegionText(p),
         "replace-region-text" => ReplaceRegionText(p),
         "find-text" => FindTextAction(p),
+        "page-text" => PageTextAction(p),
         "replace-all" => ReplaceAllAction(p),
         "merge" => MergeAction(p),
+        "merge-files" => MergeFilesAction(p),
         "encrypt" => EncryptAction(p),
         "decrypt" => DecryptAction(p),
         "sign-image" => SignImage(p),
@@ -91,6 +118,271 @@ public sealed class MessageProcessor
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 
+    private static object RotateAction(JsonObject p)
+    {
+        var pages = (p["pages"]?.AsArray().Select(n => n!.GetValue<int>()) ?? Enumerable.Empty<int>()).ToList();
+        int degrees = p["degrees"]?.GetValue<int>() ?? 90;
+        var result = PageTools.Rotate(Pdf(p), pages, degrees, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object ArrangePagesAction(JsonObject p)
+    {
+        var order = p["order"]!.AsArray().Select(n => n!.GetValue<int>()).ToList();
+        var result = PageTools.Arrange(Pdf(p), order, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object AddTextAction(JsonObject p)
+    {
+        var result = TextTools.AddText(Pdf(p), Region(p["region"]!.AsObject()),
+            p["text"]?.GetValue<string>() ?? "",
+            p["fontSize"]?.GetValue<float>() ?? 14f,
+            p["fontFamily"]?.GetValue<string>(),
+            p["bold"]?.GetValue<bool>() ?? false,
+            p["italic"]?.GetValue<bool>() ?? false,
+            p["color"]?.GetValue<string>(),
+            Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object MoveTextAction(JsonObject p)
+    {
+        var result = TextTools.MoveText(Pdf(p), Region(p["region"]!.AsObject()),
+            p["dx"]!.GetValue<float>(), p["dy"]!.GetValue<float>(), Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object MoveImageAction(JsonObject p)
+    {
+        var region = Region(p["region"]!.AsObject());
+        var result = ImageTools.MoveImage(Pdf(p), region.Page, region,
+            p["dx"]!.GetValue<float>(), p["dy"]!.GetValue<float>(), Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object AddDrawingAction(JsonObject p)
+    {
+        int page = p["page"]!.GetValue<int>();
+        var strokes = (p["strokes"]?.AsArray() ?? new JsonArray())
+            .Select(s => (IReadOnlyList<(float X, float Y)>)s!.AsArray()
+                .Select(pt => (pt!["x"]!.GetValue<float>(), pt["y"]!.GetValue<float>())).ToList())
+            .ToList();
+        var result = InkTools.AddInk(Pdf(p), page, strokes,
+            p["color"]?.GetValue<string>(), p["width"]?.GetValue<float>() ?? 2f, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object AddHighlightAction(JsonObject p)
+    {
+        int page = p["page"]!.GetValue<int>();
+        var rects = p["rects"]!.AsArray().Select(n =>
+        {
+            var o = n!.AsObject();
+            return new RectRegion(page, o["x"]!.GetValue<float>(), o["y"]!.GetValue<float>(),
+                o["width"]!.GetValue<float>(), o["height"]!.GetValue<float>());
+        }).ToList();
+        var result = HighlightTool.AddHighlight(Pdf(p), page, rects,
+            p["color"]?.GetValue<string>(), Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object FormFieldsAction(JsonObject p)
+    {
+        var fields = FormTools.ListFields(Pdf(p), Password(p));
+        return new
+        {
+            fields = fields.Select(f => new
+            {
+                name = f.Name, type = f.Type, value = f.Value, options = f.Options, readOnly = f.ReadOnly,
+                page = f.Page, x = f.X, y = f.Y, width = f.Width, height = f.Height
+            })
+        };
+    }
+
+    private static object FillFormAction(JsonObject p)
+    {
+        var values = new Dictionary<string, string>();
+        if (p["values"]?.AsObject() is { } obj)
+            foreach (var kv in obj) values[kv.Key] = kv.Value?.GetValue<string>() ?? "";
+        var result = FormTools.FillFields(Pdf(p), values, p["flatten"]?.GetValue<bool>() ?? false, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object AddFormFieldAction(JsonObject p)
+    {
+        var region = Region(p["region"]!.AsObject());
+        string type = p["fieldType"]?.GetValue<string>() ?? "text";
+        string? name = p["name"]?.GetValue<string>();
+        var result = type switch
+        {
+            "checkbox" => FormTools.AddCheckbox(Pdf(p), region.Page, region, name, password: Password(p)),
+            "dropdown" => FormTools.AddDropdown(Pdf(p), region.Page, region, name,
+                (p["options"]?.AsArray() ?? new JsonArray()).Select(o => o!.GetValue<string>()).ToList(),
+                Password(p)),
+            "radio" or "option" => FormTools.AddRadioGroup(Pdf(p), region.Page, region, name,
+                (p["options"]?.AsArray() ?? new JsonArray()).Select(o => o!.GetValue<string>()).ToList(),
+                Password(p)),
+            "multiline" => FormTools.AddTextField(Pdf(p), region.Page, region, name,
+                p["value"]?.GetValue<string>(), Password(p), multiline: true),
+            "button" => FormTools.AddButton(Pdf(p), region.Page, region, name,
+                p["caption"]?.GetValue<string>(), p["script"]?.GetValue<string>(), Password(p)),
+            _ => FormTools.AddTextField(Pdf(p), region.Page, region, name,
+                p["value"]?.GetValue<string>(), Password(p)),
+        };
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object ScanSafetyAction(JsonObject p)
+    {
+        var report = PdfSafety.Scan(Pdf(p), Password(p));
+        return new
+        {
+            javaScriptCount = report.JavaScriptCount,
+            urlCount = report.UrlCount,
+            hasActiveContent = report.HasActiveContent,
+            samples = report.Samples
+        };
+    }
+
+    private static object StripActiveAction(JsonObject p)
+    {
+        // Default both true (strip everything) when the flags are omitted.
+        bool js = p["javaScript"]?.GetValue<bool>() ?? true;
+        bool urls = p["urls"]?.GetValue<bool>() ?? true;
+        var result = PdfSafety.StripActive(Pdf(p), js, urls, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object ListScriptsAction(JsonObject p)
+    {
+        var scripts = JavaScriptTool.ListScripts(Pdf(p), Password(p));
+        return new { scripts = scripts.Select(s => new { name = s.Name, script = s.Script }) };
+    }
+
+    private static object AddScriptAction(JsonObject p)
+    {
+        var result = JavaScriptTool.AddDocumentScript(Pdf(p),
+            p["name"]?.GetValue<string>() ?? "",
+            p["script"]?.GetValue<string>() ?? "", Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object RemoveScriptAction(JsonObject p)
+    {
+        var result = JavaScriptTool.RemoveScript(Pdf(p),
+            p["name"]?.GetValue<string>() ?? "", Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object OcrTextAction(JsonObject p)
+    {
+        string text = OcrTool.ExtractText(Pdf(p), p["page"]?.GetValue<int>() ?? 1, Password(p));
+        return new { text };
+    }
+
+    private static object OcrSearchableAction(JsonObject p)
+    {
+        byte[] result = OcrTool.MakeSearchable(Pdf(p), Password(p));
+        return new { pdf = Convert.ToBase64String(result) };
+    }
+
+    private static object CompareAction(JsonObject p)
+    {
+        // 'other' is the previous/other version to diff against; the loaded document is the newer.
+        byte[] other = Convert.FromBase64String(p["other"]?.GetValue<string>()
+            ?? throw new InvalidDataException("Missing 'other' document."));
+        string? otherPassword = p["otherPassword"]?.GetValue<string>();
+        var report = DocComparer.Compare(other, Pdf(p), otherPassword, Password(p));
+        return new
+        {
+            pagesOld = report.PagesOld,
+            pagesNew = report.PagesNew,
+            changedPages = report.ChangedPages,
+            addedWords = report.AddedWords,
+            removedWords = report.RemovedWords,
+            identical = report.Identical,
+            pages = report.Pages.Where(pg => pg.Changed).Select(pg => new
+            {
+                page = pg.Page, added = pg.Added, removed = pg.Removed
+            })
+        };
+    }
+
+    private static object InspectHiddenAction(JsonObject p)
+    {
+        var r = Sanitizer.Inspect(Pdf(p), Password(p));
+        return new
+        {
+            metadataFields = r.MetadataFields,
+            attachments = r.Attachments,
+            scriptsAndActions = r.ScriptsAndActions,
+            annotations = r.Annotations,
+            bookmarks = r.Bookmarks,
+            hiddenLayers = r.HiddenLayers,
+            hasAny = r.HasAny
+        };
+    }
+
+    private static object SanitizeAction(JsonObject p)
+    {
+        bool Opt(string key) => p[key]?.GetValue<bool>() ?? true; // default: remove everything
+        var options = new SanitizeOptions(
+            Metadata: Opt("metadata"),
+            Attachments: Opt("attachments"),
+            ScriptsAndActions: Opt("scriptsAndActions"),
+            Annotations: Opt("annotations"),
+            Bookmarks: Opt("bookmarks"),
+            HiddenLayers: Opt("hiddenLayers"));
+        var result = Sanitizer.Sanitize(Pdf(p), options, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object ListUrlsAction(JsonObject p)
+    {
+        var links = UrlTools.ExtractLinks(Pdf(p), Password(p));
+        return new
+        {
+            links = links.Select(l => new
+            {
+                page = l.Page, url = l.Url,
+                x = l.X, y = l.Y, width = l.Width, height = l.Height
+            })
+        };
+    }
+
+    private static object ListLinkHotspotsAction(JsonObject p)
+    {
+        var links = UrlTools.ExtractLinkAnnotations(Pdf(p), Password(p));
+        return new
+        {
+            links = links.Select(l => new
+            {
+                page = l.Page, url = l.Url, kind = l.Kind,
+                x = l.X, y = l.Y, width = l.Width, height = l.Height
+            })
+        };
+    }
+
+    private static object ScanUrlsAction(JsonObject p)
+    {
+        var links = UrlTools.ExtractLinks(Pdf(p), Password(p));
+        var creds = new CloudflareCredentials(
+            p["cfAccountId"]?.GetValue<string>() ?? "",
+            p["cfApiToken"]?.GetValue<string>() ?? "");
+        var verdicts = CloudflareUrlScanner
+            .ScanAsync(links, creds.IsUsable ? creds : null).GetAwaiter().GetResult();
+        return new
+        {
+            usedCloudflare = creds.IsUsable,
+            verdicts = verdicts.Select(v => new
+            {
+                page = v.Page, url = v.Url, level = v.Level,
+                category = v.Category, source = v.Source, detail = v.Detail
+            })
+        };
+    }
+
     private static object GetRegionText(JsonObject p)
     {
         var text = TextTools.GetTextInRegion(Pdf(p), Region(p["region"]!.AsObject()), Password(p));
@@ -114,6 +406,15 @@ public sealed class MessageProcessor
             p["color"]?.GetValue<string>(),
             Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object PageTextAction(JsonObject p)
+    {
+        var spans = TextTools.GetTextSpans(Pdf(p), p["page"]!.GetValue<int>(), Password(p));
+        return new
+        {
+            spans = spans.Select(s => new { text = s.Text, x = s.X, y = s.Y, width = s.Width, height = s.Height })
+        };
     }
 
     private static object FindTextAction(JsonObject p)
@@ -141,6 +442,18 @@ public sealed class MessageProcessor
         var pdfs = p["pdfs"]!.AsArray().Select(n => Convert.FromBase64String(n!.GetValue<string>())).ToList();
         var passwords = p["passwords"]?.AsArray().Select(n => n?.GetValue<string>()).ToList();
         return new { pdf = Convert.ToBase64String(Merger.Merge(pdfs, passwords)) };
+    }
+
+    private static object MergeFilesAction(JsonObject p)
+    {
+        // Each entry is { data: base64, kind: "pdf"|"image"|"docx" }; non-PDFs are converted first.
+        var pdfs = p["files"]!.AsArray().Select(n =>
+        {
+            var o = n!.AsObject();
+            byte[] data = Convert.FromBase64String(o["data"]!.GetValue<string>());
+            return DocumentImport.ToPdf(data, o["kind"]?.GetValue<string>() ?? "pdf");
+        }).ToList();
+        return new { pdf = Convert.ToBase64String(Merger.Merge(pdfs)) };
     }
 
     private static object EncryptAction(JsonObject p) => new

@@ -40,7 +40,10 @@ jobs:
       - name: Build
         run: dotnet build --configuration Release
       - name: Test
-        run: dotnet test --configuration Release --no-build --verbosity normal
+        # Excludes the timing-based performance guards: this solution-wide run executes the suites
+        # in parallel on a shared runner, so their budgets would measure contention and fail at
+        # random. Performance is gated by the dedicated `perf` job in ci.yml instead.
+        run: dotnet test --configuration Release --no-build --verbosity normal --filter "Category!=Performance"
 
   package:
     needs: verify

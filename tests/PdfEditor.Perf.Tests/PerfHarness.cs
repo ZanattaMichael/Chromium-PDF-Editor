@@ -18,10 +18,32 @@ namespace PdfEditor.Perf.Tests;
 /// </summary>
 internal static class PerfHarness
 {
-    /// <summary>Uniform multiplier applied to every budget (default 1.0). Set >1 on slow CI.</summary>
-    public static readonly double Slack =
-        double.TryParse(Environment.GetEnvironmentVariable("PDF_EDITOR_PERF_SLACK"), out var s) && s > 0
-            ? s : 1.0;
+    /// <summary>
+    /// Uniform multiplier applied to every budget. An explicit <c>PDF_EDITOR_PERF_SLACK</c> always
+    /// wins. Otherwise it defaults to 1.0 locally but <see cref="CiSlack"/> on a CI runner (detected
+    /// via the standard <c>CI</c> variable): shared runners are slow, and a solution-wide
+    /// <c>dotnet test</c> runs the suites in parallel, so an un-slacked budget there measures
+    /// contention rather than the code and fails at random.
+    /// </summary>
+    internal const double CiSlack = 4.0;
+
+    public static readonly double Slack = ResolveSlack(
+        Environment.GetEnvironmentVariable("PDF_EDITOR_PERF_SLACK"),
+        IsCi(Environment.GetEnvironmentVariable("CI")));
+
+    /// <summary>
+    /// Pure slack resolution, split out from the ambient environment so every branch is testable:
+    /// a valid positive <paramref name="envValue"/> wins outright, otherwise CI gets
+    /// <see cref="CiSlack"/> and a local run stays strict at 1.0.
+    /// </summary>
+    internal static double ResolveSlack(string? envValue, bool isCi) =>
+        double.TryParse(envValue, out var s) && s > 0 ? s : isCi ? CiSlack : 1.0;
+
+    /// <summary>True on the common CI providers, which all set <c>CI</c> to a truthy value.</summary>
+    internal static bool IsCi(string? ci) =>
+        !string.IsNullOrEmpty(ci) &&
+        !ci.Equals("false", StringComparison.OrdinalIgnoreCase) &&
+        !ci.Equals("0", StringComparison.Ordinal);
 
     /// <summary>Builds a <paramref name="pages"/>-page PDF with ~<paramref name="wordsPerPage"/> words each.</summary>
     public static byte[] Doc(int pages, int wordsPerPage = 14)

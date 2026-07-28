@@ -74,7 +74,6 @@ test('honours parentheses and subtraction/division', () => {
 
 test('rejects scripts outside the supported grammar instead of guessing', () => {
   const cases = [
-    'app.alert("hi");',
     'if (this.getField("a").value > 0) this.getField("b").value = 1;',
     'this.getField("a").value = "literal string";',
     'this.submitForm("https://example.com");',
@@ -89,4 +88,35 @@ test('rejects scripts outside the supported grammar instead of guessing', () => 
 test('empty script is unsupported', () => {
   assert.equal(runFormScript('', valuesOf({})).ok, false);
   assert.equal(runFormScript('   ', valuesOf({})).ok, false);
+});
+
+test('supports app.alert with a string argument', () => {
+  const result = runFormScript("app.alert('thanks!');", valuesOf({}));
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.alerts, ['thanks!']);
+});
+
+test('supports app.alert with trailing icon/type arguments', () => {
+  const result = runFormScript('app.alert("Saved", 3);', valuesOf({}));
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.alerts, ['Saved']);
+});
+
+test('supports the app.alert({cMsg: ...}) named-argument form', () => {
+  const result = runFormScript('app.alert({cMsg: "Done", cTitle: "Info"});', valuesOf({}));
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.alerts, ['Done']);
+});
+
+test('app.alert combines with field updates in one script', () => {
+  const result = runFormScript(
+    'this.getField("total").value = this.getField("a").value + 1; app.alert("done");',
+    valuesOf({ a: '4' }));
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.sets, [{ name: 'total', value: '5' }]);
+  assert.deepEqual(result.alerts, ['done']);
+});
+
+test('a non-alert app.* call is still unsupported', () => {
+  assert.equal(runFormScript('app.launchURL("https://example.com");', valuesOf({})).ok, false);
 });

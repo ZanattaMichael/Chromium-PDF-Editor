@@ -325,6 +325,30 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
   background: color-mix(in srgb, var(--field) 32%, transparent);
   border-width: 2px;
 }
+
+/* The real, fillable control sitting inside a field's outline, so a form can be completed on the
+   page itself rather than only from the side panel. Only interactive while the select/hand tool
+   is active -- during a redact/highlight/draw drag the fields must not swallow the pointer. */
+.field-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0 3px;
+  border: none;
+  background: transparent;
+  color: #111;
+  font: inherit;
+  font-size: clamp(8px, 80%, 15px);
+  pointer-events: none;
+}
+#pages.select-mode .field-input { pointer-events: auto; }
+.field-input:focus { outline: 2px solid var(--field); outline-offset: -1px; background: #fff; }
+.field-input[type="checkbox"] { inset: 50% auto auto 50%; translate: -50% -50%; width: 80%; height: 80%; accent-color: var(--field); }
+/* Transparent hit-area only — the button's own appearance is already in the page image. */
+.field-input-button { background: transparent; cursor: pointer; }
+#pages.select-mode .field-input-button:hover { background: color-mix(in srgb, var(--field) 25%, transparent); }
 .field-tag {
   position: absolute;
   top: -9px;

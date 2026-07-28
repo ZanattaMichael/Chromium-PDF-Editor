@@ -5,11 +5,17 @@
 //   this.getField("Total").value = this.getField("A").value + this.getField("B").value;
 //   this.getField("Extra").display = display.hidden;   // or display.visible
 //   this.resetForm();
-// Anything outside that grammar (conditionals, loops, app.alert, string concatenation, calls to
-// user-defined functions, …) is reported as unsupported rather than partially executed — we never
-// want to silently do half of what a script asked for, and we never `eval`/`Function` PDF content.
+//   app.alert("Thanks!");            // also app.alert({cMsg: "Thanks!"})
+// Anything outside that grammar (conditionals, loops, string concatenation, calls to user-defined
+// functions, …) is reported as unsupported rather than partially executed — we never want to
+// silently do half of what a script asked for, and we never `eval`/`Function` PDF content.
 
 const FIELD_REF = /this\s*\.\s*getField\(\s*(["'])((?:(?!\1).)*)\1\s*\)\s*\.\s*value/g;
+// app.alert("msg") / app.alert('msg', 3) — trailing icon/type/title args are accepted and ignored.
+const ALERT_STATEMENT = /^app\s*\.\s*alert\(\s*(["'])((?:(?!\1).)*)\1\s*(?:,[^)]*)?\)$/;
+// app.alert({cMsg: "msg", cTitle: "…"}) — the named-argument form, in either key order.
+const ALERT_OBJECT_STATEMENT =
+  /^app\s*\.\s*alert\(\s*\{[^{}]*\bcMsg\s*:\s*(["'])((?:(?!\1).)*)\1[^{}]*\}\s*\)$/;
 const SET_STATEMENT =
   /^this\s*\.\s*getField\(\s*(["'])((?:(?!\1).)*)\1\s*\)\s*\.\s*value\s*=\s*(.+)$/;
 const DISPLAY_STATEMENT =
@@ -21,7 +27,7 @@ const RESET_STATEMENT = /^this\s*\.\s*resetForm\(\s*\)$/;
  *
  * @param {string} script - the raw JavaScript source from the button's /A action.
  * @param {(name: string) => string} getValue - reads a field's current (string) value.
- * @returns {{ok: true, sets: {name: string, value: string}[], display: {name: string, hidden: boolean}[], reset: boolean} | {ok: false}}
+ * @returns {{ok: true, sets: {name: string, value: string}[], display: {name: string, hidden: boolean}[], reset: boolean, alerts: string[]} | {ok: false}}
  *   `ok: false` means the script wasn't (fully) recognised — the caller should tell the user it
  *   needs a real PDF viewer rather than silently doing nothing or half-applying it.
  */
@@ -34,11 +40,18 @@ function runFormScript(script, getValue) {
 
   const sets = [];
   const display = [];
+  const alerts = [];
   let reset = false;
 
   for (const statement of statements) {
     if (RESET_STATEMENT.test(statement)) {
       reset = true;
+      continue;
+    }
+
+    const alertMatch = ALERT_STATEMENT.exec(statement) ?? ALERT_OBJECT_STATEMENT.exec(statement);
+    if (alertMatch) {
+      alerts.push(alertMatch[2]);
       continue;
     }
 
@@ -58,7 +71,7 @@ function runFormScript(script, getValue) {
 
     return { ok: false }; // an unrecognised statement — don't half-run the script
   }
-  return { ok: true, sets, display, reset };
+  return { ok: true, sets, display, reset, alerts };
 }
 
 /**

@@ -463,9 +463,58 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('forms: fields are fillable directly on the page and stay in sync with the panel', async () => {
+    const file = path.join(fixtureDir, 'onpage.pdf');
+    fs.writeFileSync(file, buildFormWithButtonScriptPdf());
+    const page = await openViewerWith(file);
+
+    // Type into the field where it sits on the page, not in the side panel.
+    const onPage = page.locator('.field-marker [data-page-field="a"]');
+    await expect(onPage).toHaveCount(1);
+    await onPage.fill('42');
+
+    // The panel reflects it...
+    await ui(page, '#btn-forms');
+    await expect(page.locator('#forms-list [data-field="a"]')).toHaveValue('42');
+    // ...and editing the panel flows back to the page.
+    await page.locator('#forms-list [data-field="a"]').fill('7');
+    await expect(onPage).toHaveValue('7');
+    await page.close();
+  });
+
+  test('forms: clicking a scripted button on the page runs it', async () => {
+    const file = path.join(fixtureDir, 'onpage-btn.pdf');
+    fs.writeFileSync(file, buildFormWithButtonScriptPdf());
+    const page = await openViewerWith(file);
+
+    await page.locator('.field-marker [data-page-field="a"]').fill('10');
+    await page.locator('.field-marker [data-page-field="b"]').fill('5');
+    await page.locator('.field-marker .field-input-button').click();
+
+    await expect(page.locator('.field-marker [data-page-field="total"]')).toHaveValue('15');
+    await page.close();
+  });
+
+  test('forms: an app.alert button shows the message like a real reader', async () => {
+    const file = path.join(fixtureDir, 'button-alert.pdf');
+    fs.writeFileSync(file, buildFormWithButtonScriptPdf("app.alert('thanks!');"));
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await page.locator('.form-field[data-field-name="calc"] .form-field-run').click();
+
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('thanks!');
+    await dialog.getByRole('button', { name: 'OK' }).click();
+    await expect(dialog).toBeHidden();
+    await page.close();
+  });
+
   test('forms: a button script outside the supported grammar is reported, not silently ignored (#18/#22)', async () => {
     const file = path.join(fixtureDir, 'button-unsupported.pdf');
-    fs.writeFileSync(file, buildFormWithButtonScriptPdf("app.alert('hi');"));
+    // Deliberately outside the grammar: a submit call, not something the viewer can stand in for.
+    fs.writeFileSync(file, buildFormWithButtonScriptPdf("this.submitForm('https://example.com');"));
     const page = await openViewerWith(file);
 
     await ui(page, '#btn-forms');

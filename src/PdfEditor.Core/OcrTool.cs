@@ -29,7 +29,7 @@ public static class OcrTool
             string img = IOPath.Combine(work, "page.png");
             File.WriteAllBytes(img, PageRenderer.RenderPagePng(pdf, page, dpi, password));
             // "stdout" tells Tesseract to write the recognised text to standard output.
-            var (stdout, _, ok) = Run(tesseract, work, img, "stdout");
+            var (stdout, _, ok) = Run(tesseract, work, img, "stdout", "-c", UserDefinedDpi(dpi));
             if (!ok) throw new InvalidOperationException("Tesseract could not read the page.");
             return stdout.Trim();
         }
@@ -55,7 +55,7 @@ public static class OcrTool
                 File.WriteAllBytes(img, PageRenderer.RenderPagePng(pdf, p, dpi, password));
 
                 string outBase = IOPath.Combine(work, $"page{p}-ocr");
-                var (_, stderr, ok) = Run(tesseract, work, img, outBase, "pdf");
+                var (_, stderr, ok) = Run(tesseract, work, img, outBase, "-c", UserDefinedDpi(dpi), "pdf");
                 string outPdf = outBase + ".pdf";
                 if (!ok || !File.Exists(outPdf))
                     throw new InvalidOperationException(
@@ -67,6 +67,19 @@ public static class OcrTool
         }
         finally { TryDelete(work); }
     }
+
+    /// <summary>
+    /// Tells Tesseract the resolution the page image was rendered at. PNGs written by Skia carry
+    /// no pHYs resolution chunk, so without this Tesseract falls back to its 70 dpi guess: it then
+    /// lays the searchable PDF out at pixels/70*72 points, i.e. 300/70 ≈ 4.3x the real page. That
+    /// single wrong number caused both reported faults — the viewer sizes each page from its media
+    /// box, so the OCR'd copy appeared hugely zoomed in (#21), and re-rendering a page that big
+    /// (the viewer asks for up to 300 dpi, and a second OCR pass squares the error) needs a bitmap
+    /// too large to allocate, leaving the scan blank/unviewable (#20). Passing the true DPI makes
+    /// the output page match the input page exactly.
+    /// </summary>
+    private static string UserDefinedDpi(int dpi) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"user_defined_dpi={dpi}");
 
     private static string RequireTesseract() =>
         FindTesseract() ?? throw new InvalidOperationException(

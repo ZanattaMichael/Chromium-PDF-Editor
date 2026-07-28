@@ -12,14 +12,13 @@ namespace PdfEditor.NativeHost.Tests;
 /// </summary>
 public class MessageProcessorTests
 {
-    private readonly MessageProcessor _processor = new();
 
     private static JsonObject Request(string action, object? payload = null) =>
         JsonNode.Parse(JsonSerializer.Serialize(new { id = "t1", action, payload }))!.AsObject();
 
-    private JsonObject HandleOne(JsonObject request)
+    private static JsonObject HandleOne(JsonObject request)
     {
-        var frames = _processor.Handle(request.ToJsonString());
+        var frames = MessageProcessor.Handle(request.ToJsonString());
         var frame = Assert.Single(frames);
         return JsonNode.Parse(frame)!.AsObject();
     }
@@ -36,7 +35,7 @@ public class MessageProcessorTests
     [Fact]
     public void Handle_PreservesTheRequestId()
     {
-        var frames = _processor.Handle("""{"id":"my-id-42","action":"ping"}""");
+        var frames = MessageProcessor.Handle("""{"id":"my-id-42","action":"ping"}""");
         var response = JsonNode.Parse(Assert.Single(frames))!.AsObject();
 
         Assert.Equal("my-id-42", response["id"]!.GetValue<string>());
@@ -45,7 +44,7 @@ public class MessageProcessorTests
     [Fact]
     public void MalformedJson_ReturnsErrorEnvelope_NotAnException()
     {
-        var frames = _processor.Handle("not json at all {{{");
+        var frames = MessageProcessor.Handle("not json at all {{{");
         var response = JsonNode.Parse(Assert.Single(frames))!.AsObject();
 
         Assert.False(response["ok"]!.GetValue<bool>());
@@ -57,14 +56,14 @@ public class MessageProcessorTests
     [Fact]
     public void JsonArray_InsteadOfObject_ReturnsErrorEnvelope()
     {
-        var response = JsonNode.Parse(Assert.Single(_processor.Handle("[1,2,3]")))!.AsObject();
+        var response = JsonNode.Parse(Assert.Single(MessageProcessor.Handle("[1,2,3]")))!.AsObject();
         Assert.False(response["ok"]!.GetValue<bool>());
     }
 
     [Fact]
     public void MissingAction_ReturnsError()
     {
-        var response = JsonNode.Parse(Assert.Single(_processor.Handle("""{"id":"x"}""")))!.AsObject();
+        var response = JsonNode.Parse(Assert.Single(MessageProcessor.Handle("""{"id":"x"}""")))!.AsObject();
 
         Assert.False(response["ok"]!.GetValue<bool>());
         Assert.Contains("action", response["result"]!["error"]!.GetValue<string>());
@@ -290,7 +289,7 @@ public class MessageProcessorTests
         // limit, forcing MessageProcessor's own Frame() splitter into action.
         string pdf = TestPdf.Base64(TestPdf.ManyPages(1500));
 
-        var frames = _processor.Handle(Request("merge", new { pdfs = new[] { pdf, pdf } }).ToJsonString());
+        var frames = MessageProcessor.Handle(Request("merge", new { pdfs = new[] { pdf, pdf } }).ToJsonString());
 
         Assert.True(frames.Count > 1, "expected the large response to be split into multiple chunk frames");
 

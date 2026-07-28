@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using iText.Forms;
 using iText.Forms.Fields;
@@ -456,13 +457,13 @@ public static class TestPdfs
         for (int i = 0; i < objs.Count; i++)
         {
             offsets.Add(sb.Length);
-            sb.Append($"{i + 1} 0 obj\n{objs[i]}\nendobj\n");
+            sb.Append(CultureInfo.InvariantCulture, $"{i + 1} 0 obj\n{objs[i]}\nendobj\n");
         }
         int xref = sb.Length;
-        sb.Append($"xref\n0 {objs.Count + 1}\n0000000000 65535 f \n");
+        sb.Append(CultureInfo.InvariantCulture, $"xref\n0 {objs.Count + 1}\n0000000000 65535 f \n");
         for (int i = 1; i <= objs.Count; i++)
-            sb.Append($"{offsets[i].ToString().PadLeft(10, '0')} 00000 n \n");
-        sb.Append($"trailer\n<< /Size {objs.Count + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
+            sb.Append(CultureInfo.InvariantCulture, $"{offsets[i].ToString(CultureInfo.InvariantCulture).PadLeft(10, '0')} 00000 n \n");
+        sb.Append(CultureInfo.InvariantCulture, $"trailer\n<< /Size {objs.Count + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
         return Encoding.Latin1.GetBytes(sb.ToString());
     }
 }

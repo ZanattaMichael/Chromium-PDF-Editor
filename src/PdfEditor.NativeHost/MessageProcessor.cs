@@ -19,7 +19,7 @@ public sealed class MessageProcessor
     };
 
     /// <summary>Handles one request and returns the JSON frames to emit (1..n).</summary>
-    public IReadOnlyList<string> Handle(string requestJson)
+    public static IReadOnlyList<string> Handle(string requestJson)
     {
         string id = "";
         try

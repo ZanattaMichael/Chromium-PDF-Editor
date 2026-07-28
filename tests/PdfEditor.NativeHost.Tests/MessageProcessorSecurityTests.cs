@@ -12,18 +12,17 @@ namespace PdfEditor.NativeHost.Tests;
 /// </summary>
 public class MessageProcessorSecurityTests
 {
-    private readonly MessageProcessor _processor = new();
 
     private static JsonObject Request(string action, object? payload = null) =>
         JsonNode.Parse(JsonSerializer.Serialize(new { id = "sec", action, payload }))!.AsObject();
 
-    private (JsonObject Response, string RawFrame) Handle(JsonObject request)
+    private static (JsonObject Response, string RawFrame) Handle(JsonObject request)
     {
-        string raw = Assert.Single(_processor.Handle(request.ToJsonString()));
+        string raw = Assert.Single(MessageProcessor.Handle(request.ToJsonString()));
         return (JsonNode.Parse(raw)!.AsObject(), raw);
     }
 
-    private JsonObject HandleOne(JsonObject request) => Handle(request).Response;
+    private static JsonObject HandleOne(JsonObject request) => Handle(request).Response;
 
     private static bool Ok(JsonObject r) => r["ok"]!.GetValue<bool>();
     private static string ErrorOf(JsonObject r) => r["result"]!["error"]!.GetValue<string>();
@@ -95,7 +94,7 @@ public class MessageProcessorSecurityTests
     {
         // Far beyond System.Text.Json's default 64-level depth guard.
         string bomb = new string('[', 5000) + new string(']', 5000);
-        var response = JsonNode.Parse(Assert.Single(_processor.Handle(bomb)))!.AsObject();
+        var response = JsonNode.Parse(Assert.Single(MessageProcessor.Handle(bomb)))!.AsObject();
         Assert.False(Ok(response));
     }
 
@@ -320,10 +319,10 @@ public class MessageProcessorSecurityTests
     [Fact]
     public void ProcessorStaysUsable_AfterAStreamOfHostileRequests()
     {
-        _processor.Handle("not json {{{");
-        _processor.Handle("[1,2,3]");
-        _processor.Handle(Request("info", new { pdf = "@@@" }).ToJsonString());
-        _processor.Handle(Request("teleport").ToJsonString());
+        MessageProcessor.Handle("not json {{{");
+        MessageProcessor.Handle("[1,2,3]");
+        MessageProcessor.Handle(Request("info", new { pdf = "@@@" }).ToJsonString());
+        MessageProcessor.Handle(Request("teleport").ToJsonString());
 
         Assert.True(Ok(HandleOne(Request("ping"))));
     }

@@ -504,7 +504,7 @@ function setZoom(z) {
 
 /** Parses the editable page box and jumps there. */
 function jumpToTypedPage() {
-  const n = parseInt($('page-input').value, 10);
+  const n = Number.parseInt($('page-input').value, 10);
   if (Number.isFinite(n)) goToPage(n, 'auto');
   $('page-input').value = String(state.page); // normalise (clamp / reject junk)
   $('page-input').blur();
@@ -840,10 +840,9 @@ pagesEl.addEventListener('pointermove', (e) => {
   const x1 = e.clientX - rect.left;
   const y1 = e.clientY - rect.top;
   if (!drag.div) {
+    const regionClass = REGION_CLASS_BY_TOOL[state.tool] ?? 'edit';
     drag.div = document.createElement('div');
-    drag.div.className = `region ${
-      state.tool === 'redact' ? '' : state.tool === 'sign' ? 'sign'
-        : state.tool === 'highlight' ? 'highlight' : 'edit'}`;
+    drag.div.className = `region ${regionClass}`;
     drag.pe.overlay.appendChild(drag.div);
   }
   const left = Math.min(drag.x0, x1);
@@ -1269,7 +1268,7 @@ async function applyTextEdit() {
       pdf: state.pdfB64,
       region,
       text: $('edit-text').value,
-      fontSize: parseFloat($('edit-size').value) || undefined,
+      fontSize: Number.parseFloat($('edit-size').value) || undefined,
       fontFamily: $('edit-font').value,
       bold: $('edit-bold').classList.contains('active'),
       italic: $('edit-italic').classList.contains('active'),
@@ -1980,9 +1979,11 @@ async function applyForms() {
   const values = {};
   for (const input of $('forms-list').querySelectorAll('[data-field]')) {
     if (input.disabled) continue;
-    values[input.dataset.field] = input.type === 'checkbox'
-      ? (input.checked ? input.dataset.on : 'Off')
-      : input.value;
+    if (input.type === 'checkbox') {
+      values[input.dataset.field] = input.checked ? input.dataset.on : 'Off';
+    } else {
+      values[input.dataset.field] = input.value;
+    }
   }
   const flatten = $('forms-flatten').checked;
   try {
@@ -1996,6 +1997,9 @@ async function applyForms() {
     fail(e);
   }
 }
+
+// Region-overlay class per active tool; anything not listed (e.g. text editing) gets 'edit'.
+const REGION_CLASS_BY_TOOL = { redact: '', sign: 'sign', highlight: 'highlight' };
 
 const FIELD_LABELS = {
   text: 'Text field', multiline: 'Text area', checkbox: 'Checkbox', dropdown: 'Dropdown',
@@ -2427,6 +2431,15 @@ function buildLinkLayer(pe, pageNum) {
   pe.wrap.insertBefore(layer, pe.overlay); // above the text layer, below the tool overlay
 }
 
+/** The risk-line text shown in the link rollover popup. */
+function linkRiskLabel(isUri, level, verdict) {
+  if (!isUri) return '● In-document action — opens nothing on the web';
+  if (level === 'unknown') return '● Not rated';
+  const category = verdict?.category ? ` · ${verdict.category}` : '';
+  const source = verdict?.source === 'cloudflare' ? ' (Cloudflare)' : '';
+  return `● ${level.toUpperCase()}${category}${source}`;
+}
+
 /** Shows the rollover popup with a link's URL/action and risk rating, positioned near the hotspot. */
 function showLinkPopup(anchor, link, level, verdict, navigable) {
   const pop = $('link-popup');
@@ -2439,12 +2452,7 @@ function showLinkPopup(anchor, link, level, verdict, navigable) {
   pop.appendChild(urlEl);
   const risk = document.createElement('div');
   risk.className = `lp-risk ${level}`;
-  risk.textContent = isUri
-    ? (level === 'unknown'
-        ? '● Not rated'
-        : `● ${level.toUpperCase()}${verdict?.category ? ` · ${verdict.category}` : ''}` +
-          (verdict?.source === 'cloudflare' ? ' (Cloudflare)' : ''))
-    : '● In-document action — opens nothing on the web';
+  risk.textContent = linkRiskLabel(isUri, level, verdict);
   pop.appendChild(risk);
   if (isUri && !navigable) {
     const note = document.createElement('div');
@@ -2528,8 +2536,9 @@ function showFieldPopup(marker, field) {
   const meta = document.createElement('div');
   meta.className = 'lp-risk unknown';
   const value = (field.value ?? '').trim();
+  const truncated = value.length > 60 ? value.slice(0, 60) + '…' : value;
   meta.textContent = `${field.type}${field.readOnly ? ' · read-only' : ''} · ` +
-    (value ? `“${value.length > 60 ? value.slice(0, 60) + '…' : value}”` : 'empty');
+    (value ? `“${truncated}”` : 'empty');
   pop.appendChild(meta);
   placePopupNear(pop, marker);
 }
@@ -2583,9 +2592,12 @@ function renderLinks() {
     }
     const meta = document.createElement('div');
     meta.className = 'link-meta';
-    meta.textContent = `page ${link.page}` +
-      (verdict ? ` · ${verdict.level.toUpperCase()} · ${verdict.category}` +
-        (verdict.source === 'cloudflare' ? ' (Cloudflare)' : '') : '');
+    let verdictSuffix = '';
+    if (verdict) {
+      const cloudflareTag = verdict.source === 'cloudflare' ? ' (Cloudflare)' : '';
+      verdictSuffix = ` · ${verdict.level.toUpperCase()} · ${verdict.category}${cloudflareTag}`;
+    }
+    meta.textContent = `page ${link.page}${verdictSuffix}`;
     body.appendChild(meta);
     if (verdict?.detail) { body.title = verdict.detail; }
     row.append(dot, body);
@@ -2783,7 +2795,7 @@ function wire() {
 
   $('draw-color').addEventListener('input', () => { state.drawColor = $('draw-color').value; redrawInk(); });
   $('draw-width').addEventListener('input', () => {
-    state.drawWidth = parseFloat($('draw-width').value) || 2.5; redrawInk();
+    state.drawWidth = Number.parseFloat($('draw-width').value) || 2.5; redrawInk();
   });
   $('draw-apply').addEventListener('click', applyDrawing);
   $('draw-clear').addEventListener('click', clearDrawing);
@@ -2909,4 +2921,4 @@ async function start() {
   if (src) await openFromUrl(src);
 }
 
-start();
+await start();

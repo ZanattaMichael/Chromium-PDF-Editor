@@ -36,10 +36,10 @@ function Invoke-Step {
         [string]$RequiredTool
     )
     if ($RequiredTool -and -not (Get-Command $RequiredTool -ErrorAction SilentlyContinue)) {
-        Write-Host "  skipped ($RequiredTool not found on PATH)"
+        Write-Information "  skipped ($RequiredTool not found on PATH)" -InformationAction Continue
         return $false
     }
-    Write-Host "> $($Command -join ' ')   (in $WorkingDirectory)"
+    Write-Information "> $($Command -join ' ')   (in $WorkingDirectory)" -InformationAction Continue
     Push-Location $WorkingDirectory
     try {
         & $Command[0] $Command[1..($Command.Length - 1)]

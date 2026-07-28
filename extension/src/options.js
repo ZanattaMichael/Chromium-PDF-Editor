@@ -3,9 +3,10 @@ import { HostClient } from './host-client.js';
 const autoOpen = document.getElementById('auto-open');
 const status = document.getElementById('host-status');
 
-chrome.storage.sync.get({ autoOpen: true }).then((value) => {
+{
+  const value = await chrome.storage.sync.get({ autoOpen: true });
   autoOpen.checked = value.autoOpen;
-});
+}
 
 autoOpen.addEventListener('change', () => {
   chrome.storage.sync.set({ autoOpen: autoOpen.checked });
@@ -25,17 +26,18 @@ async function test() {
 }
 
 document.getElementById('test').addEventListener('click', test);
-test();
+await test();
 
 // -------------------------------------------------------- Cloudflare scanner
 const cfAccount = document.getElementById('cf-account');
 const cfToken = document.getElementById('cf-token');
 const cfStatus = document.getElementById('cf-status');
 
-chrome.storage.local.get({ cfAccountId: '', cfApiToken: '' }).then((v) => {
+{
+  const v = await chrome.storage.local.get({ cfAccountId: '', cfApiToken: '' });
   cfAccount.value = v.cfAccountId;
   cfToken.value = v.cfApiToken;
-});
+}
 
 document.getElementById('cf-save').addEventListener('click', async () => {
   await chrome.storage.local.set({

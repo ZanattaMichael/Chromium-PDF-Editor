@@ -16,8 +16,9 @@ function buildPdf(pages, { mediaBox = [0, 0, 595, 842], cropBox = null, rotate =
   const rotateEntry = rotate ? ` /Rotate ${rotate}` : '';
   const cropEntry = cropBox ? ` /CropBox [${cropBox.join(' ')}]` : '';
 
+  const kids = pageObjectNumbers.map((n) => `${n} 0 R`).join(' ');
   objects.push('<< /Type /Catalog /Pages 2 0 R >>'); // 1
-  objects.push(`<< /Type /Pages /Kids [${pageObjectNumbers.map((n) => `${n} 0 R`).join(' ')}] /Count ${pages.length} >>`); // 2
+  objects.push(`<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`); // 2
   objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'); // 3
 
   for (const lines of pages) {

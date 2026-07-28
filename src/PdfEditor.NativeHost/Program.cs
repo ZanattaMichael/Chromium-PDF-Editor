@@ -15,7 +15,7 @@ while (true)
     }
     catch (Exception ex)
     {
-        Console.Error.WriteLine($"[pdf-editor-host] fatal read error: {ex.Message}");
+        await Console.Error.WriteLineAsync($"[pdf-editor-host] fatal read error: {ex.Message}");
         return 1;
     }
     if (frame == null) return 0; // browser closed the pipe

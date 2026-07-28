@@ -18,6 +18,9 @@ public static class MessageProcessor
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
+    private const string RegionKey = "region";
+    private const string ColorKey = "color";
+
     /// <summary>Handles one request and returns the JSON frames to emit (1..n).</summary>
     public static IReadOnlyList<string> Handle(string requestJson)
     {
@@ -135,27 +138,27 @@ public static class MessageProcessor
 
     private static object AddTextAction(JsonObject p)
     {
-        var result = TextTools.AddText(Pdf(p), Region(p["region"]!.AsObject()),
+        var result = TextTools.AddText(Pdf(p), Region(p[RegionKey]!.AsObject()),
             p["text"]?.GetValue<string>() ?? "",
             p["fontSize"]?.GetValue<float>() ?? 14f,
             p["fontFamily"]?.GetValue<string>(),
             p["bold"]?.GetValue<bool>() ?? false,
             p["italic"]?.GetValue<bool>() ?? false,
-            p["color"]?.GetValue<string>(),
+            p[ColorKey]?.GetValue<string>(),
             Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 
     private static object MoveTextAction(JsonObject p)
     {
-        var result = TextTools.MoveText(Pdf(p), Region(p["region"]!.AsObject()),
+        var result = TextTools.MoveText(Pdf(p), Region(p[RegionKey]!.AsObject()),
             p["dx"]!.GetValue<float>(), p["dy"]!.GetValue<float>(), Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 
     private static object MoveImageAction(JsonObject p)
     {
-        var region = Region(p["region"]!.AsObject());
+        var region = Region(p[RegionKey]!.AsObject());
         var result = ImageTools.MoveImage(Pdf(p), region.Page, region,
             p["dx"]!.GetValue<float>(), p["dy"]!.GetValue<float>(), Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
@@ -169,7 +172,7 @@ public static class MessageProcessor
                 .Select(pt => (pt!["x"]!.GetValue<float>(), pt["y"]!.GetValue<float>())).ToList())
             .ToList();
         var result = InkTools.AddInk(Pdf(p), page, strokes,
-            p["color"]?.GetValue<string>(), p["width"]?.GetValue<float>() ?? 2f, Password(p));
+            p[ColorKey]?.GetValue<string>(), p["width"]?.GetValue<float>() ?? 2f, Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 
@@ -183,7 +186,7 @@ public static class MessageProcessor
                 o["width"]!.GetValue<float>(), o["height"]!.GetValue<float>());
         }).ToList();
         var result = HighlightTool.AddHighlight(Pdf(p), page, rects,
-            p["color"]?.GetValue<string>(), Password(p));
+            p[ColorKey]?.GetValue<string>(), Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 
@@ -211,7 +214,7 @@ public static class MessageProcessor
 
     private static object AddFormFieldAction(JsonObject p)
     {
-        var region = Region(p["region"]!.AsObject());
+        var region = Region(p[RegionKey]!.AsObject());
         string type = p["fieldType"]?.GetValue<string>() ?? "text";
         string? name = p["name"]?.GetValue<string>();
         var result = type switch
@@ -385,7 +388,7 @@ public static class MessageProcessor
 
     private static object GetRegionText(JsonObject p)
     {
-        var text = TextTools.GetTextInRegion(Pdf(p), Region(p["region"]!.AsObject()), Password(p));
+        var text = TextTools.GetTextInRegion(Pdf(p), Region(p[RegionKey]!.AsObject()), Password(p));
         return new
         {
             text = text.Text,
@@ -398,12 +401,12 @@ public static class MessageProcessor
 
     private static object ReplaceRegionText(JsonObject p)
     {
-        var result = TextTools.ReplaceTextInRegion(Pdf(p), Region(p["region"]!.AsObject()),
+        var result = TextTools.ReplaceTextInRegion(Pdf(p), Region(p[RegionKey]!.AsObject()),
             p["text"]?.GetValue<string>() ?? "", p["fontSize"]?.GetValue<float>(),
             p["fontFamily"]?.GetValue<string>(),
             p["bold"]?.GetValue<bool>() ?? false,
             p["italic"]?.GetValue<bool>() ?? false,
-            p["color"]?.GetValue<string>(),
+            p[ColorKey]?.GetValue<string>(),
             Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
@@ -471,7 +474,7 @@ public static class MessageProcessor
     private static object SignImage(JsonObject p) => new
     {
         pdf = Convert.ToBase64String(Signer.AddImageSignature(Pdf(p),
-            Region(p["region"]!.AsObject()),
+            Region(p[RegionKey]!.AsObject()),
             Convert.FromBase64String(p["png"]!.GetValue<string>()), Password(p)))
     };
 
@@ -482,7 +485,7 @@ public static class MessageProcessor
             p["pfxPassword"]!.GetValue<string>(),
             p["reason"]?.GetValue<string>(),
             p["location"]?.GetValue<string>(),
-            p["region"] is JsonObject r ? Region(r) : null,
+            p[RegionKey] is JsonObject r ? Region(r) : null,
             p["appearancePng"] is JsonNode img ? Convert.FromBase64String(img.GetValue<string>()) : null,
             Password(p)))
     };

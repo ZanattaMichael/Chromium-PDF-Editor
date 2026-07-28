@@ -9,3 +9,4 @@ e2e/playwright-report/
 coverage-results/
 coverage-report/
 dist/
+.claude/worktrees/

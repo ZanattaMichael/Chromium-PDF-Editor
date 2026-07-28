@@ -1411,4 +1411,18 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#status')).toContainText('Undid last change');
     await page.close();
   });
+
+  test('open-from-url: refuses a src param pointing at a private/internal host', async () => {
+    const page = await ext.context.newPage();
+    await page.goto(`${ext.viewerUrl}?src=${encodeURIComponent('http://169.254.169.254/latest/meta-data/doc.pdf')}`);
+    await expect(page.locator('#status')).toContainText('Refusing to open');
+    await page.close();
+  });
+
+  test('open-from-url: refuses a src param that is not a PDF URL', async () => {
+    const page = await ext.context.newPage();
+    await page.goto(`${ext.viewerUrl}?src=${encodeURIComponent('https://example.com/not-a-pdf')}`);
+    await expect(page.locator('#status')).toContainText('Refusing to open');
+    await page.close();
+  });
 });

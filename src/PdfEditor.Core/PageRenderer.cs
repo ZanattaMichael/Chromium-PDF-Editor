@@ -20,8 +20,14 @@ public static class PageRenderer
             password: password,
             options: new RenderOptions(Dpi: dpi, WithAnnotations: true, WithFormFill: true));
 #pragma warning restore CA1416
-        using var image = SKImage.FromBitmap(bitmap);
-        using var encoded = image.Encode(SKEncodedImageFormat.Png, 100);
+        // A malformed document (e.g. a page tree that loops back on itself) can make PDFium hand
+        // back a bitmap with no pixels, and Skia then returns null rather than throwing. Without
+        // these checks the caller sees a bare NullReferenceException instead of being told the
+        // page could not be rendered.
+        using var image = SKImage.FromBitmap(bitmap)
+            ?? throw new InvalidDataException($"Page {page} could not be rendered: the document is malformed.");
+        using var encoded = image.Encode(SKEncodedImageFormat.Png, 100)
+            ?? throw new InvalidDataException($"Page {page} could not be encoded as PNG.");
         return encoded.ToArray();
     }
 }

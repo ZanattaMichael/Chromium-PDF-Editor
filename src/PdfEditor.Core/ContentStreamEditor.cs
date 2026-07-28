@@ -49,11 +49,13 @@ internal sealed class ContentStreamEditor : PdfCanvasProcessor
     public void EditPage(PdfPage page)
     {
         var resources = page.GetResources();
-        byte[] content = page.GetContentBytes();
+        PdfStructureGuard.EnsureFormXObjectsTerminate(page);
+        byte[] content = null!;
+        PdfIo.Guarded("decoding the page content stream", () => content = page.GetContentBytes());
         var newStream = (PdfStream)new PdfStream().MakeIndirect(_document);
         _canvas = new PdfCanvas(newStream, resources, _document);
         _editResources = resources;
-        ProcessContent(content, resources);
+        PdfIo.Guarded("rewriting the page content stream", () => ProcessContent(content, resources));
         page.GetPdfObject().Put(PdfName.Contents, newStream);
         page.GetPdfObject().SetModified();
     }
@@ -61,11 +63,12 @@ internal sealed class ContentStreamEditor : PdfCanvasProcessor
     /// <summary>Rewrites the raw content of a form XObject stream in place.</summary>
     public void EditFormStream(PdfStream formStream, PdfResources resources)
     {
-        byte[] content = formStream.GetBytes();
+        byte[] content = null!;
+        PdfIo.Guarded("decoding a form XObject stream", () => content = formStream.GetBytes());
         var scratch = new PdfStream();
         _canvas = new PdfCanvas(scratch, resources, _document);
         _editResources = resources;
-        ProcessContent(content, resources);
+        PdfIo.Guarded("rewriting a form XObject stream", () => ProcessContent(content, resources));
         formStream.SetData(_canvas.GetContentStream().GetBytes(false));
     }
 

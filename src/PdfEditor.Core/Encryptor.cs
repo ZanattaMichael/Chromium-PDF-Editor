@@ -45,8 +45,11 @@ public static class Encryptor
     {
         try
         {
-            using var doc = new PdfDocument(new PdfReader(new MemoryStream(pdf)));
-            return false;
+            PdfDocument? doc = null;
+            // Guarded for the same reason as PdfIo.Open: a catalog that is not a dictionary makes
+            // iText's constructor throw a bare InvalidCastException, which tells a caller nothing.
+            PdfIo.Guarded("opening the document", () => doc = new PdfDocument(new PdfReader(new MemoryStream(pdf))));
+            using (doc) return false;
         }
         catch (BadPasswordException)
         {

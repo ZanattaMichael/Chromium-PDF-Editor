@@ -11,3 +11,5 @@ coverage-report/
 coverage-sonar/
 dist/
 .claude/worktrees/
+__pycache__/
+*.pyc

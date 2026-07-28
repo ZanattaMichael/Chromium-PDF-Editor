@@ -1,12 +1,23 @@
-name: Build-SonarQubeScan
+name: SonarQube
+# Static analysis on its own workflow: this is the only job that needs the Java toolchain, the
+# scanner cache and the SONAR_TOKEN, and it publishes results to two places -- SonarQube Cloud's
+# quality gate, and (via SARIF) GitHub's own code scanning, so findings are readable in the
+# Security tab and annotated inline on the pull request instead of only behind a sonarcloud.io
+# link.
 on:
   push:
     branches:
       - main
   pull_request:
     types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  security-events: write   # required to upload the SARIF report to code scanning
+
 jobs:
   sonarqube:
+    # Keep this name stable: it is the check branch protection requires.
     name: SonarQube
     runs-on: ubuntu-latest
     steps:
@@ -20,6 +31,11 @@ jobs:
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: "8.0.x"
+      - name: Install Tesseract OCR
+        # The OCR tests (and the #20/#21 page-geometry regression guards) no-op when the
+        # `tesseract` binary is absent, so without this they pass without executing anything --
+        # leaving OcrTool.cs at 0% coverage on new code and the regressions unguarded in CI.
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
       - name: Cache SonarQube Cloud packages
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -54,7 +70,7 @@ jobs:
           /d:sonar.host.url="https://sonarcloud.io"
           /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,coverage-report/**,coverage-results/**,coverage-sonar/**,dist/**,e2e/test-results/**,e2e/playwright-report/**"
           /d:sonar.cs.opencover.reportsPaths="coverage-sonar/**/coverage.opencover.xml"
-          /d:sonar.coverage.exclusions="**/*.css,**/*.html,**/*.yml,**/*.yaml,**/*.ps1,**/*.sh,extension/**/*.js,e2e/**/*.js"
+          /d:sonar.coverage.exclusions="**/*.css,**/*.html,**/*.yml,**/*.yaml,**/*.ps1,**/*.sh,**/*.py,extension/**/*.js,e2e/**/*.js"
       - name: Build
         run: dotnet build --configuration Release
       - name: Test with coverage
@@ -69,3 +85,38 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: ./.sonar/scanner/dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+
+      # --- Publish the findings to GitHub code scanning -------------------------------------
+      # SonarQube Cloud has no SARIF export of its own, so the issues are read back from its API
+      # and translated. Without this the only way to see what was flagged is to leave GitHub.
+      - name: Download SonarQube findings
+        id: findings
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          # Passed through the environment rather than interpolated into the command line, so
+          # nothing from the event payload is ever pasted into a shell word.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -n "${PR_NUMBER:-}" ]; then
+            python3 scripts/fetch_sonar_issues.py --output sonar-issues.json \
+              --pull-request "$PR_NUMBER"
+          else
+            python3 scripts/fetch_sonar_issues.py --output sonar-issues.json --branch main
+          fi
+      - name: Verify the SARIF converter
+        # The converter's own tests. Run before the real conversion so a translation bug (an
+        # off-by-one column, a mangled component path) fails here with a clear message rather
+        # than as a rejected or subtly mis-anchored upload.
+        run: python3 scripts/test_sonar_to_sarif.py
+      - name: Convert findings to SARIF
+        run: >
+          python3 scripts/sonar_to_sarif.py
+          --issues sonar-issues.json
+          --project-key "${{ steps.findings.outputs.project-key }}"
+          --organization zanattamichael
+          --output sonar.sarif
+      - name: Upload SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
+        with:
+          sarif_file: sonar.sarif
+          category: sonarqube

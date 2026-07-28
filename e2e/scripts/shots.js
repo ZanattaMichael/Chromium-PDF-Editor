@@ -7,13 +7,28 @@ const path = require('node:path');
 const { launchExtension } = require('../helpers/harness');
 const { buildLinkPdf, buildJsLinkPdf, buildLinkOnPage2Pdf } = require('../helpers/pdf');
 
-/** Resolves the CLI-supplied output directory, rejecting anything that isn't a plain path string. */
+/**
+ * Resolves the CLI-supplied output directory to a canonical absolute path. Rejects anything
+ * that isn't a plain path string, then canonicalizes through the nearest *existing* ancestor
+ * (the target itself is created afterward, by mkdirSync below, so it can't be realpath'd yet)
+ * so a symlinked parent can't silently redirect where screenshots get written.
+ */
 function resolveOutputDir(rawArg) {
   const target = rawArg || path.join(os.tmpdir(), 'pdf-shots');
   if (typeof target !== 'string' || target.length === 0 || target.includes('\0')) {
     throw new Error(`invalid output directory argument: ${JSON.stringify(rawArg)}`);
   }
-  return path.resolve(target);
+  const resolved = path.resolve(target);
+  const pending = [];
+  let existingAncestor = resolved;
+  while (!fs.existsSync(existingAncestor)) {
+    pending.unshift(path.basename(existingAncestor));
+    const parent = path.dirname(existingAncestor);
+    if (parent === existingAncestor) break; // reached the filesystem root without finding one
+    existingAncestor = parent;
+  }
+  const canonicalAncestor = fs.realpathSync(existingAncestor);
+  return pending.length ? path.join(canonicalAncestor, ...pending) : canonicalAncestor;
 }
 
 const OUT = resolveOutputDir(process.argv[2]);

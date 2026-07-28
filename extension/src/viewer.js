@@ -1833,15 +1833,33 @@ async function openFilePicker() {
   $('file-input').click();
 }
 
-// Only http(s)/file URLs ending in .pdf are legitimate here -- this page is
-// opened with a `src=` query param that (in principle) reflects whatever the
-// caller passed, so re-validate it ourselves rather than trusting that every
-// caller already did (defense in depth; this must never become an arbitrary-
-// URL-fetch-with-credentials primitive).
+// Blocks loopback/private/link-local hosts -- including the 169.254.169.254 cloud metadata
+// address -- so a crafted `src=` param can't turn the credentialed fetch below into an SSRF
+// probe of internal network services. Hostname string matching only (no DNS is done client
+// side); this narrows the attack surface, it isn't a substitute for the server-side checks
+// any real internal service should already have.
+function isPrivateOrLocalHost(hostname) {
+  const h = hostname.toLowerCase();
+  if (h === 'localhost' || h === '0.0.0.0' || h === '::1' || h === '') return true;
+  if (/^127\./.test(h)) return true; // loopback
+  if (/^10\./.test(h)) return true; // RFC1918
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true; // RFC1918
+  if (/^192\.168\./.test(h)) return true; // RFC1918
+  if (/^169\.254\./.test(h)) return true; // link-local, incl. cloud metadata endpoints
+  if (/^\[?f[cd][0-9a-f]{2}:/i.test(h) || h === '[::1]') return true; // IPv6 unique-local/loopback
+  return false;
+}
+
+// Only http(s)/file URLs ending in .pdf, on a non-local/private host, are legitimate here --
+// this page is opened with a `src=` query param that (in principle) reflects whatever the
+// caller passed, so re-validate it ourselves rather than trusting that every caller already
+// did (defense in depth; this must never become an arbitrary-URL-fetch-with-credentials
+// primitive, nor a way to probe internal network services).
 function looksLikePdfUrl(rawUrl) {
   try {
     const parsed = new URL(rawUrl);
     if (!/^https?:|^file:/.test(parsed.protocol)) return false;
+    if (parsed.protocol !== 'file:' && isPrivateOrLocalHost(parsed.hostname)) return false;
     return parsed.pathname.toLowerCase().endsWith('.pdf');
   } catch {
     return false;

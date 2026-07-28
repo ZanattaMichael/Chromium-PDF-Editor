@@ -1945,6 +1945,19 @@ async function showSafetyDialog() {
   close.addEventListener('click', () => modal.close());
 }
 
+/** The "Run" control that locally simulates a field's attached script (see formScript.js). */
+function runControl(field) {
+  const run = document.createElement('button');
+  run.type = 'button';
+  run.className = 'form-field-run';
+  run.textContent = 'Run';
+  run.title = field.script
+    ? "Simulates this field's script (calculations / show-hide only — see help)"
+    : 'This field has no script attached';
+  run.addEventListener('click', () => runFormButtonScript(field));
+  return run;
+}
+
 async function openForms() {
   try {
     setStatus('Reading form fields…', true);
@@ -1967,15 +1980,7 @@ async function openForms() {
       if (f.type === 'button') {
         // A push button has no fillable value — it triggers its click script instead. Buttons are
         // deliberately excluded from [data-field] so applyForms() never tries to "fill" them.
-        const run = document.createElement('button');
-        run.type = 'button';
-        run.className = 'form-field-run';
-        run.textContent = 'Run';
-        run.title = f.script
-          ? "Simulates this button's script (calculations / show-hide only — see help)"
-          : 'This button has no script attached';
-        run.addEventListener('click', () => runFormButtonScript(f));
-        row.appendChild(run);
+        row.appendChild(runControl(f));
         list.appendChild(row);
         continue;
       }
@@ -2004,6 +2009,9 @@ async function openForms() {
       input.dataset.field = f.name;
       if (f.readOnly) input.disabled = true;
       row.appendChild(input);
+      // A non-button field can carry a script too (on its widget's /AA /U), which fires when the
+      // user activates it in a real reader. Offer the same local simulation button buttons get.
+      if (f.script) row.appendChild(runControl(f));
       list.appendChild(row);
     }
     showPanel('panel-forms');
@@ -2095,8 +2103,10 @@ const OPTION_TYPES = new Set(['dropdown', 'radio']);
 function updateFieldTypeRows() {
   const type = $('field-type').value;
   $('field-options-row').hidden = !OPTION_TYPES.has(type);
-  $('field-caption-row').hidden = type !== 'button';
-  $('field-script-row').hidden = type !== 'button';
+  $('field-caption-row').hidden = type !== 'button'; // only a push button has a visible label
+  // Every field type can carry a script: a button's goes on its /A activation action, everything
+  // else's on the widget's /AA /U (mouse-up). So this row applies to all of them.
+  $('field-script-row').hidden = false;
 }
 
 /** Enters "place a field" mode: the next box drawn on a page becomes a new form field. */
@@ -2117,7 +2127,7 @@ function beginPlaceField() {
   state.pendingField = {
     fieldType, name: $('field-name').value.trim(), options,
     caption: fieldType === 'button' ? $('field-caption').value.trim() : '',
-    script: fieldType === 'button' ? $('field-script').value : '',
+    script: $('field-script').value,
   };
   state.tool = 'field';
   for (const b of document.querySelectorAll('.tool')) b.classList.remove('active');

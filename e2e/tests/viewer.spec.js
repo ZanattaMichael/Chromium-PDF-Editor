@@ -1299,13 +1299,14 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(file);
 
     await ui(page, '#btn-forms');
-    // The button-only rows must be hidden for other field types -- a `hidden` label that CSS
-    // still renders would offer a "JavaScript to run on click" box on e.g. a checkbox, whose
-    // contents beginPlaceField() then silently discards.
+    // Type-specific rows must actually respond to the selected type -- these assertions only mean
+    // something because [hidden] is now authoritative in CSS; a `label { display: block }` rule
+    // used to render every one of them regardless, which is how a checkbox ended up offering a
+    // script box whose contents were then silently discarded.
     await page.selectOption('#field-type', 'checkbox');
-    await expect(page.locator('#field-caption-row')).toBeHidden();
-    await expect(page.locator('#field-script-row')).toBeHidden();
+    await expect(page.locator('#field-caption-row')).toBeHidden(); // only a button has a label
     await expect(page.locator('#field-options-row')).toBeHidden();
+    await expect(page.locator('#field-script-row')).toBeVisible(); // any field can carry a script
 
     await page.selectOption('#field-type', 'button');
     await expect(page.locator('#field-caption-row')).toBeVisible();
@@ -1342,6 +1343,30 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
       return nonWhite;
     });
     expect(drawn).toBeGreaterThan(0);
+    await page.close();
+  });
+
+  test('forms: a checkbox can carry JavaScript too, and it survives the save', async () => {
+    // Regression for the reported bug: the script box was offered on every field type but
+    // beginPlaceField() only forwarded it for buttons, so a checkbox's script was silently
+    // dropped -- the saved PDF had no /A and no /AA at all.
+    const file = fixture('checkboxjs.pdf', [[{ text: 'form', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await page.selectOption('#field-type', 'checkbox');
+    await expect(page.locator('#field-script-row')).toBeVisible();
+    await page.fill('#field-name', 'agree');
+    await page.fill('#field-script', "this.getField('agree').value = 'Yes';");
+    await page.click('#field-place');
+    await dragPdfRect(page, { x: 100, y: 600, width: 20, height: 20 });
+
+    // It is listed, it kept its script (so it gets a Run control), and the document is now
+    // flagged as carrying active content.
+    const row = page.locator('.form-field[data-field-name="agree"]');
+    await expect(row).toHaveCount(1);
+    await expect(row.locator('.form-field-run')).toHaveCount(1);
+    await expect(page.locator('#badges .badge.warn')).toContainText('kept');
     await page.close();
   });
 

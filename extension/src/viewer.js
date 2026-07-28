@@ -94,7 +94,16 @@ let visObserver = null;  // tracks which page is currently front-and-centre
 // ------------------------------------------------------------------ utils
 
 function setStatus(text, busy = false) {
-  $('status').innerHTML = busy ? `<span class="spinner"></span>${text}` : text;
+  const statusEl = $('status');
+  statusEl.textContent = '';
+  if (busy) {
+    const spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    statusEl.appendChild(spinner);
+    statusEl.appendChild(document.createTextNode(text));
+  } else {
+    statusEl.textContent = text;
+  }
   // The loading wheel rides along with the busy-status calls that already wrap every
   // host round-trip, so any operation that makes a button "hang" shows a spinner.
   const overlay = $('busy-overlay');

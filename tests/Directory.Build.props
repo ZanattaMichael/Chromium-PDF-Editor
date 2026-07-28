@@ -1,0 +1,14 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <!-- Test methods follow the Method_Scenario_ExpectedResult convention throughout this
+         suite; CA1707's objection to underscores doesn't apply to test names. CA1861 asks
+         to hoist inline array-literal arguments (e.g. `new[] { 1, 2 }`) into static readonly
+         fields to avoid reallocating them on every call - a hot-path optimization that adds
+         indirection with no measurable benefit for arguments built once per test case. -->
+    <NoWarn>$(NoWarn);CA1707;CA1861</NoWarn>
+  </PropertyGroup>
+
+</Project>

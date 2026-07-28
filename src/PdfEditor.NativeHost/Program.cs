@@ -4,7 +4,6 @@ using PdfEditor.NativeHost;
 // Anything written to stdout must be a framed message, so diagnostics go to stderr.
 var stdin = Console.OpenStandardInput();
 var stdout = Console.OpenStandardOutput();
-var processor = new MessageProcessor();
 var assembler = new ChunkAssembler();
 
 while (true)
@@ -34,6 +33,6 @@ while (true)
     }
     if (request == null) continue; // waiting for more chunks
 
-    foreach (string response in processor.Handle(request))
+    foreach (string response in MessageProcessor.Handle(request))
         NativeMessaging.WriteMessage(stdout, response);
 }

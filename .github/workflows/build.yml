@@ -13,17 +13,59 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
+        with:
+          distribution: temurin
+          java-version: "17"
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: "8.0.x"
-      - name: Build
-        run: dotnet build --configuration Release
-      # Generates coverage-results/**/coverage.cobertura.xml, which sonar-project.properties
-      # points sonar.cs.cobertura.reportsPaths at -- without this step the scan below has no
-      # coverage data to import, regardless of what the analysis itself finds.
-      - name: Test with coverage
-        run: ./scripts/coverage.sh 0 --configuration Release
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
+      - name: Cache SonarQube Cloud packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+      - name: Cache SonarQube Cloud scanner
+        id: cache-sonar-scanner
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ./.sonar/scanner
+          key: ${{ runner.os }}-sonar-scanner
+          restore-keys: ${{ runner.os }}-sonar-scanner
+      - name: Install SonarQube Cloud scanner for .NET
+        if: steps.cache-sonar-scanner.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ./.sonar/scanner
+          dotnet tool update dotnet-sonarscanner --tool-path ./.sonar/scanner
+      # The generic SonarSource/sonarqube-scan-action cannot analyze C# at all -- its own log
+      # says so outright ("you must use the SonarScanner for .NET"). Since PdfEditor.Core and
+      # PdfEditor.NativeHost are nearly the whole codebase, that meant the engine was never
+      # really being scanned. begin/build/test/end is the .NET-specific flow that actually
+      # runs the C# analyzers, with coverage imported from the same test run.
+      - name: Begin SonarQube analysis
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: >
+          ./.sonar/scanner/dotnet-sonarscanner begin
+          /k:"ZanattaMichael_Chromium-PDF-Editor"
+          /o:"zanattamichael"
+          /d:sonar.token="$SONAR_TOKEN"
+          /d:sonar.host.url="https://sonarcloud.io"
+          /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,coverage-report/**,coverage-results/**,coverage-sonar/**,dist/**,e2e/test-results/**,e2e/playwright-report/**"
+          /d:sonar.cs.opencover.reportsPaths="coverage-sonar/**/coverage.opencover.xml"
+          /d:sonar.coverage.exclusions="**/*.css,**/*.html,**/*.yml,**/*.yaml,**/*.ps1,**/*.sh,extension/**/*.js,e2e/**/*.js"
+      - name: Build
+        run: dotnet build --configuration Release
+      - name: Test with coverage
+        # Category!=Performance matches ci.yml's perf job split: the timing guards need a
+        # dedicated, uncontended runner and PDF_EDITOR_PERF_SLACK to be meaningful (see
+        # PerfHarness), neither of which apply when this job builds the whole solution.
+        run: >
+          dotnet test --configuration Release --filter "Category!=Performance"
+          --collect:"XPlat Code Coverage" --results-directory coverage-sonar
+          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+      - name: End SonarQube analysis
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: ./.sonar/scanner/dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"

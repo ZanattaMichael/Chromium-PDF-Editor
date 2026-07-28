@@ -62,7 +62,7 @@ const A4 = [0, 0, 595, 842];
 
 /** Drags a rectangle on the overlay, in PDF user-space coordinates. */
 async function dragPdfRect(page, { x, y, width, height }, mediaBox = A4) {
-  const [llx, lly, urx, ury] = mediaBox;
+  const [llx, , urx, ury] = mediaBox;
   const box = await page.locator(pageImageSel(1)).boundingBox();
   const scale = box.width / (urx - llx);
   const cssX = (pdfX) => box.x + (pdfX - llx) * scale;
@@ -75,7 +75,7 @@ async function dragPdfRect(page, { x, y, width, height }, mediaBox = A4) {
 
 /** Samples a rendered-page pixel at a PDF user-space point (returns [r,g,b,a]). */
 async function pixelAt(page, pdfX, pdfY, mediaBox = A4) {
-  return page.evaluate(async ([px, py, [llx, lly, urx, ury]]) => {
+  return page.evaluate(async ([px, py, [llx, , urx, ury]]) => {
     const img = document.querySelector('.page[data-page="1"] .page-image');
     await img.decode();
     const canvas = document.createElement('canvas');
@@ -395,7 +395,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
       c.width = img.naturalWidth; c.height = img.naturalHeight;
       const ctx = c.getContext('2d');
       ctx.drawImage(img, 0, 0);
-      const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
+      const { data } = ctx.getImageData(0, 0, c.width, c.height);
       for (let i = 0; i < data.length; i += 4) {
         if (data[i] < 120 && data[i + 1] > 150 && data[i + 2] < 120) return true;
       }

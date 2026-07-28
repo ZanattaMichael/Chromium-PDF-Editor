@@ -7,7 +7,16 @@ const path = require('node:path');
 const { launchExtension } = require('../helpers/harness');
 const { buildLinkPdf, buildJsLinkPdf, buildLinkOnPage2Pdf } = require('../helpers/pdf');
 
-const OUT = process.argv[2] || path.join(os.tmpdir(), 'pdf-shots');
+/** Resolves the CLI-supplied output directory, rejecting anything that isn't a plain path string. */
+function resolveOutputDir(rawArg) {
+  const target = rawArg || path.join(os.tmpdir(), 'pdf-shots');
+  if (typeof target !== 'string' || target.length === 0 || target.includes('\0')) {
+    throw new Error(`invalid output directory argument: ${JSON.stringify(rawArg)}`);
+  }
+  return path.resolve(target);
+}
+
+const OUT = resolveOutputDir(process.argv[2]);
 fs.mkdirSync(OUT, { recursive: true });
 
 const pageImageSel = (n = 1) => `.page[data-page="${n}"] .page-image`;

@@ -44,7 +44,8 @@ public static class DocComparer
     private static string[] Words(PdfDocument doc, int page)
     {
         string text = PdfTextExtractor.GetTextFromPage(doc.GetPage(page), new LocationTextExtractionStrategy());
-        return Regex.Split(text.Trim(), @"\s+").Where(w => w.Length > 0).ToArray();
+        return Regex.Split(text.Trim(), @"\s+", RegexOptions.None, TimeSpan.FromSeconds(2))
+            .Where(w => w.Length > 0).ToArray();
     }
 
     /// <summary>Returns (added, removed) words aligning <paramref name="a"/> (old) to <paramref name="b"/> (new).</summary>

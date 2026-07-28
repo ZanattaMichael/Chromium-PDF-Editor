@@ -47,9 +47,16 @@ jobs:
           /o:"zanattamichael"
           /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
           /d:sonar.host.url="https://sonarcloud.io"
-          /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,coverage-report/**,coverage-results/**,dist/**,e2e/test-results/**,e2e/playwright-report/**"
-      - name: Build
-        run: dotnet build --configuration Release
+          /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,coverage-report/**,coverage-results/**,coverage-sonar/**,dist/**,e2e/test-results/**,e2e/playwright-report/**"
+          /d:sonar.cs.opencover.reportsPaths="coverage-sonar/**/coverage.opencover.xml"
+      - name: Test with coverage
+        # Category!=Performance matches ci.yml's perf job split: the timing guards need a
+        # dedicated, uncontended runner and PDF_EDITOR_PERF_SLACK to be meaningful (see
+        # PerfHarness), neither of which apply when this job builds the whole solution.
+        run: >
+          dotnet test --configuration Release --filter "Category!=Performance"
+          --collect:"XPlat Code Coverage" --results-directory coverage-sonar
+          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
       - name: End SonarQube analysis
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

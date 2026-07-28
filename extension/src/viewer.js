@@ -2898,6 +2898,7 @@ function wire() {
   $('forms-cancel').addEventListener('click', () => hidePanels());
   $('field-place').addEventListener('click', beginPlaceField);
   $('field-type').addEventListener('change', updateFieldTypeRows);
+  updateFieldTypeRows(); // sync the type-specific rows to the initial selection, not just on change
   enableCodeEditorTab($('field-script'));
 
   $('btn-organize').addEventListener('click', openOrganize);

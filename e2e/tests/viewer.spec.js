@@ -492,6 +492,25 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('safety: opening a form whose field carries JavaScript raises the warning badge', async () => {
+    // Field-level scripts live on a widget annotation's /A, not in the document-level name tree
+    // or /OpenAction -- so this covers a path the document-script test above does not.
+    const file = path.join(fixtureDir, 'formjs.pdf');
+    fs.writeFileSync(file, buildFormWithButtonScriptPdf("app.alert('FORM_FIELD_MARKER_456');"));
+    const page = await openViewerWith(file);
+
+    const badge = page.locator('#badges .badge.warn', { hasText: 'JavaScript' });
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText('disabled');
+
+    // ...and the details dialog names the field's actual script, not a generic notice.
+    await badge.click();
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('.safety-samples')).toContainText('FORM_FIELD_MARKER_456');
+    await page.close();
+  });
+
   test('safety: JavaScript is detected, flagged with its source, and stripped by default', async () => {
     const file = path.join(fixtureDir, 'hasjs.pdf');
     fs.writeFileSync(file, buildJavaScriptPdf("app.alert('DISTINCTIVE_MARKER_123');"));
@@ -1280,9 +1299,18 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(file);
 
     await ui(page, '#btn-forms');
+    // The button-only rows must be hidden for other field types -- a `hidden` label that CSS
+    // still renders would offer a "JavaScript to run on click" box on e.g. a checkbox, whose
+    // contents beginPlaceField() then silently discards.
+    await page.selectOption('#field-type', 'checkbox');
+    await expect(page.locator('#field-caption-row')).toBeHidden();
+    await expect(page.locator('#field-script-row')).toBeHidden();
+    await expect(page.locator('#field-options-row')).toBeHidden();
+
     await page.selectOption('#field-type', 'button');
     await expect(page.locator('#field-caption-row')).toBeVisible();
     await expect(page.locator('#field-script-row')).toBeVisible();
+    await expect(page.locator('#field-options-row')).toBeHidden();
     await page.fill('#field-name', 'submitBtn');
     await page.fill('#field-caption', 'Submit');
     await page.fill('#field-script', "app.alert('submitted');");
@@ -1294,6 +1322,26 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // The button is listed as a form field, and the script it carries is kept on save.
     await expect(page.locator('.form-field[data-field-name="submitBtn"]')).toHaveCount(1);
     await expect(page.locator('#badges .badge.warn')).toContainText('kept');
+
+    // ...and it is actually drawn on the page. A widget with no /AP appearance stream renders
+    // as blank space in PDFium (the preview) and in most readers, so the button would be
+    // invisible and unclickable even though it exists in the document.
+    const drawn = await page.evaluate(async () => {
+      const img = document.querySelector('.page[data-page="1"] .page-image');
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
+      const s = img.naturalWidth / 595;
+      let nonWhite = 0;
+      for (let py = 600; py <= 628; py++)
+        for (let px = 100; px <= 220; px++) {
+          const d = ctx.getImageData(Math.round(px * s), Math.round((842 - py) * s), 1, 1).data;
+          if (!(d[0] > 248 && d[1] > 248 && d[2] > 248)) nonWhite++;
+        }
+      return nonWhite;
+    });
+    expect(drawn).toBeGreaterThan(0);
     await page.close();
   });
 

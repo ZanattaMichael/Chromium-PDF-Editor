@@ -10,6 +10,12 @@
 
 * { box-sizing: border-box; }
 
+/* The HTML `hidden` attribute is only `display: none` in the UA stylesheet, so ANY author rule
+   that sets `display` (e.g. `label { display: block }` below) silently beats it and the element
+   stays on screen. Several panels rely on `hidden` to show type-specific inputs, so make the
+   attribute authoritative here rather than hunting down every rule that could out-specify it. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   height: 100%;

@@ -142,7 +142,12 @@ public static class TextTools
         {
             var strategy = new RegexBasedLocationExtractionStrategy(
                 System.Text.RegularExpressions.Regex.Escape(phrase));
-            new PdfCanvasProcessor(strategy).ProcessPageContent(doc.GetPage(p));
+            int page = p;
+            PdfIo.Guarded($"searching page {page}", () =>
+            {
+                PdfStructureGuard.EnsureFormXObjectsTerminate(doc.GetPage(page));
+                new PdfCanvasProcessor(strategy).ProcessPageContent(doc.GetPage(page));
+            });
             foreach (var location in strategy.GetResultantLocations())
             {
                 var r = location.GetRectangle();
@@ -220,7 +225,11 @@ public static class TextTools
         using var doc = PdfIo.OpenReadOnly(pdf, password);
         if (page < 1 || page > doc.GetNumberOfPages()) return Array.Empty<TextSpan>();
         var spans = new List<TextSpan>();
-        new PdfCanvasProcessor(new SpanListener(spans)).ProcessPageContent(doc.GetPage(page));
+        PdfIo.Guarded($"reading the text layout of page {page}", () =>
+        {
+            PdfStructureGuard.EnsureFormXObjectsTerminate(doc.GetPage(page));
+            new PdfCanvasProcessor(new SpanListener(spans)).ProcessPageContent(doc.GetPage(page));
+        });
         return spans;
     }
 
@@ -254,7 +263,11 @@ public static class TextTools
     {
         var chunks = new List<Chunk>();
         var listener = new ChunkListener(chunks);
-        new PdfCanvasProcessor(listener).ProcessPageContent(doc.GetPage(pageNumber));
+        PdfIo.Guarded($"extracting text from page {pageNumber}", () =>
+        {
+            PdfStructureGuard.EnsureFormXObjectsTerminate(doc.GetPage(pageNumber));
+            new PdfCanvasProcessor(listener).ProcessPageContent(doc.GetPage(pageNumber));
+        });
         return chunks;
     }
 

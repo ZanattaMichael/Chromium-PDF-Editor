@@ -59,6 +59,7 @@ public static class MessageProcessor
         "form-fields" => FormFieldsAction(p),
         "fill-form" => FillFormAction(p),
         "add-form-field" => AddFormFieldAction(p),
+        "validate" => ValidateAction(p),
         "scan-safety" => ScanSafetyAction(p),
         "js-sources" => new { sources = PdfSafety.JavaScriptSources(Pdf(p), Password(p)) },
         "strip-active" => StripActiveAction(p),
@@ -236,6 +237,30 @@ public static class MessageProcessor
                 p["value"]?.GetValue<string>(), Password(p), script: script),
         };
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    /// <summary>
+    /// Re-reads an exported document and reports what is structurally wrong with it. This is a
+    /// diagnostic: it never rewrites the document and never turns a successful export into a
+    /// failure — the caller decides what to do with the findings.
+    /// </summary>
+    private static object ValidateAction(JsonObject p)
+    {
+        var report = ExportValidator.Validate(Pdf(p), Password(p));
+        return new
+        {
+            valid = report.IsValid,
+            errorCount = report.ErrorCount,
+            warningCount = report.WarningCount,
+            findings = report.Findings.Select(f => new
+            {
+                code = f.Code,
+                severity = f.Severity.ToString().ToLowerInvariant(),
+                location = f.Location,
+                message = f.Message
+            }),
+            log = report.ToLogText()
+        };
     }
 
     private static object ScanSafetyAction(JsonObject p)

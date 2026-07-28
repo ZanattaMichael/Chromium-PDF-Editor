@@ -13,6 +13,16 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build
+        run: dotnet build --configuration Release
+      # Generates coverage-results/**/coverage.cobertura.xml, which sonar-project.properties
+      # points sonar.cs.cobertura.reportsPaths at -- without this step the scan below has no
+      # coverage data to import, regardless of what the analysis itself finds.
+      - name: Test with coverage
+        run: ./scripts/coverage.sh 0 --configuration Release
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
         env:

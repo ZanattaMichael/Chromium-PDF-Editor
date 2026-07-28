@@ -27,27 +27,12 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from sonar_paths import safe_path
+
 DEFAULT_REPORT_TASK = Path(".sonarqube/out/.sonar/report-task.txt")
 PAGE_SIZE = 500          # api/issues/search maximum
 MAX_ISSUES = 10_000      # the API refuses paging past this
 SETTLED = {"SUCCESS", "FAILED", "CANCELED", "CANCELLED"}
-
-
-def safe_path(value: str, *, must_exist: bool = False) -> Path:
-    """Resolve a caller-supplied path, refusing anything outside the working tree.
-
-    These scripts only ever read and write artefacts inside the checkout, so a path that escapes
-    it (`../../etc/passwd`) is always a mistake or an attack rather than a legitimate use. Anchor
-    to the working directory and reject the rest, instead of trusting whatever the CLI was given.
-    """
-    base = Path.cwd().resolve()
-    candidate = Path(value)
-    candidate = candidate.resolve() if candidate.is_absolute() else (base / candidate).resolve()
-    if not candidate.is_relative_to(base):
-        raise SystemExit(f"error: refusing a path outside {base}: {value}")
-    if must_exist and not candidate.is_file():
-        raise SystemExit(f"error: no such file: {value}")
-    return candidate
 
 
 def read_report_task(path: Path) -> dict[str, str]:

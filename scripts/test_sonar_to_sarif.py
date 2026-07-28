@@ -13,8 +13,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from sonar_to_sarif import (convert, load_issues, region, relative_path,  # noqa: E402
-                            safe_path, sarif_level)
+from sonar_paths import safe_path  # noqa: E402
+from sonar_to_sarif import convert, load_issues, region, relative_path, sarif_level  # noqa: E402
 
 PROJECT = "ZanattaMichael_Chromium-PDF-Editor"
 

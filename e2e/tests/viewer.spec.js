@@ -605,6 +605,35 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('links: the panel does not keep the previous document\'s links (#24)', async () => {
+    // Regression (#24): opening another document left the Links panel listing the OLD document's
+    // URLs. loadDocument() cleared state.linkHotspots (the on-page overlay) but never state.links
+    // (the panel's list), and nothing re-ran openLinks() for the panel that was already showing.
+    const first = path.join(fixtureDir, 'links-first.pdf');
+    fs.writeFileSync(first, buildLinkPdf('https://github.com/example/FIRST-DOC'));
+    const second = path.join(fixtureDir, 'links-second.pdf');
+    fs.writeFileSync(second, buildLinkPdf('https://example.com/SECOND-DOC'));
+
+    const page = await openViewerWith(first);
+    await ui(page, '#btn-links');
+    await expect(page.locator('#links-list')).toContainText('FIRST-DOC');
+
+    // Open a different document while the panel is still on screen.
+    const chooser = page.waitForEvent('filechooser');
+    await ui(page, '#btn-open');
+    await (await chooser).setFiles(second);
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+
+    // The first document's link must be gone — whether the panel refreshes or closes.
+    await expect(page.locator('#links-list')).not.toContainText('FIRST-DOC');
+
+    // And the panel must show the new document's link once it is on screen.
+    if (await page.locator('#panel-links').isHidden()) await ui(page, '#btn-links');
+    await expect(page.locator('#links-list')).toContainText('SECOND-DOC');
+    await expect(page.locator('#links-list')).not.toContainText('FIRST-DOC');
+    await page.close();
+  });
+
   test('links: a hotspot is drawn over the link, coloured by risk, inert until enabled', async () => {
     const file = path.join(fixtureDir, 'linkspot.pdf');
     fs.writeFileSync(file, buildLinkPdf('https://github.com/example/repo'));

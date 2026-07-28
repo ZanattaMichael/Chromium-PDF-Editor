@@ -103,13 +103,20 @@ jobs:
           else
             python3 scripts/fetch_sonar_issues.py --output sonar-issues.json --branch main
           fi
+      - name: Verify the SARIF converter
+        # The converter's own assertions. Runs before the real conversion so a translation bug
+        # (an off-by-one column, a single-element array serialising as a scalar) fails here with
+        # a clear message rather than as a rejected or subtly mis-anchored upload.
+        shell: pwsh
+        run: ./scripts/sonar-to-sarif.ps1 -SelfTest
       - name: Convert findings to SARIF
+        shell: pwsh
         run: >
-          python3 scripts/sonar_to_sarif.py
-          --issues sonar-issues.json
-          --project-key "${{ steps.findings.outputs.project-key }}"
-          --organization zanattamichael
-          --output sonar.sarif
+          ./scripts/sonar-to-sarif.ps1
+          -Issues sonar-issues.json
+          -ProjectKey "${{ steps.findings.outputs.project-key }}"
+          -Organization zanattamichael
+          -Output sonar.sarif
       - name: Upload SARIF to code scanning
         uses: github/codeql-action/upload-sarif@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
         with:

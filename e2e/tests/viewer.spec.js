@@ -1292,7 +1292,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await dragPdfRect(page, { x: 100, y: 600, width: 120, height: 28 });
 
     // The button is listed as a form field, and the script it carries is kept on save.
-    await expect(page.locator('#forms-list [data-field="submitBtn"]')).toHaveCount(1);
+    await expect(page.locator('.form-field[data-field-name="submitBtn"]')).toHaveCount(1);
     await expect(page.locator('#badges .badge.warn')).toContainText('kept');
     await page.close();
   });

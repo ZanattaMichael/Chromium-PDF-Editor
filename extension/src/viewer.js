@@ -2147,8 +2147,12 @@ async function placeField(region) {
     const message = pf.script
       ? `${FIELD_LABELS[pf.fieldType] ?? 'Field'} added — its JavaScript will be kept when you save.`
       : `${FIELD_LABELS[pf.fieldType] ?? 'Field'} added.`;
-    await applyResult(result.pdf, message);
-    openForms(); // show the updated field list (and let them add another)
+    // Refresh the document and the field list *before* toasting: openForms() drives its own
+    // "Reading form fields…" status while it fetches, which would otherwise stomp the toast
+    // if shown first.
+    await loadDocument(base64ToBytes(result.pdf), null, { pushHistory: true });
+    await openForms(); // show the updated field list (and let them add another)
+    toast(message);
   } catch (e) {
     fail(e);
   }

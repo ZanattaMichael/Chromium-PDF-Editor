@@ -497,6 +497,7 @@ select {
 .form-field { margin: 8px 0; }
 .form-field > span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; word-break: break-word; }
 .form-field input[type="checkbox"] { width: auto; }
+.form-field-run { padding: 4px 12px; }
 
 .badge.warn { background: #7c3a10; color: #ffd9b0; cursor: pointer; }
 

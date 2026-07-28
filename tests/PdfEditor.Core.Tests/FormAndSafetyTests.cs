@@ -250,6 +250,37 @@ public class FormToolsTests
     }
 
     [Fact]
+    public void AddButton_WithScript_ListFields_ExposesTheScript()
+    {
+        // The Fill Form panel needs the button's click script to simulate it in-viewer (#18).
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+
+        var result = FormTools.AddButton(pdf, 1, new RectRegion(1, 100, 500, 80, 24), "calc", "Calculate",
+            "this.getField(\"total\").value = this.getField(\"a\").value;");
+
+        var field = Assert.Single(FormTools.ListFields(result.Pdf));
+        Assert.Equal("button", field.Type);
+        Assert.Equal("this.getField(\"total\").value = this.getField(\"a\").value;", field.Script);
+    }
+
+    [Fact]
+    public void AddButton_WithoutScript_ListFields_ScriptIsNull()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+
+        var result = FormTools.AddButton(pdf, 1, new RectRegion(1, 100, 500, 80, 24), "noop", "OK");
+
+        Assert.Null(Assert.Single(FormTools.ListFields(result.Pdf)).Script);
+    }
+
+    [Fact]
+    public void ListFields_NonButtonFields_HaveNoScript()
+    {
+        byte[] pdf = TestPdfs.WithTextField("fullName", "Jane");
+        Assert.Null(Assert.Single(FormTools.ListFields(pdf)).Script);
+    }
+
+    [Fact]
     public void AddCheckbox_DefaultsToUnchecked_AndCanBeCheckedByFilling()
     {
         byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));

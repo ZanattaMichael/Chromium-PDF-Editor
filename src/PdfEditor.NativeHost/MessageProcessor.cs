@@ -198,7 +198,7 @@ public static class MessageProcessor
             fields = fields.Select(f => new
             {
                 name = f.Name, type = f.Type, value = f.Value, options = f.Options, readOnly = f.ReadOnly,
-                page = f.Page, x = f.X, y = f.Y, width = f.Width, height = f.Height
+                page = f.Page, x = f.X, y = f.Y, width = f.Width, height = f.Height, script = f.Script
             })
         };
     }

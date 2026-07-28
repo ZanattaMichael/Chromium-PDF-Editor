@@ -6,8 +6,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { launchExtension } = require('../helpers/harness');
 const {
-  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf, buildLinkPdf, buildJsLinkPdf,
-  buildLinkOnPage2Pdf, buildLinkOverTextPdf,
+  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildFormWithButtonScriptPdf, buildJavaScriptPdf,
+  buildLinkPdf, buildJsLinkPdf, buildLinkOnPage2Pdf, buildLinkOverTextPdf,
 } = require('../helpers/pdf');
 
 /** @type {Awaited<ReturnType<typeof launchExtension>>} */
@@ -440,6 +440,55 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
 
     // The forms panel reopens and lists the newly inserted field.
     await expect(page.locator('#forms-list [data-field="signature_name"]')).toHaveCount(1);
+    await page.close();
+  });
+
+  test('forms: clicking a button simulates its calculation script (#18)', async () => {
+    const file = path.join(fixtureDir, 'button-calc.pdf');
+    fs.writeFileSync(file, buildFormWithButtonScriptPdf());
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await expect(page.locator('#panel-forms')).toBeVisible();
+    await expect(page.locator('#forms-list [data-field="a"]')).toHaveValue('2');
+    await expect(page.locator('#forms-list [data-field="b"]')).toHaveValue('3');
+
+    // Edit the inputs, then run the button's script — it should read the live panel values.
+    await page.locator('#forms-list [data-field="a"]').fill('10');
+    await page.locator('#forms-list [data-field="b"]').fill('5');
+    await page.locator('.form-field[data-field-name="calc"] .form-field-run').click();
+
+    await expect(page.locator('#forms-list [data-field="total"]')).toHaveValue('15');
+    await expect(page.locator('#status')).toContainText('Ran "calc"');
+    await page.close();
+  });
+
+  test('forms: a button script outside the supported grammar is reported, not silently ignored (#18/#22)', async () => {
+    const file = path.join(fixtureDir, 'button-unsupported.pdf');
+    fs.writeFileSync(file, buildFormWithButtonScriptPdf("app.alert('hi');"));
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await page.locator('.form-field[data-field-name="calc"] .form-field-run').click();
+
+    await expect(page.locator('#status')).toContainText("can't simulate");
+    await expect(page.locator('#forms-list [data-field="total"]')).toHaveValue('');
+    await page.close();
+  });
+
+  test('forms: adding a scripted button notifies that its JavaScript will be kept (#22)', async () => {
+    const file = fixture('insertbutton.pdf', [[{ text: 'blank form', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await page.selectOption('#field-type', 'button');
+    await page.fill('#field-name', 'go');
+    await page.fill('#field-caption', 'Go');
+    await page.fill('#field-script', "app.alert('hi');");
+    await page.click('#field-place');
+    await dragPdfRect(page, { x: 100, y: 600, width: 90, height: 24 });
+
+    await expect(page.locator('#status')).toContainText('JavaScript will be kept');
     await page.close();
   });
 

@@ -207,9 +207,11 @@ public static class FormTools
             if (type == "container") continue; // non-terminal parent — not directly fillable
             bool readOnly = (field.GetFieldFlags() & PdfFormField.FF_READ_ONLY) != 0;
             var (page, rect) = WidgetLocation(doc, field);
+            string? script = type == "button" ? ButtonScript(field) : null;
             fields.Add(new FormField(name, type, field.GetValueAsString() ?? "", Options(field), readOnly,
                 page,
-                rect?.GetX() ?? 0, rect?.GetY() ?? 0, rect?.GetWidth() ?? 0, rect?.GetHeight() ?? 0));
+                rect?.GetX() ?? 0, rect?.GetY() ?? 0, rect?.GetWidth() ?? 0, rect?.GetHeight() ?? 0,
+                script));
         }
         return fields;
     }
@@ -251,6 +253,37 @@ public static class FormTools
             return (flags & PdfButtonFormField.FF_RADIO) != 0 ? "radio" : "checkbox";
         }
         return "text";
+    }
+
+    /// <summary>
+    /// The JavaScript source attached to a push button's activation action (its widget's /A entry,
+    /// or the widget's /AA /U — mouse-up — entry as a fallback), if any. The viewer surfaces this so
+    /// a click can (for the common calculation/visibility patterns) be simulated locally; see
+    /// extension/src/formScript.js. Returns null for a plain button with no script.
+    /// </summary>
+    private static string? ButtonScript(PdfFormField field)
+    {
+        foreach (var widget in field.GetWidgets())
+        {
+            var obj = widget.GetPdfObject();
+            string? script = JsActionText(obj.Get(PdfName.A))
+                ?? JsActionText(obj.GetAsDictionary(PdfName.AA)?.Get(PdfName.U));
+            if (script != null) return script;
+        }
+        return null;
+    }
+
+    /// <summary>Reads the /JS text out of an action dictionary if it's a JavaScript action.</summary>
+    private static string? JsActionText(PdfObject? action)
+    {
+        if (action is not PdfDictionary a) return null;
+        if (a.GetAsName(PdfName.S)?.Equals(PdfName.JavaScript) != true) return null;
+        return a.Get(PdfName.JS) switch
+        {
+            PdfString s => s.ToUnicodeString(),
+            PdfStream st => System.Text.Encoding.UTF8.GetString(st.GetBytes()),
+            _ => null
+        };
     }
 
     /// <summary>Allowed values: choice /Opt entries, or a checkbox/radio's appearance states.</summary>

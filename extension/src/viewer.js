@@ -2,6 +2,7 @@
 // document lives here as bytes and every edit round-trips through the host.
 
 import { HostClient, bytesToBase64, base64ToBytes } from './host-client.js';
+import { runFormScript } from './formScript.js';
 
 const host = new HostClient();
 
@@ -1958,9 +1959,27 @@ async function openForms() {
     for (const f of fields) {
       const row = document.createElement('div');
       row.className = 'form-field';
+      row.dataset.fieldName = f.name; // lets a button's script show/hide this row
       const label = document.createElement('span');
       label.textContent = f.name; // textContent — field names come from the document
       row.appendChild(label);
+
+      if (f.type === 'button') {
+        // A push button has no fillable value — it triggers its click script instead. Buttons are
+        // deliberately excluded from [data-field] so applyForms() never tries to "fill" them.
+        const run = document.createElement('button');
+        run.type = 'button';
+        run.className = 'form-field-run';
+        run.textContent = 'Run';
+        run.title = f.script
+          ? "Simulates this button's script (calculations / show-hide only — see help)"
+          : 'This button has no script attached';
+        run.addEventListener('click', () => runFormButtonScript(f));
+        row.appendChild(run);
+        list.appendChild(row);
+        continue;
+      }
+
       let input;
       if (f.type === 'checkbox') {
         input = document.createElement('input');
@@ -1991,6 +2010,52 @@ async function openForms() {
   } catch (e) {
     fail(e);
   }
+}
+
+/**
+ * Simulates a form button's click script against the other fields currently shown in the Forms
+ * panel — the viewer's stand-in for real PDF JavaScript execution (see extension/src/formScript.js
+ * for exactly which patterns are supported: field-to-field calculations, show/hide, and reset).
+ * Nothing here is saved until the user hits "Apply"; scripts outside that supported grammar are
+ * reported rather than silently ignored or half-run (issues #18 and #22).
+ */
+function runFormButtonScript(f) {
+  if (!f.script) {
+    toast(`"${f.name}" has no script attached — nothing to run.`);
+    return;
+  }
+  const fieldInput = (name) =>
+    [...$('forms-list').querySelectorAll('[data-field]')].find((el) => el.dataset.field === name);
+  const getValue = (name) => {
+    const el = fieldInput(name);
+    if (!el) return '';
+    return el.type === 'checkbox' ? (el.checked ? (el.dataset.on ?? 'Yes') : 'Off') : el.value;
+  };
+
+  const result = runFormScript(f.script, getValue);
+  if (!result.ok) {
+    toast(`⚠ "${f.name}" runs JavaScript this viewer can't simulate (only calculations and ` +
+      'show/hide are supported here) — it will run once the saved file is opened in Acrobat or Chrome.');
+    return;
+  }
+
+  for (const { name, value } of result.sets) {
+    const el = fieldInput(name);
+    if (el && el.type !== 'checkbox') el.value = value;
+  }
+  for (const { name, hidden } of result.display) {
+    const row = [...$('forms-list').children].find((el) => el.dataset.fieldName === name);
+    if (row) row.hidden = hidden;
+  }
+  if (result.reset) {
+    for (const el of $('forms-list').querySelectorAll('[data-field]')) {
+      if (el.type === 'checkbox') el.checked = false;
+      else el.value = '';
+    }
+  }
+  toast(result.sets.length > 0
+    ? `Ran "${f.name}"'s JavaScript — ${result.sets.length} field${result.sets.length === 1 ? '' : 's'} updated.`
+    : `Ran "${f.name}"'s JavaScript.`);
 }
 
 async function applyForms() {
@@ -2074,10 +2139,15 @@ async function placeField(region) {
       caption: pf.caption || undefined, script: pf.script || undefined,
       pdfPassword: state.password,
     });
-    // A button carrying a script is deliberately-authored active content — keep it on save.
+    // A button carrying a script is deliberately-authored active content — keep it on save, and
+    // say so explicitly (rather than only lighting up the badge a moment later) so the user isn't
+    // surprised the JavaScript survives the save (#22).
     if (pf.script) state.keepActiveContent = true;
     setTool('select');
-    await applyResult(result.pdf, `${FIELD_LABELS[pf.fieldType] ?? 'Field'} added.`);
+    const message = pf.script
+      ? `${FIELD_LABELS[pf.fieldType] ?? 'Field'} added — its JavaScript will be kept when you save.`
+      : `${FIELD_LABELS[pf.fieldType] ?? 'Field'} added.`;
+    await applyResult(result.pdf, message);
     openForms(); // show the updated field list (and let them add another)
   } catch (e) {
     fail(e);

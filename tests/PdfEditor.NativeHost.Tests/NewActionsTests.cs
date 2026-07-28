@@ -7,14 +7,13 @@ namespace PdfEditor.NativeHost.Tests;
 /// <summary>Covers the dispatcher handlers added for the editor-menu features.</summary>
 public class NewActionsTests
 {
-    private readonly MessageProcessor _processor = new();
 
     private static JsonObject Request(string action, object? payload = null) =>
         JsonNode.Parse(JsonSerializer.Serialize(new { id = "t1", action, payload }))!.AsObject();
 
-    private JsonObject Handle(string action, object payload)
+    private static JsonObject Handle(string action, object payload)
     {
-        var frame = Assert.Single(_processor.Handle(Request(action, payload).ToJsonString()));
+        var frame = Assert.Single(MessageProcessor.Handle(Request(action, payload).ToJsonString()));
         return JsonNode.Parse(frame)!.AsObject();
     }
 

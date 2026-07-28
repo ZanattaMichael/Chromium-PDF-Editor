@@ -28,10 +28,16 @@ depend on them being correct.
 3. #24 links menu stale state (independent, can run in parallel with 1–2)
 4. #23 highlight click-and-drag (independent, can run in parallel)
 
-### Phase 2 — Safety net (can parallelize across sessions)
-5. #53 golden-file regression suite
-6. #54 fuzz/regression testing
-7. #52 export pipeline validation
+### Phase 2 — Safety net (partly parallel; #52 first)
+5. **#52 export pipeline validation — do this first.** It yields the structural
+   validator that #53 and #54 both want as their assertion oracle; running it last
+   means the other two invent their own. *(PR #75, open.)*
+6. #54 fuzz/regression testing — independent of #52, can run concurrently with it.
+   *(PR #76, open.)*
+7. #53 golden-file regression suite — after #52, so it asserts with the validator.
+   Note the corpus must be **generated in-repo**: no network access, and real-world
+   PDFs carry licensing questions. Build on `CorruptPdfs.cs` (#52) and
+   `Fuzz/RawPdf.cs` (#54).
 8. #19 async link parser + loading indicator
 9. #56 SonarCube cleanup — split into 2–3 sub-PRs by rule category (bugs, code
    smells, security hotspots); run as background/low-priority sessions since it's
@@ -76,10 +82,20 @@ For each issue:
 1. Start a session (or spawn a subagent — see `issue-resolver` below) with a prompt
    that includes: the issue number/title/body, the relevant ACTION_PLAN.md tier
    context, and the target branch name.
-2. The session should: reproduce the bug/confirm the gap, implement the fix, add/
-   update tests, run the existing test suite, commit, push, and open a draft PR
-   linking the issue (`Fixes #<n>`).
-3. Human review gate: PRs from Phase 1 and Phase 6 (security-sensitive) get a manual
+2. The session should: reproduce the bug/confirm the gap, implement the fix, add
+   tests **and confirm they fail without it**, run the full suite, commit and push.
+3. **Opening the PR is the calling session's job.** A subagent has no GitHub API
+   access — `gh` is absent and `/repos/...` returns 403 — so it can push a branch but
+   cannot file the PR. Have it write the PR body to a file and report the path; three
+   agent runs in one session ended with finished work and no PR because of this.
+4. Before opening the PR, **rebase the branch onto current `main`** and re-run the
+   suites. Agent branches go stale quickly when several land in a session, and a
+   diff against a moved `main` shows other people's merges as deletions.
+5. **Verify the agent's central claim yourself** rather than relaying it. For a fix,
+   that means reverting it and watching the new test fail; for a detector, stubbing it
+   out and watching the suite go red. Both Phase 2 agents' headline claims held up
+   under that check — but the check is what makes the claim worth repeating.
+6. Human review gate: PRs from Phase 1 and Phase 6 (security-sensitive) get a manual
    review before merge; later phases can use lighter review if CI is green and the
    regression suite (Phase 2) passes.
 

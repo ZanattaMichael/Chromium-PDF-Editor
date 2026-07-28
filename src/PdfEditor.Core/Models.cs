@@ -52,11 +52,13 @@ public sealed record SignatureInfo(string Name, string? SignerName, bool Integri
 /// <summary>
 /// A fillable AcroForm field. <paramref name="Type"/> is one of text/checkbox/radio/choice/
 /// signature/button. <paramref name="Options"/> lists the allowed values for checkbox/radio/choice
-/// fields (empty otherwise).
+/// fields (empty otherwise). <paramref name="Script"/> is the JavaScript source attached to a
+/// button's activation action (null for every other field type, or a scriptless button).
 /// </summary>
 public sealed record FormField(string Name, string Type, string Value,
     IReadOnlyList<string> Options, bool ReadOnly,
-    int Page = 0, float X = 0, float Y = 0, float Width = 0, float Height = 0);
+    int Page = 0, float X = 0, float Y = 0, float Width = 0, float Height = 0,
+    string? Script = null);
 
 /// <summary>
 /// Result of scanning a document for active content. <paramref name="Samples"/> holds a few

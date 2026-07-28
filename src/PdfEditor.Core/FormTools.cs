@@ -19,7 +19,7 @@ public static class FormTools
     /// <paramref name="multiline"/> is true the field accepts multiple lines (a comment/notes box).
     /// </summary>
     public static EditResult AddTextField(byte[] pdf, int page, RectRegion rect, string? name = null,
-        string? value = null, string? password = null, bool multiline = false)
+        string? value = null, string? password = null, bool multiline = false, string? script = null)
     {
         using var output = new MemoryStream();
         using (var doc = PdfIo.Open(pdf, output, password))
@@ -33,6 +33,7 @@ public static class FormTools
             if (multiline) field.SetMultiline(true);
             field.SetValue(value ?? "");
             StyleWidget(field);
+            AttachScript(field, script);
             form.AddField(field);
         }
         return EditResult.Of(output.ToArray());
@@ -43,7 +44,7 @@ public static class FormTools
     /// option is preselected; the user picks one when filling the form.
     /// </summary>
     public static EditResult AddDropdown(byte[] pdf, int page, RectRegion rect, string? name,
-        IReadOnlyList<string> options, string? password = null)
+        IReadOnlyList<string> options, string? password = null, string? script = null)
     {
         var choices = options.Where(o => !string.IsNullOrWhiteSpace(o)).Select(o => o.Trim()).ToArray();
         if (choices.Length == 0)
@@ -60,6 +61,7 @@ public static class FormTools
                 .SetPage(page).SetOptions(choices).CreateComboBox();
             field.SetValue(choices[0]);
             StyleWidget(field);
+            AttachScript(field, script);
             form.AddField(field);
         }
         return EditResult.Of(output.ToArray());
@@ -71,7 +73,7 @@ public static class FormTools
     /// can be selected; the first is selected by default. Needs at least two options.
     /// </summary>
     public static EditResult AddRadioGroup(byte[] pdf, int page, RectRegion rect, string? name,
-        IReadOnlyList<string> options, string? password = null)
+        IReadOnlyList<string> options, string? password = null, string? script = null)
     {
         var choices = options.Where(o => !string.IsNullOrWhiteSpace(o)).Select(o => o.Trim())
             .Distinct().ToArray();
@@ -105,6 +107,7 @@ public static class FormTools
                     .MoveText(rect.X + box + 6, y + 2).ShowText(choices[i]).EndText();
             }
             group.SetValue(choices[0]); // first option selected by default
+            AttachScript(group, script);
             form.AddField(group, pdfPage);
         }
         return EditResult.Of(output.ToArray());
@@ -112,7 +115,7 @@ public static class FormTools
 
     /// <summary>Inserts a checkbox on the given page at the given rectangle.</summary>
     public static EditResult AddCheckbox(byte[] pdf, int page, RectRegion rect, string? name = null,
-        bool isChecked = false, string? password = null)
+        bool isChecked = false, string? password = null, string? script = null)
     {
         using var output = new MemoryStream();
         using (var doc = PdfIo.Open(pdf, output, password))
@@ -125,6 +128,7 @@ public static class FormTools
                 .SetPage(page).SetCheckType(CheckBoxType.CHECK).CreateCheckBox();
             field.SetValue(isChecked ? "Yes" : "Off");
             StyleWidget(field);
+            AttachScript(field, script);
             form.AddField(field);
         }
         return EditResult.Of(output.ToArray());
@@ -149,8 +153,7 @@ public static class FormTools
                 .SetCaption(string.IsNullOrWhiteSpace(caption) ? "Button" : caption)
                 .SetPage(page).CreatePushButton();
             field.GetFirstFormAnnotation().SetBorderColor(ColorConstants.GRAY);
-            if (!string.IsNullOrEmpty(script))
-                field.GetWidgets()[0].SetAction(PdfAction.CreateJavaScript(script));
+            AttachScript(field, script, asActivation: true);
             form.AddField(field);
         }
         return EditResult.Of(output.ToArray());
@@ -159,6 +162,31 @@ public static class FormTools
     // A light fill so an empty field is a visible box on the page (many readers, including the
     // PDFium-based preview, draw nothing for a borderless, value-less widget).
     private static readonly DeviceRgb FieldFill = new(240, 244, 250);
+
+    /// <summary>
+    /// Attaches <paramref name="script"/> to every one of a field's widgets so it runs when the
+    /// user activates that field in Acrobat/Chrome. A push button uses the widget's /A (activation)
+    /// entry — the conventional place for a button's click script — while every other field type
+    /// uses /AA /U (the annotation's mouse-up additional action), which is where readers look for
+    /// "run this when the field is clicked/toggled". Radio groups get it on each option's widget.
+    /// No-op for a null/empty script.
+    /// </summary>
+    private static void AttachScript(PdfFormField field, string? script, bool asActivation = false)
+    {
+        if (string.IsNullOrEmpty(script)) return;
+        foreach (var widget in field.GetWidgets())
+        {
+            if (asActivation)
+            {
+                widget.SetAction(PdfAction.CreateJavaScript(script));
+                continue;
+            }
+            var obj = widget.GetPdfObject();
+            var additional = obj.GetAsDictionary(PdfName.AA) ?? new PdfDictionary();
+            additional.Put(PdfName.U, PdfAction.CreateJavaScript(script).GetPdfObject());
+            obj.Put(PdfName.AA, additional);
+        }
+    }
 
     /// <summary>Gives a widget a visible border + light background and generates its appearance so
     /// it renders as an obvious box (not blank page space) in every viewer.</summary>
@@ -207,9 +235,11 @@ public static class FormTools
             if (type == "container") continue; // non-terminal parent — not directly fillable
             bool readOnly = (field.GetFieldFlags() & PdfFormField.FF_READ_ONLY) != 0;
             var (page, rect) = WidgetLocation(doc, field);
+            string? script = FieldScript(field);
             fields.Add(new FormField(name, type, field.GetValueAsString() ?? "", Options(field), readOnly,
                 page,
-                rect?.GetX() ?? 0, rect?.GetY() ?? 0, rect?.GetWidth() ?? 0, rect?.GetHeight() ?? 0));
+                rect?.GetX() ?? 0, rect?.GetY() ?? 0, rect?.GetWidth() ?? 0, rect?.GetHeight() ?? 0,
+                script));
         }
         return fields;
     }
@@ -251,6 +281,38 @@ public static class FormTools
             return (flags & PdfButtonFormField.FF_RADIO) != 0 ? "radio" : "checkbox";
         }
         return "text";
+    }
+
+    /// <summary>
+    /// The JavaScript source attached to a field's widget activation — its /A entry (how push
+    /// buttons carry a click script), falling back to the widget's /AA /U mouse-up entry (how every
+    /// other field type carries one). The viewer surfaces this so an activation can, for the common
+    /// calculation/visibility patterns, be simulated locally; see extension/src/formScript.js.
+    /// Returns null for a field with no script.
+    /// </summary>
+    private static string? FieldScript(PdfFormField field)
+    {
+        foreach (var widget in field.GetWidgets())
+        {
+            var obj = widget.GetPdfObject();
+            string? script = JsActionText(obj.Get(PdfName.A))
+                ?? JsActionText(obj.GetAsDictionary(PdfName.AA)?.Get(PdfName.U));
+            if (script != null) return script;
+        }
+        return null;
+    }
+
+    /// <summary>Reads the /JS text out of an action dictionary if it's a JavaScript action.</summary>
+    private static string? JsActionText(PdfObject? action)
+    {
+        if (action is not PdfDictionary a) return null;
+        if (a.GetAsName(PdfName.S)?.Equals(PdfName.JavaScript) != true) return null;
+        return a.Get(PdfName.JS) switch
+        {
+            PdfString s => s.ToUnicodeString(),
+            PdfStream st => System.Text.Encoding.UTF8.GetString(st.GetBytes()),
+            _ => null
+        };
     }
 
     /// <summary>Allowed values: choice /Opt entries, or a checkbox/radio's appearance states.</summary>

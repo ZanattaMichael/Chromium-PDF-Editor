@@ -6,8 +6,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { launchExtension } = require('../helpers/harness');
 const {
-  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf, buildLinkPdf, buildJsLinkPdf,
-  buildLinkOnPage2Pdf, buildLinkOverTextPdf,
+  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildFormWithButtonScriptPdf, buildJavaScriptPdf,
+  buildLinkPdf, buildJsLinkPdf, buildLinkOnPage2Pdf, buildLinkOverTextPdf,
 } = require('../helpers/pdf');
 
 /** @type {Awaited<ReturnType<typeof launchExtension>>} */
@@ -440,6 +440,123 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
 
     // The forms panel reopens and lists the newly inserted field.
     await expect(page.locator('#forms-list [data-field="signature_name"]')).toHaveCount(1);
+    await page.close();
+  });
+
+  test('forms: clicking a button simulates its calculation script (#18)', async () => {
+    const file = path.join(fixtureDir, 'button-calc.pdf');
+    fs.writeFileSync(file, buildFormWithButtonScriptPdf());
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await expect(page.locator('#panel-forms')).toBeVisible();
+    await expect(page.locator('#forms-list [data-field="a"]')).toHaveValue('2');
+    await expect(page.locator('#forms-list [data-field="b"]')).toHaveValue('3');
+
+    // Edit the inputs, then run the button's script — it should read the live panel values.
+    await page.locator('#forms-list [data-field="a"]').fill('10');
+    await page.locator('#forms-list [data-field="b"]').fill('5');
+    await page.locator('.form-field[data-field-name="calc"] .form-field-run').click();
+
+    await expect(page.locator('#forms-list [data-field="total"]')).toHaveValue('15');
+    await expect(page.locator('#status')).toContainText('Ran "calc"');
+    await page.close();
+  });
+
+  test('forms: fields are fillable directly on the page and stay in sync with the panel', async () => {
+    const file = path.join(fixtureDir, 'onpage.pdf');
+    fs.writeFileSync(file, buildFormWithButtonScriptPdf());
+    const page = await openViewerWith(file);
+
+    // Type into the field where it sits on the page, not in the side panel.
+    const onPage = page.locator('.field-marker [data-page-field="a"]');
+    await expect(onPage).toHaveCount(1);
+    await onPage.fill('42');
+
+    // The panel reflects it...
+    await ui(page, '#btn-forms');
+    await expect(page.locator('#forms-list [data-field="a"]')).toHaveValue('42');
+    // ...and editing the panel flows back to the page.
+    await page.locator('#forms-list [data-field="a"]').fill('7');
+    await expect(onPage).toHaveValue('7');
+    await page.close();
+  });
+
+  test('forms: clicking a scripted button on the page runs it', async () => {
+    const file = path.join(fixtureDir, 'onpage-btn.pdf');
+    fs.writeFileSync(file, buildFormWithButtonScriptPdf());
+    const page = await openViewerWith(file);
+
+    await page.locator('.field-marker [data-page-field="a"]').fill('10');
+    await page.locator('.field-marker [data-page-field="b"]').fill('5');
+    await page.locator('.field-marker .field-input-button').click();
+
+    await expect(page.locator('.field-marker [data-page-field="total"]')).toHaveValue('15');
+    await page.close();
+  });
+
+  test('forms: an app.alert button shows the message like a real reader', async () => {
+    const file = path.join(fixtureDir, 'button-alert.pdf');
+    fs.writeFileSync(file, buildFormWithButtonScriptPdf("app.alert('thanks!');"));
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await page.locator('.form-field[data-field-name="calc"] .form-field-run').click();
+
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('thanks!');
+    await dialog.getByRole('button', { name: 'OK' }).click();
+    await expect(dialog).toBeHidden();
+    await page.close();
+  });
+
+  test('forms: a button script outside the supported grammar is reported, not silently ignored (#18/#22)', async () => {
+    const file = path.join(fixtureDir, 'button-unsupported.pdf');
+    // Deliberately outside the grammar: a submit call, not something the viewer can stand in for.
+    fs.writeFileSync(file, buildFormWithButtonScriptPdf("this.submitForm('https://example.com');"));
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await page.locator('.form-field[data-field-name="calc"] .form-field-run').click();
+
+    await expect(page.locator('#status')).toContainText("can't simulate");
+    await expect(page.locator('#forms-list [data-field="total"]')).toHaveValue('');
+    await page.close();
+  });
+
+  test('forms: adding a scripted button notifies that its JavaScript will be kept (#22)', async () => {
+    const file = fixture('insertbutton.pdf', [[{ text: 'blank form', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await page.selectOption('#field-type', 'button');
+    await page.fill('#field-name', 'go');
+    await page.fill('#field-caption', 'Go');
+    await page.fill('#field-script', "app.alert('hi');");
+    await page.click('#field-place');
+    await dragPdfRect(page, { x: 100, y: 600, width: 90, height: 24 });
+
+    await expect(page.locator('#status')).toContainText('JavaScript will be kept');
+    await page.close();
+  });
+
+  test('safety: opening a form whose field carries JavaScript raises the warning badge', async () => {
+    // Field-level scripts live on a widget annotation's /A, not in the document-level name tree
+    // or /OpenAction -- so this covers a path the document-script test above does not.
+    const file = path.join(fixtureDir, 'formjs.pdf');
+    fs.writeFileSync(file, buildFormWithButtonScriptPdf("app.alert('FORM_FIELD_MARKER_456');"));
+    const page = await openViewerWith(file);
+
+    const badge = page.locator('#badges .badge.warn', { hasText: 'JavaScript' });
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText('disabled');
+
+    // ...and the details dialog names the field's actual script, not a generic notice.
+    await badge.click();
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('.safety-samples')).toContainText('FORM_FIELD_MARKER_456');
     await page.close();
   });
 
@@ -1231,9 +1348,19 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(file);
 
     await ui(page, '#btn-forms');
+    // Type-specific rows must actually respond to the selected type -- these assertions only mean
+    // something because [hidden] is now authoritative in CSS; a `label { display: block }` rule
+    // used to render every one of them regardless, which is how a checkbox ended up offering a
+    // script box whose contents were then silently discarded.
+    await page.selectOption('#field-type', 'checkbox');
+    await expect(page.locator('#field-caption-row')).toBeHidden(); // only a button has a label
+    await expect(page.locator('#field-options-row')).toBeHidden();
+    await expect(page.locator('#field-script-row')).toBeVisible(); // any field can carry a script
+
     await page.selectOption('#field-type', 'button');
     await expect(page.locator('#field-caption-row')).toBeVisible();
     await expect(page.locator('#field-script-row')).toBeVisible();
+    await expect(page.locator('#field-options-row')).toBeHidden();
     await page.fill('#field-name', 'submitBtn');
     await page.fill('#field-caption', 'Submit');
     await page.fill('#field-script', "app.alert('submitted');");
@@ -1243,7 +1370,51 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await dragPdfRect(page, { x: 100, y: 600, width: 120, height: 28 });
 
     // The button is listed as a form field, and the script it carries is kept on save.
-    await expect(page.locator('#forms-list [data-field="submitBtn"]')).toHaveCount(1);
+    await expect(page.locator('.form-field[data-field-name="submitBtn"]')).toHaveCount(1);
+    await expect(page.locator('#badges .badge.warn')).toContainText('kept');
+
+    // ...and it is actually drawn on the page. A widget with no /AP appearance stream renders
+    // as blank space in PDFium (the preview) and in most readers, so the button would be
+    // invisible and unclickable even though it exists in the document.
+    const drawn = await page.evaluate(async () => {
+      const img = document.querySelector('.page[data-page="1"] .page-image');
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
+      const s = img.naturalWidth / 595;
+      let nonWhite = 0;
+      for (let py = 600; py <= 628; py++)
+        for (let px = 100; px <= 220; px++) {
+          const d = ctx.getImageData(Math.round(px * s), Math.round((842 - py) * s), 1, 1).data;
+          if (!(d[0] > 248 && d[1] > 248 && d[2] > 248)) nonWhite++;
+        }
+      return nonWhite;
+    });
+    expect(drawn).toBeGreaterThan(0);
+    await page.close();
+  });
+
+  test('forms: a checkbox can carry JavaScript too, and it survives the save', async () => {
+    // Regression for the reported bug: the script box was offered on every field type but
+    // beginPlaceField() only forwarded it for buttons, so a checkbox's script was silently
+    // dropped -- the saved PDF had no /A and no /AA at all.
+    const file = fixture('checkboxjs.pdf', [[{ text: 'form', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-forms');
+    await page.selectOption('#field-type', 'checkbox');
+    await expect(page.locator('#field-script-row')).toBeVisible();
+    await page.fill('#field-name', 'agree');
+    await page.fill('#field-script', "this.getField('agree').value = 'Yes';");
+    await page.click('#field-place');
+    await dragPdfRect(page, { x: 100, y: 600, width: 20, height: 20 });
+
+    // It is listed, it kept its script (so it gets a Run control), and the document is now
+    // flagged as carrying active content.
+    const row = page.locator('.form-field[data-field-name="agree"]');
+    await expect(row).toHaveCount(1);
+    await expect(row.locator('.form-field-run')).toHaveCount(1);
     await expect(page.locator('#badges .badge.warn')).toContainText('kept');
     await page.close();
   });

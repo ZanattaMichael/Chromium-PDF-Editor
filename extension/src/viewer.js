@@ -2,6 +2,7 @@
 // document lives here as bytes and every edit round-trips through the host.
 
 import { HostClient, bytesToBase64, base64ToBytes } from './host-client.js';
+import { runFormScript } from './formScript.js';
 
 const host = new HostClient();
 
@@ -1944,12 +1945,31 @@ async function showSafetyDialog() {
   close.addEventListener('click', () => modal.close());
 }
 
+/** The "Run" control that locally simulates a field's attached script (see formScript.js). */
+function runControl(field) {
+  const run = document.createElement('button');
+  run.type = 'button';
+  run.className = 'form-field-run';
+  run.textContent = 'Run';
+  run.title = field.script
+    ? "Simulates this field's script (calculations / show-hide only — see help)"
+    : 'This field has no script attached';
+  run.addEventListener('click', () => runFormButtonScript(field));
+  return run;
+}
+
 async function openForms() {
   try {
     setStatus('Reading form fields…', true);
     const result = await host.call('form-fields', { pdf: state.pdfB64, pdfPassword: state.password });
     setStatus('');
-    const fields = result.fields ?? [];
+    // The document on disk is the source of truth for the field *set*, but not for values the user
+    // has already typed (on the page or here) and not yet applied — keep those.
+    const fields = (result.fields ?? []).map((f) => {
+      const edited = (state.formFields ?? []).find((s) => s.name === f.name);
+      return edited ? { ...f, value: edited.value } : f;
+    });
+    state.formFields = fields;
     const list = $('forms-list');
     list.innerHTML = '';
     $('forms-empty').hidden = fields.length > 0;
@@ -1958,9 +1978,19 @@ async function openForms() {
     for (const f of fields) {
       const row = document.createElement('div');
       row.className = 'form-field';
+      row.dataset.fieldName = f.name; // lets a button's script show/hide this row
       const label = document.createElement('span');
       label.textContent = f.name; // textContent — field names come from the document
       row.appendChild(label);
+
+      if (f.type === 'button') {
+        // A push button has no fillable value — it triggers its click script instead. Buttons are
+        // deliberately excluded from [data-field] so applyForms() never tries to "fill" them.
+        row.appendChild(runControl(f));
+        list.appendChild(row);
+        continue;
+      }
+
       let input;
       if (f.type === 'checkbox') {
         input = document.createElement('input');
@@ -1984,7 +2014,14 @@ async function openForms() {
       }
       input.dataset.field = f.name;
       if (f.readOnly) input.disabled = true;
+      // Keep the panel and the on-page control showing the same value, whichever one is edited.
+      input.addEventListener('input', () => setFieldValue(f.name,
+        input.type === 'checkbox' ? (input.checked ? (input.dataset.on ?? 'Yes') : 'Off') : input.value,
+        input));
       row.appendChild(input);
+      // A non-button field can carry a script too (on its widget's /AA /U), which fires when the
+      // user activates it in a real reader. Offer the same local simulation button buttons get.
+      if (f.script) row.appendChild(runControl(f));
       list.appendChild(row);
     }
     showPanel('panel-forms');
@@ -1993,8 +2030,83 @@ async function openForms() {
   }
 }
 
+/**
+ * Simulates a form button's click script against the other fields currently shown in the Forms
+ * panel — the viewer's stand-in for real PDF JavaScript execution (see extension/src/formScript.js
+ * for exactly which patterns are supported: field-to-field calculations, show/hide, and reset).
+ * Nothing here is saved until the user hits "Apply"; scripts outside that supported grammar are
+ * reported rather than silently ignored or half-run (issues #18 and #22).
+ */
+function runFormButtonScript(f) {
+  if (!f.script) {
+    toast(`"${f.name}" has no script attached — nothing to run.`);
+    return;
+  }
+  // Read from the model, not from one view's inputs — a script must see the current values whether
+  // they were typed on the page or in the panel, and whether or not the panel is even open.
+  const getValue = (name) =>
+    (state.formFields ?? []).find((field) => field.name === name)?.value ?? '';
+
+  const result = runFormScript(f.script, getValue);
+  if (!result.ok) {
+    toast(`⚠ "${f.name}" runs JavaScript this viewer can't simulate (only calculations, show/hide, ` +
+      'alerts and resets are supported here) — it will run in full once the saved file is opened ' +
+      'in Acrobat or Chrome.');
+    return;
+  }
+
+  for (const { name, value } of result.sets) setFieldValue(name, value);
+  for (const { name, hidden } of result.display) {
+    const row = [...$('forms-list').children].find((el) => el.dataset.fieldName === name);
+    if (row) row.hidden = hidden;
+    for (const marker of document.querySelectorAll(
+      `[data-page-field="${CSS.escape(name)}"]`)) marker.closest('.field-marker').hidden = hidden;
+  }
+  if (result.reset) {
+    for (const field of state.formFields ?? []) {
+      if (field.type !== 'button') setFieldValue(field.name, field.type === 'checkbox' ? 'Off' : '');
+    }
+  }
+  toast(result.sets.length > 0
+    ? `Ran "${f.name}"'s JavaScript — ${result.sets.length} field${result.sets.length === 1 ? '' : 's'} updated.`
+    : `Ran "${f.name}"'s JavaScript.`);
+  if (result.alerts.length > 0) showScriptAlert(f.name, result.alerts);
+}
+
+/** Shows an app.alert() message from a field's script, the way a real reader would. */
+function showScriptAlert(fieldName, messages) {
+  modal.innerHTML = '';
+  const heading = document.createElement('h2');
+  heading.textContent = 'This document says'; // mirrors the browser's own alert phrasing
+  modal.appendChild(heading);
+  for (const message of messages) {
+    const p = document.createElement('p');
+    p.textContent = message; // textContent — the message is document-authored, never HTML
+    modal.appendChild(p);
+  }
+  const note = document.createElement('p');
+  note.className = 'muted';
+  note.textContent = `From the script on "${fieldName}".`;
+  modal.appendChild(note);
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const ok = document.createElement('button');
+  ok.textContent = 'OK';
+  ok.addEventListener('click', () => modal.close());
+  actions.appendChild(ok);
+  modal.appendChild(actions);
+  modal.showModal();
+  ok.focus();
+}
+
 async function applyForms() {
   const values = {};
+  // Start from the model so edits made on the page count even when the panel was never opened,
+  // then let the panel's own inputs win for anything currently shown there.
+  for (const f of state.formFields ?? []) {
+    if (f.readOnly || f.type === 'button') continue;
+    values[f.name] = f.value ?? '';
+  }
   for (const input of $('forms-list').querySelectorAll('[data-field]')) {
     if (input.disabled) continue;
     if (input.type === 'checkbox') {
@@ -2030,8 +2142,10 @@ const OPTION_TYPES = new Set(['dropdown', 'radio']);
 function updateFieldTypeRows() {
   const type = $('field-type').value;
   $('field-options-row').hidden = !OPTION_TYPES.has(type);
-  $('field-caption-row').hidden = type !== 'button';
-  $('field-script-row').hidden = type !== 'button';
+  $('field-caption-row').hidden = type !== 'button'; // only a push button has a visible label
+  // Every field type can carry a script: a button's goes on its /A activation action, everything
+  // else's on the widget's /AA /U (mouse-up). So this row applies to all of them.
+  $('field-script-row').hidden = false;
 }
 
 /** Enters "place a field" mode: the next box drawn on a page becomes a new form field. */
@@ -2052,7 +2166,7 @@ function beginPlaceField() {
   state.pendingField = {
     fieldType, name: $('field-name').value.trim(), options,
     caption: fieldType === 'button' ? $('field-caption').value.trim() : '',
-    script: fieldType === 'button' ? $('field-script').value : '',
+    script: $('field-script').value,
   };
   state.tool = 'field';
   for (const b of document.querySelectorAll('.tool')) b.classList.remove('active');
@@ -2074,11 +2188,20 @@ async function placeField(region) {
       caption: pf.caption || undefined, script: pf.script || undefined,
       pdfPassword: state.password,
     });
-    // A button carrying a script is deliberately-authored active content — keep it on save.
+    // A button carrying a script is deliberately-authored active content — keep it on save, and
+    // say so explicitly (rather than only lighting up the badge a moment later) so the user isn't
+    // surprised the JavaScript survives the save (#22).
     if (pf.script) state.keepActiveContent = true;
     setTool('select');
-    await applyResult(result.pdf, `${FIELD_LABELS[pf.fieldType] ?? 'Field'} added.`);
-    openForms(); // show the updated field list (and let them add another)
+    const message = pf.script
+      ? `${FIELD_LABELS[pf.fieldType] ?? 'Field'} added — its JavaScript will be kept when you save.`
+      : `${FIELD_LABELS[pf.fieldType] ?? 'Field'} added.`;
+    // Refresh the document and the field list *before* toasting: openForms() drives its own
+    // "Reading form fields…" status while it fetches, which would otherwise stomp the toast
+    // if shown first.
+    await loadDocument(base64ToBytes(result.pdf), null, { pushHistory: true });
+    await openForms(); // show the updated field list (and let them add another)
+    toast(message);
   } catch (e) {
     fail(e);
   }
@@ -2518,7 +2641,77 @@ function drawFormFields() {
   }
 }
 
-/** Outlines each form field on one page so empty/borderless fields are visible; hover shows value. */
+/**
+ * Builds the real, editable control for a field so it can be filled in place on the page — the
+ * way a native PDF viewer presents it — rather than only from the side panel. Returns null for a
+ * type with no on-page control.
+ */
+function fieldControl(field) {
+  if (field.type === 'button') {
+    // Left deliberately empty and transparent: the page image already draws the button's own
+    // appearance stream (its caption, border and fill), so this only needs to catch the click.
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'field-input field-input-button';
+    button.setAttribute('aria-label', field.name || 'Button');
+    button.title = field.script ? "Runs this button's script" : 'This button has no script attached';
+    button.addEventListener('click', (e) => { e.stopPropagation(); runFormButtonScript(field); });
+    return button;
+  }
+
+  let input;
+  if (field.type === 'checkbox') {
+    input = document.createElement('input');
+    input.type = 'checkbox';
+    input.dataset.on = (field.options || []).find((o) => o && o !== 'Off') || 'Yes';
+    input.checked = !!field.value && field.value !== 'Off';
+  } else if ((field.type === 'choice' || field.type === 'radio') && field.options?.length) {
+    input = document.createElement('select');
+    for (const o of field.options.filter((o) => field.type !== 'radio' || o !== 'Off')) {
+      const opt = document.createElement('option');
+      opt.value = o;
+      opt.textContent = o;
+      input.appendChild(opt);
+    }
+    input.value = field.value;
+  } else {
+    input = document.createElement('input');
+    input.type = 'text';
+    input.value = field.value ?? '';
+  }
+  input.className = 'field-input';
+  input.dataset.pageField = field.name;
+  if (field.readOnly) input.disabled = true;
+  const read = () => (input.type === 'checkbox'
+    ? (input.checked ? (input.dataset.on ?? 'Yes') : 'Off')
+    : input.value);
+  input.addEventListener('input', () => setFieldValue(field.name, read(), input));
+  input.addEventListener('change', () => {
+    setFieldValue(field.name, read(), input);
+    // A field's own script fires on activation in a real reader; mirror that here.
+    if (field.script) runFormButtonScript(field);
+  });
+  input.addEventListener('click', (e) => e.stopPropagation()); // don't start a page-tool drag
+  return input;
+}
+
+/**
+ * Records a field's new value and mirrors it into whichever of the two views didn't originate it
+ * (the on-page control and the side panel's row), so both always agree and Apply sees the edit
+ * regardless of where it was made.
+ */
+function setFieldValue(name, value, source) {
+  const field = (state.formFields ?? []).find((f) => f.name === name);
+  if (field) field.value = value;
+  for (const el of document.querySelectorAll(
+    `[data-page-field="${CSS.escape(name)}"], #forms-list [data-field="${CSS.escape(name)}"]`)) {
+    if (el === source) continue;
+    if (el.type === 'checkbox') el.checked = !!value && value !== 'Off';
+    else el.value = value;
+  }
+}
+
+/** Renders each form field on one page as an editable control positioned over the page image. */
 function buildFieldLayer(pe, pageNum) {
   pe.wrap.querySelector('.field-layer')?.remove();
   const fields = (state.formFields ?? []).filter((f) => f.page === pageNum && f.width > 0 && f.height > 0);
@@ -2535,9 +2728,10 @@ function buildFieldLayer(pe, pageNum) {
     tag.className = 'field-tag';
     tag.textContent = FIELD_ICONS[field.type] ?? '▭';
     marker.appendChild(tag);
+    const control = fieldControl(field);
+    if (control) marker.appendChild(control);
     marker.addEventListener('mouseenter', () => showFieldPopup(marker, field));
     marker.addEventListener('mouseleave', hideLinkPopup);
-    marker.addEventListener('click', () => openForms()); // jump to the fill panel
     layer.appendChild(marker);
   }
   pe.wrap.insertBefore(layer, pe.overlay); // above the text/link layers, below the tool overlay
@@ -2824,6 +3018,7 @@ function wire() {
   $('forms-cancel').addEventListener('click', () => hidePanels());
   $('field-place').addEventListener('click', beginPlaceField);
   $('field-type').addEventListener('change', updateFieldTypeRows);
+  updateFieldTypeRows(); // sync the type-specific rows to the initial selection, not just on change
   enableCodeEditorTab($('field-script'));
 
   $('btn-organize').addEventListener('click', openOrganize);

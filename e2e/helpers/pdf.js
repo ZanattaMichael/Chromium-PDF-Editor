@@ -118,6 +118,34 @@ function buildFormPdf(fieldName = 'fullName', value = '') {
   ]);
 }
 
+/**
+ * A single-page AcroForm with two number text fields ("a", "b"), an empty "total" text field, and
+ * a push-button field whose click action runs a calculation script summing "a" and "b" into
+ * "total". Regression fixture for the viewer's in-panel button-script simulation (#18): the
+ * button carries real PDF JavaScript, and clicking its "Run" control in the Forms panel should
+ * update "total" without a round trip to Acrobat/Chrome.
+ */
+function buildFormWithButtonScriptPdf(script) {
+  const calc = script ??
+    'this.getField("total").value = this.getField("a").value + this.getField("b").value;';
+  return assemble([
+    `<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R 6 0 R 7 0 R 8 0 R] ` +
+      `/DA (/Helv 0 Tf 0 g) /NeedAppearances true >> >>`, // 1
+    `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`, // 2
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Annots [5 0 R 6 0 R 7 0 R 8 0 R] ` +
+      `/Resources << /Font << /Helv 4 0 R >> >> >>`, // 3
+    `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`, // 4
+    `<< /FT /Tx /T (a) /V (2) /Type /Annot /Subtype /Widget ` +
+      `/Rect [100 700 180 724] /P 3 0 R /DA (/Helv 12 Tf 0 g) >>`, // 5
+    `<< /FT /Tx /T (b) /V (3) /Type /Annot /Subtype /Widget ` +
+      `/Rect [200 700 280 724] /P 3 0 R /DA (/Helv 12 Tf 0 g) >>`, // 6
+    `<< /FT /Tx /T (total) /V () /Type /Annot /Subtype /Widget ` +
+      `/Rect [300 700 380 724] /P 3 0 R /DA (/Helv 12 Tf 0 g) >>`, // 7
+    `<< /FT /Btn /Ff 65536 /T (calc) /Type /Annot /Subtype /Widget /MK << /CA (Calculate) >> ` +
+      `/Rect [400 700 480 724] /P 3 0 R /DA (/Helv 12 Tf 0 g) /A << /S /JavaScript /JS (${calc}) >> >>`, // 8
+  ]);
+}
+
 /** A single-page document that runs JavaScript on open (document-level active content). */
 function buildJavaScriptPdf(script = "app.alert('hello from the pdf');") {
   const content = 'BT /F1 18 Tf 72 700 Td (Has script) Tj ET';
@@ -192,6 +220,6 @@ function buildJsLinkPdf(script = 'window.close();') {
 }
 
 module.exports = {
-  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildJavaScriptPdf, buildLinkPdf, buildJsLinkPdf,
-  buildLinkOnPage2Pdf, buildLinkOverTextPdf,
+  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildFormWithButtonScriptPdf, buildJavaScriptPdf,
+  buildLinkPdf, buildJsLinkPdf, buildLinkOnPage2Pdf, buildLinkOverTextPdf,
 };

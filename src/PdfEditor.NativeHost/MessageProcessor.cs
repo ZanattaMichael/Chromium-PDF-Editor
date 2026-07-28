@@ -198,7 +198,7 @@ public static class MessageProcessor
             fields = fields.Select(f => new
             {
                 name = f.Name, type = f.Type, value = f.Value, options = f.Options, readOnly = f.ReadOnly,
-                page = f.Page, x = f.X, y = f.Y, width = f.Width, height = f.Height
+                page = f.Page, x = f.X, y = f.Y, width = f.Width, height = f.Height, script = f.Script
             })
         };
     }
@@ -217,21 +217,23 @@ public static class MessageProcessor
         var region = Region(p[RegionKey]!.AsObject());
         string type = p["fieldType"]?.GetValue<string>() ?? "text";
         string? name = p["name"]?.GetValue<string>();
+        string? script = p["script"]?.GetValue<string>();
         var result = type switch
         {
-            "checkbox" => FormTools.AddCheckbox(Pdf(p), region.Page, region, name, password: Password(p)),
+            "checkbox" => FormTools.AddCheckbox(Pdf(p), region.Page, region, name,
+                password: Password(p), script: script),
             "dropdown" => FormTools.AddDropdown(Pdf(p), region.Page, region, name,
                 (p["options"]?.AsArray() ?? new JsonArray()).Select(o => o!.GetValue<string>()).ToList(),
-                Password(p)),
+                Password(p), script),
             "radio" or "option" => FormTools.AddRadioGroup(Pdf(p), region.Page, region, name,
                 (p["options"]?.AsArray() ?? new JsonArray()).Select(o => o!.GetValue<string>()).ToList(),
-                Password(p)),
+                Password(p), script),
             "multiline" => FormTools.AddTextField(Pdf(p), region.Page, region, name,
-                p["value"]?.GetValue<string>(), Password(p), multiline: true),
+                p["value"]?.GetValue<string>(), Password(p), multiline: true, script: script),
             "button" => FormTools.AddButton(Pdf(p), region.Page, region, name,
-                p["caption"]?.GetValue<string>(), p["script"]?.GetValue<string>(), Password(p)),
+                p["caption"]?.GetValue<string>(), script, Password(p)),
             _ => FormTools.AddTextField(Pdf(p), region.Page, region, name,
-                p["value"]?.GetValue<string>(), Password(p)),
+                p["value"]?.GetValue<string>(), Password(p), script: script),
         };
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }

@@ -245,6 +245,8 @@ public class NewActionsTests
         var field = Assert.Single(Result(list)["fields"]!.AsArray());
         Assert.Equal("go", field!["name"]!.GetValue<string>());
         Assert.Equal("button", field["type"]!.GetValue<string>());
+        // The click script round-trips through form-fields so the viewer can simulate it (#18).
+        Assert.Equal("app.alert('clicked');", field["script"]!.GetValue<string>());
     }
 
     [Fact]

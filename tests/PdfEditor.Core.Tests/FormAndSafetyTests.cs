@@ -250,6 +250,77 @@ public class FormToolsTests
     }
 
     [Fact]
+    public void AddButton_WithScript_ListFields_ExposesTheScript()
+    {
+        // The Fill Form panel needs the button's click script to simulate it in-viewer (#18).
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+
+        var result = FormTools.AddButton(pdf, 1, new RectRegion(1, 100, 500, 80, 24), "calc", "Calculate",
+            "this.getField(\"total\").value = this.getField(\"a\").value;");
+
+        var field = Assert.Single(FormTools.ListFields(result.Pdf));
+        Assert.Equal("button", field.Type);
+        Assert.Equal("this.getField(\"total\").value = this.getField(\"a\").value;", field.Script);
+    }
+
+    [Fact]
+    public void AddButton_WithoutScript_ListFields_ScriptIsNull()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+
+        var result = FormTools.AddButton(pdf, 1, new RectRegion(1, 100, 500, 80, 24), "noop", "OK");
+
+        Assert.Null(Assert.Single(FormTools.ListFields(result.Pdf)).Script);
+    }
+
+    [Fact]
+    public void ListFields_NonButtonFields_HaveNoScript()
+    {
+        byte[] pdf = TestPdfs.WithTextField("fullName", "Jane");
+        Assert.Null(Assert.Single(FormTools.ListFields(pdf)).Script);
+    }
+
+    [Fact]
+    public void AddCheckbox_WithScript_ListFields_ExposesTheScript()
+    {
+        // A non-button field carries its script on the widget's /AA /U (mouse-up) rather than /A,
+        // so this covers the other half of FieldScript's lookup.
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+
+        var result = FormTools.AddCheckbox(pdf, 1, new RectRegion(1, 100, 500, 20, 20), "agree",
+            script: "this.getField(\"total\").value = 1;");
+
+        var field = Assert.Single(FormTools.ListFields(result.Pdf));
+        Assert.Equal("checkbox", field.Type);
+        Assert.Equal("this.getField(\"total\").value = 1;", field.Script);
+    }
+
+    [Fact]
+    public void AddTextField_WithScript_ListFields_ExposesTheScript()
+    {
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+
+        var result = FormTools.AddTextField(pdf, 1, new RectRegion(1, 100, 500, 120, 24), "qty",
+            script: "this.getField(\"total\").value = 2;");
+
+        Assert.Equal("this.getField(\"total\").value = 2;",
+            Assert.Single(FormTools.ListFields(result.Pdf)).Script);
+    }
+
+    [Fact]
+    public void AddCheckbox_WithScript_IsFlaggedAsActiveContent()
+    {
+        // The safety scan must treat a field-level script as active content, exactly like a
+        // document-level one -- otherwise a scripted form opens with no warning at all.
+        byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));
+
+        var result = FormTools.AddCheckbox(pdf, 1, new RectRegion(1, 100, 500, 20, 20), "agree",
+            script: "app.alert('hi');");
+
+        Assert.True(PdfSafety.Scan(result.Pdf).HasJavaScript);
+    }
+
+    [Fact]
     public void AddCheckbox_DefaultsToUnchecked_AndCanBeCheckedByFilling()
     {
         byte[] pdf = TestPdfs.WithText(("plain page", 72, 700, 12));

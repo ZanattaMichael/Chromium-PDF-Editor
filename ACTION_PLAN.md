@@ -8,6 +8,27 @@ other enhancements, and (4) larger feature/quality investments.
 
 _Generated 2026-07-28. Source: 40 open issues (#17–#56) on `zanattamichael/chromium-pdf-editor`._
 
+## Progress
+
+**Tier 0 is complete.** #18 + #22 (PR #59), #20 + #21 (PR #68), #24 (PR #67) are all merged.
+
+**Tier 2 is in flight:** #52 (PR #75) and #54 (PR #76) are open for review; #53 is
+sequenced after #52 so it can assert with that validator rather than reinventing one.
+
+Issues raised by this work, not in the original 40: **#72** (bare `catch {}` hides
+render failures), **#74** (ban interpolated `innerHTML` in `extension/src`). A
+client-side XSS found by the new code scanning was fixed in #73.
+
+Two corrections to the sequencing below, learned in practice:
+
+- **#52 should come before #53 and #54, not alongside them.** It produces the
+  structural validator both of the others want as their assertion oracle.
+- **"A corpus of tricky real-world PDFs" (#53) has to mean synthetic ones.** There is
+  no network access in the working environment, and real-world files carry licensing
+  questions. `tests/PdfEditor.Core.Tests/CorruptPdfs.cs` (from #52) and
+  `tests/PdfEditor.Core.Tests/Fuzz/RawPdf.cs` (from #54) already construct malformed
+  and awkward-but-valid documents byte by byte; #53 should build on those.
+
 ## Tier 0 — Critical correctness bugs (fix first)
 
 These break core, everyday functionality and should be fixed before new features are

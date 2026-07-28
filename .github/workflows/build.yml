@@ -50,7 +50,7 @@ jobs:
           ./.sonar/scanner/dotnet-sonarscanner begin
           /k:"ZanattaMichael_Chromium-PDF-Editor"
           /o:"zanattamichael"
-          /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
+          /d:sonar.token="$SONAR_TOKEN"
           /d:sonar.host.url="https://sonarcloud.io"
           /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,coverage-report/**,coverage-results/**,coverage-sonar/**,dist/**,e2e/test-results/**,e2e/playwright-report/**"
           /d:sonar.cs.opencover.reportsPaths="coverage-sonar/**/coverage.opencover.xml"
@@ -67,4 +67,4 @@ jobs:
       - name: End SonarQube analysis
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: ./.sonar/scanner/dotnet-sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
+        run: ./.sonar/scanner/dotnet-sonarscanner end /d:sonar.token="$SONAR_TOKEN"

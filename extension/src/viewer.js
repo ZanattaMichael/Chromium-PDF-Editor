@@ -207,6 +207,17 @@ async function loadDocument(bytes, fileName, { pushHistory = false, password } =
   state.urlVerdicts = [];
   state.formFields = [];
   const freshOpen = !!fileName; // only warn about active content when a document is first opened
+  if (freshOpen) {
+    // A panel left open across an Open must not keep showing the PREVIOUS document's data (#24).
+    // state.links backs the Links list and was never cleared here, and openLinks()/openForms()
+    // only refetch when the panel is (re)opened — so a panel already on screen kept the old rows.
+    // Drop the stale lists (model and DOM) and close the panel; reopening it fetches for the new
+    // document. Guarded on freshOpen so an edit/undo reload never closes the panel being worked in.
+    state.links = [];
+    state.scripts = [];
+    renderLinks();
+    hidePanels();
+  }
   await showDocument();
   updateChrome();
   Promise.all([refreshSignatures(), refreshSafety()]).then(() => {

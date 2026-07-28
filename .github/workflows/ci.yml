@@ -13,6 +13,11 @@ jobs:
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: "8.0.x"
+      - name: Install Tesseract OCR
+        # The OCR tests (and the #20/#21 page-geometry regression guards) no-op when the
+        # `tesseract` binary is absent, so without this they pass without executing anything --
+        # leaving OcrTool.cs at 0% coverage on new code and the regressions unguarded in CI.
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
       - name: Build
         run: dotnet build --configuration Release
       - name: Test with coverage (gated at 90% line coverage)

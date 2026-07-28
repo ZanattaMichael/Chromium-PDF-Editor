@@ -79,6 +79,34 @@ public static class TestPdfs
     }
 
     /// <summary>
+    /// A "scan": one page whose entire surface is a JPEG (DCTDecode) photo of some text — the
+    /// shape of document people actually run OCR over.
+    /// </summary>
+    public static byte[] JpegScan(string text = "HELLO OCR")
+    {
+        const int pixelWidth = 1240, pixelHeight = 1754; // A4 at ~150 dpi
+        using var bitmap = new SKBitmap(pixelWidth, pixelHeight);
+        using (var c = new SKCanvas(bitmap))
+        {
+            c.Clear(SKColors.White);
+            using var paint = new SKPaint { Color = SKColors.Black, IsAntialias = true };
+            using var font = new SKFont(SKTypeface.Default, 96);
+            c.DrawText(text, 120, 400, SKTextAlign.Left, font, paint);
+        }
+        using var image = SKImage.FromBitmap(bitmap);
+        byte[] jpeg = image.Encode(SKEncodedImageFormat.Jpeg, 85).ToArray();
+
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            new PdfCanvas(page).AddImageFittedIntoRectangle(ImageDataFactory.Create(jpeg),
+                new Rectangle(0, 0, PageWidth, PageHeight), false);
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>
     /// A page with a solid blue square drawn as a genuine inline (BI/ID/EI) image. iText's
     /// canvas API has no high-level method that reliably emits BI/ID/EI (its "asInline"
     /// flag on AddImageFittedIntoRectangle still emits a Do-based XObject in this version),

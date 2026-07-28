@@ -1452,6 +1452,8 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const file = fixture('ocr.pdf', [[{ text: 'Scanned document', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
 
+    const before = await page.locator('.page').first().boundingBox();
+
     await ui(page, '#btn-ocr');
     // Deterministic across environments: OCR either succeeds (status confirms "searchable") or,
     // when Tesseract is not installed, an in-app note naming it appears — never a silent failure.
@@ -1461,6 +1463,20 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
       if (/searchable/i.test((await page.locator('#status').textContent()) || '')) return 'done';
       return 'pending';
     }, { timeout: 60000 }).not.toBe('pending');
+
+    // Issue #21: where OCR did run, the searchable copy must occupy the same page geometry, so
+    // the page is laid out at the same on-screen size — not blown up several times over.
+    if (/searchable/i.test((await page.locator('#status').textContent()) || '')) {
+      const after = await page.locator('.page').first().boundingBox();
+      expect(Math.abs(after.width - before.width)).toBeLessThan(2);
+      expect(Math.abs(after.height - before.height)).toBeLessThan(2);
+      // Issue #20: and it is still viewable — the page image renders rather than falling back
+      // to a blank placeholder.
+      await expect.poll(
+        async () => page.locator('.page').first().locator('img.page-image').evaluate((i) => i.naturalWidth),
+        { timeout: 30000 },
+      ).toBeGreaterThan(0);
+    }
     await page.close();
   });
 

@@ -169,13 +169,16 @@ jobs:
           REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
         run: |
           zip_path=$(ls dist/*.zip | head -1)
-          npx --yes chrome-webstore-upload-cli@3.3.2 upload \
+          # Install the pinned version explicitly (--ignore-scripts: it has no install-time
+          # work to do), then invoke it with --no-install so npx never fetches on demand.
+          npm install --no-save --ignore-scripts chrome-webstore-upload-cli@3.3.2
+          npx --no-install chrome-webstore-upload-cli upload \
             --source "$zip_path" \
             --extension-id "$EXTENSION_ID" \
             --client-id "$CLIENT_ID" \
             --client-secret "$CLIENT_SECRET" \
             --refresh-token "$REFRESH_TOKEN"
-          npx --yes chrome-webstore-upload-cli@3.3.2 publish \
+          npx --no-install chrome-webstore-upload-cli publish \
             --extension-id "$EXTENSION_ID" \
             --client-id "$CLIENT_ID" \
             --client-secret "$CLIENT_SECRET" \

@@ -101,9 +101,9 @@ extract_tag() {
 resolve_tag() {
   local repo="$1" tag
   if [[ -n "$TAG_OVERRIDE" ]]; then echo "$TAG_OVERRIDE"; return; fi
-  tag="$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null | extract_tag || true)"
+  tag="$(curl -fsSL --proto '=https' --proto-redir '=https' "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null | extract_tag || true)"
   if [[ -z "$tag" ]]; then
-    tag="$(curl -fsSL "https://api.github.com/repos/$repo/releases?per_page=1" 2>/dev/null | extract_tag || true)"
+    tag="$(curl -fsSL --proto '=https' --proto-redir '=https' "https://api.github.com/repos/$repo/releases?per_page=1" 2>/dev/null | extract_tag || true)"
   fi
   if [[ -z "$tag" ]]; then
     echo "error: could not determine the latest release tag for $repo — pass --tag <vX.Y.Z>" >&2
@@ -164,7 +164,7 @@ else
   echo "Downloading prebuilt bundle $TAG ($RID) from $REPO..."
   TMP="$(mktemp -d)"
   trap 'rm -rf "$TMP"' EXIT
-  if ! curl -fSL -o "$TMP/bundle.zip" "$URL"; then
+  if ! curl -fSL --proto '=https' --proto-redir '=https' -o "$TMP/bundle.zip" "$URL"; then
     echo "error: could not download $URL" >&2
     echo "       That release may not have a $RID bundle yet. Try --from-source, or --tag/--repo." >&2
     exit 1

@@ -33,7 +33,7 @@ body { display: flex; }
   border-bottom: 1px solid #222;
 }
 
-.group { display: flex; gap: 4px; align-items: center; }
+.group { display: flex; gap: 4px; align-items: center; margin: 0; padding: 0; border: none; min-width: 0; }
 
 /* Vertical divider between toolbar groups. */
 .sep {
@@ -132,14 +132,12 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 0 10px;
+  padding: 5px 10px;
   background: var(--surface);
   border-bottom: 1px solid #222;
 }
-#badge-bar:has(#badges:empty) { display: none; }
+#badge-bar:has(#badges:empty) { display: none; padding: 0; border-bottom: none; }
 #badge-bar #badges .badge:first-child { margin-left: 0; }
-#badge-bar { padding-top: 5px; padding-bottom: 5px; }
-#badge-bar:has(#badges:empty) { padding: 0; border-bottom: none; }
 
 /* -------------------------------------------------------------- workspace */
 #workspace { flex: 1; display: flex; min-height: 0; }
@@ -511,10 +509,10 @@ select {
 .compare-page .organize-label { flex-direction: column; }
 .compare-words { font-size: 12px; word-break: break-word; }
 .compare-words .w-add {
-  background: rgba(47, 158, 68, 0.28); color: #d7f5dd; border-radius: 3px; padding: 0 3px; margin: 0 2px 2px 0; display: inline-block;
+  background: rgba(26, 94, 44, 0.85); color: #fff; border-radius: 3px; padding: 0 3px; margin: 0 2px 2px 0; display: inline-block;
 }
 .compare-words .w-del {
-  background: rgba(229, 72, 77, 0.28); color: #ffd7d9; border-radius: 3px; padding: 0 3px; margin: 0 2px 2px 0; display: inline-block; text-decoration: line-through;
+  background: rgba(170, 38, 42, 0.85); color: #fff; border-radius: 3px; padding: 0 3px; margin: 0 2px 2px 0; display: inline-block; text-decoration: line-through;
 }
 .compare-page-num { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 

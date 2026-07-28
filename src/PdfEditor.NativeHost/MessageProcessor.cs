@@ -11,7 +11,7 @@ namespace PdfEditor.NativeHost;
 /// native-messaging outgoing limit are split into chunk frames that the extension's
 /// background worker reassembles.
 /// </summary>
-public sealed class MessageProcessor
+public static class MessageProcessor
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

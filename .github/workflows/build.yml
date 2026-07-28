@@ -47,6 +47,7 @@ jobs:
           /o:"zanattamichael"
           /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
           /d:sonar.host.url="https://sonarcloud.io"
+          /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,coverage-report/**,coverage-results/**,dist/**,e2e/test-results/**,e2e/playwright-report/**"
       - name: Build
         run: dotnet build --configuration Release
       - name: End SonarQube analysis

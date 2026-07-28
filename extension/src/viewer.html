@@ -8,7 +8,7 @@
 <body>
   <header id="toolbar">
     <!-- Always-visible essentials: open/save/print, history, and the default hand tool. -->
-    <div class="group" role="group" aria-label="Document">
+    <fieldset class="group" aria-label="Document">
       <button id="btn-sidebar" title="Toggle the page thumbnails sidebar" disabled>☰</button>
       <button id="btn-open" title="Open a PDF file">📂 Open</button>
       <button id="btn-save" title="Save the edited PDF" disabled>💾 Save</button>
@@ -16,7 +16,7 @@
       <button id="btn-undo" title="Undo last change" disabled>↩</button>
       <button id="btn-redo" title="Redo last undone change" disabled>↪</button>
       <button id="tool-select" class="tool active" title="Pan / select text">🖐</button>
-    </div>
+    </fieldset>
     <span class="sep" aria-hidden="true"></span>
 
     <!-- Reading tools: inspect and fill, without changing the page content. -->
@@ -65,25 +65,25 @@
     </div>
 
     <!-- Navigation + zoom (pushed to the right) -->
-    <div class="group" id="nav" role="group" aria-label="Navigation">
+    <fieldset class="group" id="nav" aria-label="Navigation">
       <button id="btn-prev" title="Previous page" disabled>◀</button>
       <span id="page-counter">
         <input id="page-input" type="text" inputmode="numeric" value="–" disabled
-          title="Type a page number and press Enter" /> / <span id="page-total">–</span>
+          title="Type a page number and press Enter" aria-label="Page number" /> / <span id="page-total">–</span>
       </span>
       <button id="btn-next" title="Next page" disabled>▶</button>
       <span class="sep" aria-hidden="true"></span>
       <button id="btn-zoom-out" title="Zoom out" disabled>−</button>
       <span id="zoom-label">100%</span>
       <button id="btn-zoom-in" title="Zoom in" disabled>＋</button>
-    </div>
+    </fieldset>
   </header>
 
   <!-- Document status (encryption, JavaScript, links, signatures) sits directly under the menu. -->
   <div id="badge-bar"><span id="badges"></span></div>
 
   <main id="workspace">
-    <aside id="thumbnails" hidden></aside>
+    <aside id="thumbnails" aria-label="Page thumbnails" hidden></aside>
     <div id="scroll-area">
       <div id="pages"></div>
       <div id="empty-state">
@@ -94,13 +94,13 @@
       </div>
     </div>
 
-    <aside id="panel" hidden>
+    <aside id="panel" aria-label="Editing panel" hidden>
       <div id="panel-redact" class="panel-section" hidden>
         <h2>Redact</h2>
         <p class="muted">Drag boxes over content, or search for text to mark every match. Content
           behind each box is <strong>permanently removed</strong> when applied.</p>
         <div id="redact-search">
-          <input id="redact-search-text" type="text" placeholder="Find text to redact…" />
+          <input id="redact-search-text" type="text" placeholder="Find text to redact…" aria-label="Text to redact" />
           <button id="redact-search-btn">🔍 Find &amp; mark</button>
         </div>
         <ul id="redact-list"></ul>
@@ -233,7 +233,7 @@
       <div id="panel-edit" class="panel-section" hidden>
         <h2 id="edit-title">Edit text</h2>
         <p class="muted" id="edit-hint">Text found in the selected region:</p>
-        <textarea id="edit-text" rows="5"></textarea>
+        <textarea id="edit-text" rows="5" aria-labelledby="edit-hint"></textarea>
         <label>Font
           <select id="edit-font">
             <option value="helvetica">Helvetica (sans-serif)</option>
@@ -264,7 +264,7 @@
           <button id="sign-pad-clear">Clear pad</button>
         </div>
         <div id="sign-upload" hidden>
-          <input id="sign-file" type="file" accept="image/png,image/jpeg" />
+          <input id="sign-file" type="file" accept="image/png,image/jpeg" aria-label="Upload signature image" />
         </div>
         <div class="actions">
           <button id="sign-apply">Place signature</button>
@@ -309,11 +309,11 @@
   </dialog>
 
   <dialog id="modal"></dialog>
-  <input id="file-input" type="file" accept="application/pdf" hidden />
-  <input id="merge-input" type="file" multiple hidden
+  <input id="file-input" type="file" accept="application/pdf" aria-label="Open PDF file" hidden />
+  <input id="merge-input" type="file" multiple hidden aria-label="Files to merge"
     accept="application/pdf,.pdf,image/png,image/jpeg,image/*,.docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
-  <input id="pfx-input" type="file" accept=".p12,.pfx" hidden />
-  <input id="compare-input" type="file" accept="application/pdf,.pdf" hidden />
+  <input id="pfx-input" type="file" accept=".p12,.pfx" aria-label="Certificate file (.p12 or .pfx)" hidden />
+  <input id="compare-input" type="file" accept="application/pdf,.pdf" aria-label="PDF to compare" hidden />
 
   <script type="module" src="viewer.js"></script>
 </body>

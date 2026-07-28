@@ -54,13 +54,17 @@ jobs:
           node-version: "22"
       - name: Install e2e dependencies
         working-directory: e2e
-        run: npm ci
+        # --ignore-scripts: @playwright/test's postinstall would try to download browsers
+        # itself; the dedicated "Install Playwright Chromium" step below does that instead.
+        run: npm ci --ignore-scripts
       - name: Install Playwright Chromium
         working-directory: e2e
-        run: npx playwright install --with-deps chromium
+        # --no-install: the exact pinned version was just installed by `npm ci` above, so
+        # this must resolve to that local binary and never fetch anything from the registry.
+        run: npx --no-install playwright@1.61.1 install --with-deps chromium
       - name: Run Playwright suite (extension + native host)
         working-directory: e2e
-        run: npx playwright test
+        run: npx --no-install playwright@1.61.1 test
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:

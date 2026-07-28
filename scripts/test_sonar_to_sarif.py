@@ -13,7 +13,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from sonar_to_sarif import convert, load_issues, region, relative_path, sarif_level  # noqa: E402
+from sonar_to_sarif import (convert, load_issues, region, relative_path,  # noqa: E402
+                            safe_path, sarif_level)
 
 PROJECT = "ZanattaMichael_Chromium-PDF-Editor"
 
@@ -136,6 +137,26 @@ class ConvertTests(unittest.TestCase):
 
     def test_is_json_serialisable(self):
         json.dumps(convert(self.sample(), PROJECT))
+
+
+class SafePathTests(unittest.TestCase):
+    def test_accepts_a_path_inside_the_working_tree(self):
+        self.assertEqual(safe_path("sonar.sarif"), Path.cwd().resolve() / "sonar.sarif")
+
+    def test_rejects_a_traversal_out_of_the_working_tree(self):
+        with self.assertRaises(SystemExit):
+            safe_path("../../etc/passwd")
+
+    def test_rejects_an_absolute_path_elsewhere(self):
+        with self.assertRaises(SystemExit):
+            safe_path("/etc/passwd")
+
+    def test_rejects_a_missing_file_when_existence_is_required(self):
+        with self.assertRaises(SystemExit):
+            safe_path("definitely-not-here.json", must_exist=True)
+
+    def test_accepts_a_real_file_when_existence_is_required(self):
+        self.assertTrue(safe_path(__file__, must_exist=True).is_file())
 
 
 class LoadIssuesTests(unittest.TestCase):

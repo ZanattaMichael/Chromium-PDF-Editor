@@ -33,6 +33,23 @@ MAX_ISSUES = 10_000      # the API refuses paging past this
 SETTLED = {"SUCCESS", "FAILED", "CANCELED", "CANCELLED"}
 
 
+def safe_path(value: str, *, must_exist: bool = False) -> Path:
+    """Resolve a caller-supplied path, refusing anything outside the working tree.
+
+    These scripts only ever read and write artefacts inside the checkout, so a path that escapes
+    it (`../../etc/passwd`) is always a mistake or an attack rather than a legitimate use. Anchor
+    to the working directory and reject the rest, instead of trusting whatever the CLI was given.
+    """
+    base = Path.cwd().resolve()
+    candidate = Path(value)
+    candidate = candidate.resolve() if candidate.is_absolute() else (base / candidate).resolve()
+    if not candidate.is_relative_to(base):
+        raise SystemExit(f"error: refusing a path outside {base}: {value}")
+    if must_exist and not candidate.is_file():
+        raise SystemExit(f"error: no such file: {value}")
+    return candidate
+
+
 def read_report_task(path: Path) -> dict[str, str]:
     """Parse the scanner's report-task.txt (key=value per line), searching if it moved."""
     if not path.exists():
@@ -42,7 +59,7 @@ def read_report_task(path: Path) -> dict[str, str]:
         path = found[0]
         print(f"note: using {path}", file=sys.stderr)
     values: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in safe_path(str(path), must_exist=True).read_text(encoding="utf-8").splitlines():
         key, sep, value = line.partition("=")
         if sep:
             values[key.strip()] = value.strip()
@@ -127,7 +144,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"error: analysis finished with status {status}")
 
     issues = fetch_issues(base_url, project_key, token, args.pull_request, args.branch)
-    Path(args.output).write_text(json.dumps({"issues": issues}, indent=2), encoding="utf-8")
+    safe_path(args.output).write_text(
+        json.dumps({"issues": issues}, indent=2), encoding="utf-8")
     print(f"Fetched {len(issues)} unresolved issue(s) -> {args.output}", file=sys.stderr)
 
     # Hand the project key on so the converter can strip it off component keys.

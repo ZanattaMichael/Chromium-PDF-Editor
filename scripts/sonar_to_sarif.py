@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Any, Iterable
 
 SARIF_VERSION = "2.1.0"
@@ -90,14 +91,27 @@ def region(issue: dict[str, Any]) -> dict[str, Any] | None:
     start_offset = text_range.get("startOffset")
     if start_offset is not None:
         result["startColumn"] = int(start_offset) + 1
-    end_offset = text_range.get("endOffset")
-    if end_offset is not None:
-        end_column = int(end_offset) + 1
-        # Only meaningful when the range is on one line, or the end is on a later line.
-        if result.get("endLine", result["startLine"]) > result["startLine"] \
-                or end_column >= result.get("startColumn", 1):
-            result["endColumn"] = end_column
+    end_column = _end_column(text_range, result)
+    if end_column is not None:
+        result["endColumn"] = end_column
     return result
+
+
+def _end_column(text_range: dict[str, Any], region_so_far: dict[str, Any]) -> int | None:
+    """The 1-based end column, or None when Sonar gave one that cannot be represented.
+
+    An end that lands before the start on the *same* line is not a valid SARIF region, so it is
+    dropped rather than emitted malformed. Across lines any column is fine.
+    """
+    end_offset = text_range.get("endOffset")
+    if end_offset is None:
+        return None
+    end_column = int(end_offset) + 1
+    start_line = region_so_far["startLine"]
+    spans_lines = region_so_far.get("endLine", start_line) > start_line
+    if spans_lines or end_column >= region_so_far.get("startColumn", 1):
+        return end_column
+    return None
 
 
 def rule_help_uri(rule_key: str, organization: str | None) -> str:
@@ -176,6 +190,23 @@ def load_issues(raw: str) -> list[dict[str, Any]]:
     return list(data)
 
 
+def safe_path(value: str, *, must_exist: bool = False) -> Path:
+    """Resolve a caller-supplied path, refusing anything outside the working tree.
+
+    These scripts only ever read and write artefacts inside the checkout, so a path that escapes
+    it (`../../etc/passwd`) is always a mistake or an attack rather than a legitimate use. Anchor
+    to the working directory and reject the rest, instead of trusting whatever the CLI was given.
+    """
+    base = Path.cwd().resolve()
+    candidate = Path(value)
+    candidate = candidate.resolve() if candidate.is_absolute() else (base / candidate).resolve()
+    if not candidate.is_relative_to(base):
+        raise SystemExit(f"error: refusing a path outside {base}: {value}")
+    if must_exist and not candidate.is_file():
+        raise SystemExit(f"error: no such file: {value}")
+    return candidate
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--issues", required=True,
@@ -185,15 +216,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", default="-", help="SARIF output path, or - for stdout")
     args = parser.parse_args(argv)
 
-    raw = sys.stdin.read() if args.issues == "-" else open(args.issues, encoding="utf-8").read()
+    raw = (sys.stdin.read() if args.issues == "-"
+           else safe_path(args.issues, must_exist=True).read_text(encoding="utf-8"))
     sarif = convert(load_issues(raw), args.project_key, args.organization)
     rendered = json.dumps(sarif, indent=2)
 
     if args.output == "-":
         sys.stdout.write(rendered + "\n")
     else:
-        with open(args.output, "w", encoding="utf-8") as handle:
-            handle.write(rendered + "\n")
+        safe_path(args.output).write_text(rendered + "\n", encoding="utf-8")
     count = len(sarif["runs"][0]["results"])
     print(f"Wrote {count} finding{'' if count == 1 else 's'} to {args.output}", file=sys.stderr)
     return 0

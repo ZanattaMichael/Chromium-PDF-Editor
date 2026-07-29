@@ -1,0 +1,99 @@
+# stream-undecodable-flate
+# Content stream claiming /FlateDecode over plain text (#52's fixture).
+== source ==
+bytes: ~512
+pdf-version: PDF-1.7
+pages: 1
+encrypted: no
+info: has-CreationDate=no has-ModDate=no has-ID=no
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 200 200] crop=none rotate=0 annots=0 group=none
+  text: <empty>
+  ops: <none>
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+acroform: none
+validation: Error/PDF030x1
+== redact ==
+bytes: ~1280
+pdf-version: PDF-1.7
+pages: 1
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 200 200] crop=none rotate=0 annots=0 group=none
+  text: <empty>
+  ops: Qx1 fx1 qx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+acroform: none
+validation: clean
+== rotate-90 ==
+bytes: ~768
+pdf-version: PDF-1.7
+pages: 1
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 200 200] crop=none rotate=90 annots=0 group=none
+  text: <empty>
+  ops: <none>
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+acroform: none
+validation: Error/PDF030x1
+== merge-with-self ==
+bytes: ~1280
+pdf-version: PDF-1.7
+pages: 2
+encrypted: no
+info: has-CreationDate=yes has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 200 200] crop=none rotate=0 annots=0 group=none
+  text: <empty>
+  ops: <none>
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 2: media=[0 0 200 200] crop=none rotate=0 annots=0 group=none
+  text: <empty>
+  ops: <none>
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+acroform: none
+validation: Error/PDF030x2
+== sanitize ==
+bytes: ~1024
+pdf-version: PDF-1.7
+pages: 1
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 200 200] crop=none rotate=0 annots=0 group=none
+  text: <empty>
+  ops: <none>
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+acroform: none
+validation: Error/PDF030x1
+== add-text-field ==
+bytes: ~1792
+pdf-version: PDF-1.7
+pages: 1
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 200 200] crop=none rotate=0 annots=1 group=none
+  text: <empty>
+  ops: <none>
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+acroform: needAppearances=none fields=1
+  field: name=(golden.added) type=Tx value=(filled) hasAppearance=yes
+validation: Error/PDF030x1
+== sign-image ==
+bytes: ~1536
+pdf-version: PDF-1.7
+pages: 1
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 200 200] crop=none rotate=0 annots=0 group=none
+  text: <empty>
+  ops: Dox1 Qx2 cmx1 qx2
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+  xobject Im1: subtype=Image size=24x12 cs=/DeviceRGB bpc=8 filter=/FlateDecode smask=yes mask=no
+acroform: none
+validation: Error/PDF030x1

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using iText.Kernel.Geom;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Xobject;
@@ -47,9 +48,12 @@ internal static class ImageScrubber
             if (!painted) return true;
             canvas.Flush();
 
-            using var image = SKImage.FromBitmap(bitmap);
-            using var encoded = image.Encode(SKEncodedImageFormat.Png, 100);
-            ReplaceWithPng(imageStream, bitmap, encoded.ToArray());
+            byte[]? rgb = ReadRgb(bitmap);
+            // No readable pixels means we cannot prove the scrubbed image is what gets written, so
+            // report failure and let the caller drop the image outright. Failing closed is the only
+            // safe direction here: this is redaction.
+            if (rgb == null) return false;
+            ReplaceWithRgb(imageStream, bitmap.Width, bitmap.Height, rgb);
             return true;
         }
         catch
@@ -58,32 +62,63 @@ internal static class ImageScrubber
         }
     }
 
-    private static void ReplaceWithPng(PdfStream imageStream, SKBitmap bitmap, byte[] png)
+    /// <summary>
+    /// Reads the scrubbed bitmap out as packed 8-bit RGB, the form the PDF stream wants.
+    /// <para>
+    /// One bulk <see cref="SKPixmap.ReadPixels(SKImageInfo, IntPtr, int, int, int)"/> into a pinned
+    /// buffer, then a walk to drop the alpha byte. This used to encode the bitmap to PNG, decode that
+    /// PNG straight back into a second bitmap, and read the copy a pixel at a time through
+    /// <c>GetPixel</c> — one managed-to-native call per pixel, 16.7 million of them on a 4096-square
+    /// image, on top of a PNG compress/decompress round trip whose output was never otherwise used
+    /// (the already-scrubbed bitmap was passed in and ignored). Redacting over a 4096-square image
+    /// took 8.5s because of it, against a 20s fuzz budget it intermittently blew on CI.
+    /// </para>
+    /// <para>
+    /// <see cref="SKAlphaType.Unpremul"/> is requested deliberately: <c>GetPixel</c> returned
+    /// unpremultiplied components, and since the stream written below has no alpha channel, taking
+    /// premultiplied bytes instead would darken every partially transparent pixel toward black.
+    /// </para>
+    /// </summary>
+    /// <returns>Packed RGB, three bytes per pixel; null if the pixels could not be read.</returns>
+    private static byte[]? ReadRgb(SKBitmap bitmap)
+    {
+        int width = bitmap.Width, height = bitmap.Height;
+        var info = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        int rowBytes = info.RowBytes;
+        var rgba = new byte[checked(rowBytes * height)];
+
+        using var pixels = bitmap.PeekPixels();
+        if (pixels == null) return null;
+
+        var pin = GCHandle.Alloc(rgba, GCHandleType.Pinned);
+        try
+        {
+            if (!pixels.ReadPixels(info, pin.AddrOfPinnedObject(), rowBytes, 0, 0)) return null;
+        }
+        finally { pin.Free(); }
+
+        var rgb = new byte[checked(width * height * 3)];
+        for (int src = 0, dst = 0; src < rgba.Length; src += 4)
+        {
+            rgb[dst++] = rgba[src];
+            rgb[dst++] = rgba[src + 1];
+            rgb[dst++] = rgba[src + 2];
+        }
+        return rgb;
+    }
+
+    private static void ReplaceWithRgb(PdfStream imageStream, int width, int height, byte[] rgb)
     {
         // Store as FlateDecoded raw RGB — universally supported and avoids
         // format-specific entries left over from the original image.
-        using var decoded = SKBitmap.Decode(png);
-        var rgb = new byte[decoded.Width * decoded.Height * 3];
-        int p = 0;
-        for (int y = 0; y < decoded.Height; y++)
-        {
-            for (int x = 0; x < decoded.Width; x++)
-            {
-                var c = decoded.GetPixel(x, y);
-                rgb[p++] = c.Red;
-                rgb[p++] = c.Green;
-                rgb[p++] = c.Blue;
-            }
-        }
-
         foreach (var key in imageStream.KeySet().ToArray())
         {
             if (!PdfName.Subtype.Equals(key) && !PdfName.Type.Equals(key))
                 imageStream.Remove(key);
         }
         imageStream.SetData(rgb);
-        imageStream.Put(PdfName.Width, new PdfNumber(decoded.Width));
-        imageStream.Put(PdfName.Height, new PdfNumber(decoded.Height));
+        imageStream.Put(PdfName.Width, new PdfNumber(width));
+        imageStream.Put(PdfName.Height, new PdfNumber(height));
         imageStream.Put(PdfName.ColorSpace, PdfName.DeviceRGB);
         imageStream.Put(PdfName.BitsPerComponent, new PdfNumber(8));
         imageStream.SetModified();

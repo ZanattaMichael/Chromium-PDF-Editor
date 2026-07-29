@@ -9,6 +9,7 @@ info: has-CreationDate=no has-ModDate=no has-ID=no
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 200 200] crop=none rotate=0 annots=0 group=none
   text: <empty>
+  typeset: <no text>
   ops: <none>
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
 acroform: none
@@ -22,8 +23,24 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 200 200] crop=none rotate=0 annots=0 group=none
   text: <empty>
+  typeset: <no text>
   ops: Qx1 fx1 qx1 rex1 rgx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+acroform: none
+validation: clean
+== replace-region-text ==
+bytes: ~1280
+pdf-version: PDF-1.7
+pages: 1
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 200 200] crop=none rotate=0 annots=0 group=none
+  text: replaced copy
+  typeset: Helvetica@12.0
+  ops: BTx1 ETx1 Qx2 Tdx1 Tfx1 Tjx1 qx2
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+  font F2: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
 acroform: none
 validation: clean
 == rotate-90 ==
@@ -35,6 +52,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 200 200] crop=none rotate=90 annots=0 group=none
   text: <empty>
+  typeset: <no text>
   ops: <none>
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
 acroform: none
@@ -48,10 +66,12 @@ info: has-CreationDate=yes has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 200 200] crop=none rotate=0 annots=0 group=none
   text: <empty>
+  typeset: <no text>
   ops: <none>
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
 page 2: media=[0 0 200 200] crop=none rotate=0 annots=0 group=none
   text: <empty>
+  typeset: <no text>
   ops: <none>
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
 acroform: none
@@ -65,6 +85,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 200 200] crop=none rotate=0 annots=0 group=none
   text: <empty>
+  typeset: <no text>
   ops: <none>
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
 acroform: none
@@ -78,6 +99,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 200 200] crop=none rotate=0 annots=1 group=none
   text: <empty>
+  typeset: <no text>
   ops: <none>
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
 acroform: needAppearances=none fields=1
@@ -92,6 +114,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 200 200] crop=none rotate=0 annots=0 group=none
   text: <empty>
+  typeset: <no text>
   ops: Dox1 Qx2 cmx1 qx2
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   xobject Im1: subtype=Image size=24x12 cs=/DeviceRGB bpc=8 filter=/FlateDecode smask=yes mask=no

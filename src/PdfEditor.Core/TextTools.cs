@@ -26,14 +26,18 @@ public static class TextTools
         using var doc = PdfIo.OpenReadOnly(pdf, password);
         var rect = new Rectangle(region.X, region.Y, region.Width, region.Height);
         var chunks = CollectChunks(doc, region.Page).Where(c => ContainsCenter(rect, c.BBox)).ToList();
-        float size = chunks.Count == 0 ? 12f : chunks.Max(c => c.FontHeight);
         string dominantFont = chunks
             .Where(c => !string.IsNullOrEmpty(c.FontName))
-            .GroupBy(c => c.FontName)
+            .GroupBy(c => c.FontName, StringComparer.Ordinal)
             .OrderByDescending(g => g.Count())
             .FirstOrDefault()?.Key ?? "";
+        // Take the size from the run the region is mostly made of, so a single stray large glyph
+        // cannot decide the size for a paragraph — and so size and family describe the same run.
+        var sizing = chunks.Where(c => string.Equals(c.FontName, dominantFont, StringComparison.Ordinal)).ToList();
+        if (sizing.Count == 0) sizing = chunks;
+        float size = sizing.Count == 0 ? 12f : MathF.Round(sizing.Max(c => c.FontSize), 2);
         var (family, bold, italic) = DetectFont(dominantFont);
-        return new RegionText(AssembleText(chunks), size, family, bold, italic);
+        return new RegionText(AssembleText(chunks), size, family, bold, italic, dominantFont);
     }
 
     /// <summary>
@@ -42,14 +46,50 @@ public static class TextTools
     /// size, style, and colour (all optional — omitted values fall back to what was there).
     /// </summary>
     public static EditResult ReplaceTextInRegion(byte[] pdf, RectRegion region, string newText,
-        float? fontSize = null, string? fontFamily = null, bool bold = false, bool italic = false,
+        float? fontSize = null, string? fontFamily = null, bool? bold = null, bool? italic = null,
         string? colorHex = null, string? password = null)
     {
-        float size = fontSize ?? GetTextInRegion(pdf, region, password).FontSize;
+        var found = GetTextInRegion(pdf, region, password);
+        float size = fontSize ?? found.FontSize;
+        // Family and style fall back to the run being replaced, as the summary above promises. They
+        // used to default to plain Helvetica instead, so any caller that named a size but no face
+        // silently reset bold Times body copy to regular Helvetica (#29).
+        string stampFont = ResolveFont(fontFamily ?? found.FontFamily,
+            bold ?? found.Bold, italic ?? found.Italic);
+
         var removed = Redactor.RemoveContent(pdf, new[] { region }, password);
         var stamped = StampText(removed.Pdf, region, newText, size, password,
-            fontName: ResolveFont(fontFamily, bold, italic), color: ParseColor(colorHex));
-        return new EditResult(stamped, removed.Warnings);
+            fontName: stampFont, color: ParseColor(colorHex));
+
+        var warnings = new List<string>(removed.Warnings);
+        if (DescribeSubstitution(found.SourceFont, stampFont) is { } note) warnings.Add(note);
+        return new EditResult(stamped, warnings);
+    }
+
+    /// <summary>
+    /// Reports, in words, when replacement text will not be set in the font the original was set
+    /// in. Only the standard-14 faces can be stamped today, so editing a run in any other font is a
+    /// silent change to how the document looks — exactly the kind of quiet substitution a user needs
+    /// told about rather than left to notice. Returns null when the original face is reproduced.
+    /// </summary>
+    /// <remarks>
+    /// Reusing the embedded program itself is issue #34; widening the stampable set is #28. Until
+    /// then the honest thing is to say what was swapped for what.
+    /// </remarks>
+    internal static string? DescribeSubstitution(string? sourceFont, string stampFont)
+    {
+        string original = StripSubsetPrefix(sourceFont);
+        if (original.Length == 0) return null;                                   // nothing detected
+        if (string.Equals(original, stampFont, StringComparison.OrdinalIgnoreCase)) return null;
+        return $"The original font '{original}' cannot be embedded by the editor, so the replacement "
+            + $"text was substituted with '{stampFont}'. Spacing and letterforms will differ.";
+    }
+
+    /// <summary>Drops the six-letter subset tag PDF writers prepend (e.g. <c>ABCDEF+Calibri</c>).</summary>
+    internal static string StripSubsetPrefix(string? fontName)
+    {
+        string name = (fontName ?? "").Trim();
+        return name.Length > 7 && name[6] == '+' ? name[7..] : name;
     }
 
     /// <summary>
@@ -257,7 +297,51 @@ public static class TextTools
 
     // ------------------------------------------------------------ extraction
 
-    private sealed record Chunk(string Text, Rectangle BBox, float FontHeight, string FontName);
+    private sealed record Chunk(string Text, Rectangle BBox, float FontHeight, float FontSize, string FontName);
+
+    /// <summary>
+    /// Recovers the type size a run was set in from the height of its transformed
+    /// ascender-to-descender box.
+    /// <para>
+    /// The box is <em>not</em> the em: it spans only <c>(ascender - descender) / 1000</c> of it —
+    /// 0.925 for Helvetica, 0.900 for Times, 0.786 for Courier. Treating the box height as the font
+    /// size (which this code did until #29) re-stamped every edited run 7–21% smaller than the
+    /// original, and because each edit re-measured its own undersized output the error compounded:
+    /// three passes over 24pt Courier left it under 12pt.
+    /// </para>
+    /// <para>
+    /// Working back from the box rather than from the <c>Tf</c> operand is deliberate — the box has
+    /// the text matrix and CTM already applied, so a run scaled by a <c>Tm</c>/<c>cm</c> yields the
+    /// size it is drawn at, which is the size the replacement has to be stamped at.
+    /// </para>
+    /// </summary>
+    /// <param name="boxHeight">Transformed ascent-line to descent-line distance.</param>
+    /// <param name="ascender">Font ascender, normalised to a 1000-unit em.</param>
+    /// <param name="descender">Font descender (negative), normalised to a 1000-unit em.</param>
+    internal static float EmSizeFromBoxHeight(float boxHeight, float ascender, float descender)
+    {
+        float span = (ascender - descender) / 1000f;
+        // Fonts that report no usable vertical metrics — Type 3 faces, undecodable embedded
+        // programs — leave the box height as the only estimate there is. Guarding on a plausible
+        // range also keeps a zero or absurd span from producing an infinity or a NaN.
+        if (!float.IsFinite(span) || span < 0.4f || span > 2f) return boxHeight;
+        return boxHeight / span;
+    }
+
+    /// <summary>Vertical metrics of a run's font, normalised to a 1000-unit em; (0,0) if unusable.</summary>
+    private static (float Ascender, float Descender) VerticalMetrics(PdfFont? font)
+    {
+        try
+        {
+            var metrics = font?.GetFontProgram()?.GetFontMetrics();
+            return metrics == null ? (0f, 0f) : (metrics.GetTypoAscender(), metrics.GetTypoDescender());
+        }
+        catch (Exception ex) when (ex is NullReferenceException or InvalidOperationException
+                                       or iText.Kernel.Exceptions.PdfException)
+        {
+            return (0f, 0f); // same fallback as a font with no metrics at all
+        }
+    }
 
     private static List<Chunk> CollectChunks(PdfDocument doc, int pageNumber)
     {
@@ -289,10 +373,18 @@ public static class TextTools
                 float maxY = asc.GetStartPoint().Get(1);
                 if (maxX <= minX) continue;
                 string fontName = "";
-                try { fontName = single.GetFont()?.GetFontProgram()?.GetFontNames()?.GetFontName() ?? ""; }
+                PdfFont? font = null;
+                try
+                {
+                    font = single.GetFont();
+                    fontName = font?.GetFontProgram()?.GetFontNames()?.GetFontName() ?? "";
+                }
                 catch { /* some embedded fonts expose no usable name; family detection just falls back */ }
+                float boxHeight = maxY - minY;
+                var (ascender, descender) = VerticalMetrics(font);
                 _chunks.Add(new Chunk(single.GetText(),
-                    new Rectangle(minX, minY, maxX - minX, maxY - minY), maxY - minY, fontName));
+                    new Rectangle(minX, minY, maxX - minX, boxHeight), boxHeight,
+                    EmSizeFromBoxHeight(boxHeight, ascender, descender), fontName));
             }
         }
 

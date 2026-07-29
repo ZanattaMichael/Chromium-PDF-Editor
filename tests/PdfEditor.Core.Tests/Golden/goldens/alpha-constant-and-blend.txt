@@ -9,6 +9,7 @@ info: has-CreationDate=no has-ModDate=no has-ID=no
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 ETx1 Qx2 Tdx1 Tfx1 Tjx1 fx2 gx1 gsx2 qx2 rex2 rgx2
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   gs GSa: BM=/Multiply CA=0.6 ca=0.4
@@ -24,8 +25,26 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 ETx1 Qx3 Tdx1 Tfx1 Tjx1 fx3 gx1 gsx2 qx3 rex3 rgx3
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+  gs GSa: BM=/Multiply CA=0.6 ca=0.4
+  gs GSb: AIS=false BM=/Screen ca=0.75
+acroform: none
+validation: clean
+== replace-region-text ==
+bytes: ~1536
+pdf-version: PDF-1.7
+pages: 1
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: golden corpus replaced copy
+  typeset: Helvetica@10.0 Helvetica@12.0
+  ops: BTx2 ETx2 Qx4 Tdx2 Tfx2 Tjx2 fx2 gx1 gsx2 qx4 rex2 rgx2
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+  font F2: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   gs GSa: BM=/Multiply CA=0.6 ca=0.4
   gs GSb: AIS=false BM=/Screen ca=0.75
 acroform: none
@@ -39,6 +58,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=90 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 ETx1 Qx2 Tdx1 Tfx1 Tjx1 fx2 gx1 gsx2 qx2 rex2 rgx2
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   gs GSa: BM=/Multiply CA=0.6 ca=0.4
@@ -54,12 +74,14 @@ info: has-CreationDate=yes has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 ETx1 Qx2 Tdx1 Tfx1 Tjx1 fx2 gx1 gsx2 qx2 rex2 rgx2
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   gs GSa: BM=/Multiply CA=0.6 ca=0.4
   gs GSb: AIS=false BM=/Screen ca=0.75
 page 2: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 ETx1 Qx2 Tdx1 Tfx1 Tjx1 fx2 gx1 gsx2 qx2 rex2 rgx2
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   gs GSa: BM=/Multiply CA=0.6 ca=0.4
@@ -75,6 +97,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 ETx1 Qx2 Tdx1 Tfx1 Tjx1 fx2 gx1 gsx2 qx2 rex2 rgx2
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   gs GSa: BM=/Multiply CA=0.6 ca=0.4
@@ -90,6 +113,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=1 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 ETx1 Qx2 Tdx1 Tfx1 Tjx1 fx2 gx1 gsx2 qx2 rex2 rgx2
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   gs GSa: BM=/Multiply CA=0.6 ca=0.4
@@ -106,6 +130,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 Dox1 ETx1 Qx4 Tdx1 Tfx1 Tjx1 cmx1 fx2 gx1 gsx2 qx4 rex2 rgx2
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   gs GSa: BM=/Multiply CA=0.6 ca=0.4

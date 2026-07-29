@@ -1491,11 +1491,25 @@ async function beginTextEdit(region) {
     setStyleToggle('edit-bold', found.bold);
     setStyleToggle('edit-italic', found.italic);
     $('edit-color').value = '#000000';
+    // Record what the size/face controls were matched to. The user sees the pre-filled controls;
+    // the console says what they were derived from, which is the only place the original font name
+    // appears at all (the picker can only offer the three families the editor can stamp).
+    activity.add('info', 'matched the existing text style', describeMatchedFont(found));
     showPanel('panel-edit');
     $('edit-text').focus();
   } catch (e) {
     fail(e);
   }
+}
+
+/** "times 11.0pt bold (from ABCDEF+MinionPro-Bold)" — for the activity console. */
+function describeMatchedFont(found) {
+  const size = Number(found.fontSize);
+  let text = `${found.fontFamily} ${Number.isFinite(size) ? size.toFixed(1) : '?'}pt`;
+  if (found.bold) text += ' bold';
+  if (found.italic) text += ' italic';
+  if (found.sourceFont && found.sourceFont !== found.fontFamily) text += ` (from ${found.sourceFont})`;
+  return text;
 }
 
 /** Opens the text panel in "add" mode for stamping brand-new text into a region. */
@@ -1535,7 +1549,16 @@ async function applyTextEdit() {
     });
     hidePanels();
     if (adding) setTool('text');
-    await applyContentEdit(result.pdf, [region.page], adding ? 'Text added.' : 'Text replaced.');
+    // Warnings from an edit used to be dropped on the floor. A font substitution changes how the
+    // document looks, so it is reported rather than left for the user to notice later (#29, #72).
+    const warnings = result.warnings ?? [];
+    for (const warning of warnings) {
+      activity.add('warn', adding ? 'text added with a warning' : 'text replaced with a warning', warning);
+    }
+    const substituted = warnings.some((w) => /substitut/i.test(w));
+    let message = adding ? 'Text added.' : 'Text replaced.';
+    if (substituted) message += ' The original font could not be reused — see Help ▸ Activity console.';
+    await applyContentEdit(result.pdf, [region.page], message);
   } catch (e) {
     fail(e);
   }

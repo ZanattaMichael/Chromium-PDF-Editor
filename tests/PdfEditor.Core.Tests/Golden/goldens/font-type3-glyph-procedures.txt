@@ -9,6 +9,7 @@ info: has-CreationDate=no has-ModDate=no has-ID=no
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus abab
+  typeset: <unnamed>@36.0 Helvetica@10.0
   ops: BTx2 ETx2 Tdx2 Tfx2 Tjx2 gx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   font T3: subtype=Type3 base=none encoding=none+Differences[4] toUnicode=no widths=2 charProcs=square/triangle fontMatrix=[0.001 0 0 0.001 0 0]
@@ -23,8 +24,25 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx2 ETx2 Qx1 TJx1 Tdx2 Tfx2 Tjx1 fx1 gx1 qx1 rex1 rgx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+  font T3: subtype=Type3 base=none encoding=none+Differences[4] toUnicode=no widths=2 charProcs=square/triangle fontMatrix=[0.001 0 0 0.001 0 0]
+acroform: none
+validation: clean
+== replace-region-text ==
+bytes: ~2048
+pdf-version: PDF-1.7
+pages: 1
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: golden corpus replaced copy
+  typeset: Helvetica@10.0 Helvetica@36.0
+  ops: BTx3 ETx3 Qx2 TJx1 Tdx3 Tfx3 Tjx2 gx1 qx2
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+  font F2: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   font T3: subtype=Type3 base=none encoding=none+Differences[4] toUnicode=no widths=2 charProcs=square/triangle fontMatrix=[0.001 0 0 0.001 0 0]
 acroform: none
 validation: clean
@@ -37,6 +55,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=90 annots=0 group=none
   text: golden corpus abab
+  typeset: <unnamed>@36.0 Helvetica@10.0
   ops: BTx2 ETx2 Tdx2 Tfx2 Tjx2 gx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   font T3: subtype=Type3 base=none encoding=none+Differences[4] toUnicode=no widths=2 charProcs=square/triangle fontMatrix=[0.001 0 0 0.001 0 0]
@@ -51,11 +70,13 @@ info: has-CreationDate=yes has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus abab
+  typeset: <unnamed>@36.0 Helvetica@10.0
   ops: BTx2 ETx2 Tdx2 Tfx2 Tjx2 gx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   font T3: subtype=Type3 base=none encoding=none+Differences[4] toUnicode=no widths=2 charProcs=square/triangle fontMatrix=[0.001 0 0 0.001 0 0]
 page 2: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus abab
+  typeset: <unnamed>@36.0 Helvetica@10.0
   ops: BTx2 ETx2 Tdx2 Tfx2 Tjx2 gx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   font T3: subtype=Type3 base=none encoding=none+Differences[4] toUnicode=no widths=2 charProcs=square/triangle fontMatrix=[0.001 0 0 0.001 0 0]
@@ -70,6 +91,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus abab
+  typeset: <unnamed>@36.0 Helvetica@10.0
   ops: BTx2 ETx2 Tdx2 Tfx2 Tjx2 gx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   font T3: subtype=Type3 base=none encoding=none+Differences[4] toUnicode=no widths=2 charProcs=square/triangle fontMatrix=[0.001 0 0 0.001 0 0]
@@ -84,6 +106,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=1 group=none
   text: golden corpus abab
+  typeset: <unnamed>@36.0 Helvetica@10.0
   ops: BTx2 ETx2 Tdx2 Tfx2 Tjx2 gx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   font T3: subtype=Type3 base=none encoding=none+Differences[4] toUnicode=no widths=2 charProcs=square/triangle fontMatrix=[0.001 0 0 0.001 0 0]
@@ -99,6 +122,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus abab
+  typeset: <unnamed>@36.0 Helvetica@10.0
   ops: BTx2 Dox1 ETx2 Qx2 Tdx2 Tfx2 Tjx2 cmx1 gx1 qx2
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   font T3: subtype=Type3 base=none encoding=none+Differences[4] toUnicode=no widths=2 charProcs=square/triangle fontMatrix=[0.001 0 0 0.001 0 0]

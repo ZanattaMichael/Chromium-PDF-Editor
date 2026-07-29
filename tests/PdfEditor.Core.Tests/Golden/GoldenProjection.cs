@@ -151,6 +151,7 @@ internal static class GoldenProjection
             .Append('\n');
 
         report.Append("  text: ").Append(Safely(() => Normalise(PdfTextExtractor.GetTextFromPage(page)))).Append('\n');
+        report.Append("  typeset: ").Append(Safely(() => Typeset(page))).Append('\n');
         report.Append("  ops: ").Append(Safely(() => Operators(page.GetContentBytes()))).Append('\n');
         DescribeResources(page.GetResources().GetPdfObject(), "  ", 0, report);
     }
@@ -427,6 +428,49 @@ internal static class GoldenProjection
     /// </summary>
     private static string Bucket(int length) =>
         "~" + (length / 256 * 256).ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// The distinct <c>face@size</c> pairs the page's text is actually drawn in, sorted.
+    /// <para>
+    /// The resource inventory above records which fonts a page <em>declares</em>; this records what
+    /// the glyphs are really set in, which is the thing an editing regression damages. #29 shipped
+    /// because nothing in the suite looked at type size: replaced text came back 7–21% smaller than
+    /// the original and every projection stayed identical. Sizes are the <c>Tf</c> operand with the
+    /// text and graphics matrices applied, rounded to 0.1pt so a harmless last-bit difference in a
+    /// matrix cannot make the recordings flap.
+    /// </para>
+    /// </summary>
+    private static string Typeset(PdfPage page)
+    {
+        var listener = new TypesetListener();
+        new PdfCanvasProcessor(listener).ProcessPageContent(page);
+        return listener.Runs.Count == 0 ? "<no text>" : string.Join(' ', listener.Runs);
+    }
+
+    private sealed class TypesetListener : iText.Kernel.Pdf.Canvas.Parser.Listener.IEventListener
+    {
+        public SortedSet<string> Runs { get; } = new(StringComparer.Ordinal);
+
+        public void EventOccurred(iText.Kernel.Pdf.Canvas.Parser.Data.IEventData data, EventType type)
+        {
+            if (data is not iText.Kernel.Pdf.Canvas.Parser.Data.TextRenderInfo t
+                || string.IsNullOrWhiteSpace(t.GetText())) return;
+
+            var m = t.GetTextMatrix();
+            float scale = (float)Math.Sqrt(Math.Abs(
+                m.Get(iText.Kernel.Geom.Matrix.I11) * m.Get(iText.Kernel.Geom.Matrix.I22)
+                - m.Get(iText.Kernel.Geom.Matrix.I12) * m.Get(iText.Kernel.Geom.Matrix.I21)));
+            float size = t.GetFontSize() * (scale == 0 ? 1 : scale);
+
+            string face;
+            try { face = t.GetFont()?.GetFontProgram()?.GetFontNames()?.GetFontName() ?? "<unnamed>"; }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { face = "<unreadable>"; }
+
+            Runs.Add(string.Create(CultureInfo.InvariantCulture, $"{face}@{size:F1}"));
+        }
+
+        public ICollection<EventType>? GetSupportedEvents() => null;
+    }
 
     private static string Safely(Func<string> describe)
     {

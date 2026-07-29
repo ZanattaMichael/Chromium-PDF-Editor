@@ -257,6 +257,17 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
 #pages.select-mode .overlay { pointer-events: none; }
 ::selection { background: rgba(79, 142, 247, 0.4); }
 
+/* Highlighting is a sweep across text, not a box drag (#23): the text layer takes the pointer so
+   press-move-release makes a real selection, tinted in the highlight colour as a preview. A page
+   with no selectable text (a scan) has no .text-layer at all, keeps its overlay, and so keeps the
+   box-drag fallback — the only thing that can be expressed there. */
+#pages { --sweep: #ffeb3b; }
+#pages.highlight-mode .text-layer { pointer-events: auto; user-select: text; }
+#pages.highlight-mode .page:has(.text-layer) .overlay { pointer-events: none; }
+#pages.highlight-mode .text-layer span::selection {
+  background: color-mix(in srgb, var(--sweep) 55%, transparent);
+}
+
 /* Clickable link hotspots laid over the rendered page, tinted by risk, with a risk-colour dot.
    Only clickable in select mode (like the text layer); tools draw over them otherwise. */
 .link-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; }

@@ -91,6 +91,48 @@ async function pixelAt(page, pdfX, pdfY, mediaBox = A4) {
   }, [pdfX, pdfY, mediaBox]);
 }
 
+/**
+ * Presses at one PDF-space point, sweeps to another and releases — the way a reader
+ * selects text with the mouse (as opposed to dragPdfRect's box drag).
+ */
+async function sweepPdf(page, from, to, { pageNum = 1, mediaBox = A4 } = {}) {
+  const [llx, , urx, ury] = mediaBox;
+  const box = await page.locator(pageImageSel(pageNum)).boundingBox();
+  const scale = box.width / (urx - llx);
+  const at = (p) => [box.x + (p.x - llx) * scale, box.y + (ury - p.y) * scale];
+  await page.mouse.move(...at(from));
+  await page.mouse.down();
+  await page.mouse.move(...at(to), { steps: 10 });
+  await page.mouse.up();
+}
+
+/**
+ * Fraction of pixels in a PDF-space band of a rendered page that are highlight-yellow paper.
+ * Used to assert *where* a highlight landed: ~0 means the band was left alone.
+ */
+async function yellowFraction(page, { x0, x1, y0, y1 }, { pageNum = 1, mediaBox = A4 } = {}) {
+  return page.evaluate(async ([band, n, [llx, lly, urx, ury]]) => {
+    const img = document.querySelector(`.page[data-page="${n}"] .page-image`);
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const scale = img.naturalWidth / (urx - llx);
+    let yellow = 0, total = 0;
+    for (let py = band.y0; py <= band.y1; py += 0.5) {
+      for (let px = band.x0; px <= band.x1; px += 0.5) {
+        const d = ctx.getImageData(
+          Math.round((px - llx) * scale), Math.round((ury - py) * scale), 1, 1).data;
+        total++;
+        if (d[0] > 200 && d[1] > 180 && d[2] < 140) yellow++;
+      }
+    }
+    return yellow / total;
+  }, [{ x0, x1, y0, y1 }, pageNum, mediaBox]);
+}
+
 /** Fills the promptDialog() form (inputs in creation order) and confirms. */
 async function fillDialog(page, values, confirmText) {
   const dialog = page.locator('dialog#modal');
@@ -1083,34 +1125,113 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
-  test('highlight: drawing a box over text highlights the covered words', async () => {
-    const file = fixture('highlightbox.pdf', [[{ text: 'BOX HIGHLIGHT LINE', x: 72, y: 700 }]]);
+  // #23: highlighting is a text selection, not a box. Sweeping across half a line must mark
+  // exactly the characters swept — the old box drag marked whole runs, so the untouched word
+  // on the same run came out yellow too.
+  test('highlight: sweeping across part of a line marks only the swept words', async () => {
+    // One show-text run holding two well-separated words, so run-snapping cannot pass this.
+    // Helvetica 14: "ALPHA" spans x≈72..118, "OMEGA" x≈157..209.
+    const file = fixture('sweep.pdf', [[{ text: 'ALPHA          OMEGA', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);
     await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
 
     await ui(page, '#tool-highlight');
-    // Draw a rectangle over the line (not a thin swipe).
+    // Press on the first letter, sweep into the gap, release — no box drawn.
+    await sweepPdf(page, { x: 73, y: 703 }, { x: 137, y: 703 });
+    await expect(page.locator('#status')).toContainText('Highlighted');
+
+    const band = { y0: 698, y1: 709 };
+    expect(await yellowFraction(page, { x0: 74, x1: 116, ...band })).toBeGreaterThan(0.3);
+    expect(await yellowFraction(page, { x0: 158, x1: 207, ...band })).toBeLessThan(0.02);
+    // ...and nothing above the line either.
+    expect(await yellowFraction(page, { x0: 74, x1: 207, y0: 715, y1: 730 })).toBeLessThan(0.02);
+    await page.close();
+  });
+
+  test('highlight: a sweep across a line break marks the swept part of each line', async () => {
+    // Helvetica 14 groups: line 1 A≈72..119, B≈123..169, C≈173..220;
+    //                      line 2 D≈72..122, E≈126..173, F≈177..220.
+    const file = fixture('sweeplines.pdf', [[
+      { text: 'AAAAA BBBBB CCCCC', x: 72, y: 700 },
+      { text: 'DDDDD EEEEE FFFFF', x: 72, y: 670 },
+    ]]);
+    const page = await openViewerWith(file);
+    await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
+
+    await ui(page, '#tool-highlight');
+    // Start at the last word of line 1, end at the first word of line 2.
+    await sweepPdf(page, { x: 174, y: 703 }, { x: 122, y: 673 });
+    await expect(page.locator('#status')).toContainText('Highlighted');
+
+    const l1 = { y0: 698, y1: 709 };
+    const l2 = { y0: 668, y1: 679 };
+    expect(await yellowFraction(page, { x0: 175, x1: 218, ...l1 })).toBeGreaterThan(0.3); // CCCCC
+    expect(await yellowFraction(page, { x0: 74, x1: 117, ...l1 })).toBeLessThan(0.02);    // AAAAA
+    expect(await yellowFraction(page, { x0: 74, x1: 120, ...l2 })).toBeGreaterThan(0.3);  // DDDDD
+    expect(await yellowFraction(page, { x0: 179, x1: 218, ...l2 })).toBeLessThan(0.02);   // FFFFF
+    // The gap between the two lines is never painted.
+    expect(await yellowFraction(page, { x0: 74, x1: 218, y0: 683, y1: 694 })).toBeLessThan(0.02);
+    await page.close();
+  });
+
+  test('highlight: a selection spanning two pages highlights both, each in its own place', async () => {
+    const file = fixture('sweeppages.pdf', [
+      [{ text: 'PAGE ONE TAIL', x: 72, y: 700 }],
+      [{ text: 'PAGE TWO HEAD', x: 72, y: 700 }],
+    ]);
+    const page = await openViewerWith(file);
+    await page.locator('.page[data-page="2"]').scrollIntoViewIfNeeded();
+    await page.locator('.page[data-page="2"] .text-layer span').first().waitFor({ timeout: 15000 });
+    await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
+
+    await ui(page, '#tool-highlight');
+    // A sweep that crosses a page boundary can't be driven by one mouse path without
+    // scrolling mid-drag, so the selection is made directly and released with a real mouseup.
+    await page.evaluate(() => {
+      const runOn = (n) => document.querySelector(`.page[data-page="${n}"] .text-layer span`).firstChild;
+      const a = runOn(1), b = runOn(2);
+      window.getSelection().setBaseAndExtent(a, 0, b, b.length);
+    });
+    await page.mouse.up();
+    await expect(page.locator('#status')).toContainText('Highlighted');
+
+    const band = { y0: 698, y1: 709 };
+    expect(await yellowFraction(page, { x0: 74, x1: 160, ...band }, { pageNum: 1 })).toBeGreaterThan(0.3);
+    expect(await yellowFraction(page, { x0: 74, x1: 160, ...band }, { pageNum: 2 })).toBeGreaterThan(0.3);
+    // Neither page is painted outside its text line.
+    expect(await yellowFraction(page, { x0: 300, x1: 400, ...band }, { pageNum: 2 })).toBeLessThan(0.02);
+    await page.close();
+  });
+
+  test('highlight: a page with no selectable text still falls back to a box drag', async () => {
+    const file = fixture('highlightbox.pdf', [[]]); // no text runs: nothing to select
+    const page = await openViewerWith(file);
+    await expect(page.locator('.page[data-page="1"] .text-layer')).toHaveCount(0);
+
+    await ui(page, '#tool-highlight');
+    // Draw a rectangle: with no text layer the overlay still takes the pointer.
+    await dragPdfRect(page, { x: 66, y: 694, width: 250, height: 22 });
+    await expect(page.locator('#status')).toContainText('Highlighted');
+    expect(await yellowFraction(page, { x0: 70, x1: 310, y0: 697, y1: 713 })).toBeGreaterThan(0.9);
+    expect(await yellowFraction(page, { x0: 70, x1: 310, y0: 725, y1: 740 })).toBeLessThan(0.02);
+    await page.close();
+  });
+
+  test('highlight: a loose diagonal drag over a line still marks that line, and only it', async () => {
+    const file = fixture('highlightloose.pdf', [[
+      { text: 'BOX HIGHLIGHT LINE', x: 72, y: 700 },
+      { text: 'UNTOUCHED LINE BELOW', x: 72, y: 640 },
+    ]]);
+    const page = await openViewerWith(file);
+    await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
+
+    await ui(page, '#tool-highlight');
+    // Sloppy diagonal drag across the first line only.
     await dragPdfRect(page, { x: 66, y: 694, width: 250, height: 22 });
     await expect(page.locator('#status')).toContainText('Highlighted');
 
-    const scan = await page.evaluate(async () => {
-      const img = document.querySelector('.page[data-page="1"] .page-image');
-      await img.decode();
-      const c = document.createElement('canvas');
-      c.width = img.naturalWidth; c.height = img.naturalHeight;
-      const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
-      const scale = img.naturalWidth / 595;
-      let yellow = false, dark = false;
-      for (let py = 697; py <= 711; py++)
-        for (let px = 74; px <= 250; px++) {
-          const d = ctx.getImageData(Math.round(px * scale), Math.round((842 - py) * scale), 1, 1).data;
-          if (d[0] > 200 && d[1] > 180 && d[2] < 140) yellow = true;
-          if (d[0] < 120 && d[1] < 120 && d[2] < 120) dark = true;
-        }
-      return { yellow, dark };
-    });
-    expect(scan.yellow).toBe(true);
-    expect(scan.dark).toBe(true);
+    expect(await yellowFraction(page, { x0: 74, x1: 200, y0: 698, y1: 709 })).toBeGreaterThan(0.3);
+    expect(await yellowFraction(page, { x0: 74, x1: 200, y0: 638, y1: 649 })).toBeLessThan(0.02);
     await page.close();
   });
 

@@ -710,6 +710,13 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const hotspot = page.locator('.page[data-page="1"] .link-hotspot');
     await expect(hotspot).toHaveCount(1, { timeout: 15000 });
 
+    // Wait for the link work to go idle before probing geometry. Since #19 the overlay is drawn
+    // in two phases — hotspots as soon as the annotations are listed, then rebuilt to apply risk
+    // colours when the scan lands — so a hit test run between them lands mid-rebuild and finds
+    // the text layer instead of the hotspot. The status element is hidden once nothing is
+    // in flight, which is the observable "settled" signal.
+    await expect(page.locator('#link-status')).toBeHidden({ timeout: 15000 });
+
     // The topmost element at the hotspot's centre must be the hotspot itself, not the text layer.
     const hitsHotspot = await hotspot.evaluate((el) => {
       const r = el.getBoundingClientRect();
@@ -820,7 +827,14 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
 
     // Now deliver document A's results. They must be dropped on the floor.
     expect(await page.evaluate(() => window.__hostGate.release())).toBeGreaterThan(0);
-    await page.waitForTimeout(1500); // give the stale continuations every chance to apply
+
+    // Synchronise on something observable rather than sleeping: the gate reports every parked
+    // response handed back to the page, and `settled()` resolves after the microtask queue has
+    // drained and a frame has been painted — so each continuation those responses resumed has
+    // run to the point where it would have written to the DOM.
+    await expect.poll(() => page.evaluate(() => window.__hostGate.heldCount())).toBe(0);
+    await page.evaluate(() => window.__hostGate.settled());
+
     await expect(hotspots).toHaveCount(1);
     await expect(page.locator('#links-list')).not.toContainText('STALE-DOC-A');
     await expect(page.locator('#links-list')).toContainText('FRESH-DOC-B');

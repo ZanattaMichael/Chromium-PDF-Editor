@@ -1,10 +1,58 @@
 using PdfEditor.Core;
+using SkiaSharp;
 using Xunit;
 
 namespace PdfEditor.Tests;
 
 public class TextToolsTests
 {
+    /// <summary>
+    /// Editing a word that sits on top of artwork must not disturb the artwork. Text editing removes
+    /// the original content through the same machinery redaction uses, and that machinery blacks out
+    /// the pixels of any image the region touches — so editing a line over a letterhead, watermark or
+    /// scanned page punched a black rectangle through it. The text is what is being replaced; the
+    /// picture behind it is not.
+    /// </summary>
+    [Fact]
+    public void ReplaceTextInRegion_OverAnImage_LeavesTheImageAlone()
+    {
+        byte[] pdf = TestPdfs.WithTextOverImage("HELLO", 120, 600, 14);
+        var match = Assert.Single(TextTools.FindText(pdf, "HELLO"));
+        // A box dragged slightly proud of the text, which is what the Edit tool actually produces —
+        // and it leaves a margin of plain image inside the region to sample, away from the
+        // antialiased glyph edges.
+        const float pad = 6;
+        var region = new RectRegion(1, match.X - pad, match.Y - pad,
+            match.Width + 2 * pad, match.Height + 2 * pad);
+
+        float marginX = match.X - pad / 2, marginY = match.Y + match.Height / 2;
+        Assert.Equal(SKColors.Red, TestPdfAssert.PixelAt(pdf, 1, marginX, marginY));
+
+        var result = TextTools.ReplaceTextInRegion(pdf, region, "WORLD");
+
+        // Inside the edited region, and elsewhere in the image: both still the original artwork.
+        Assert.Equal(SKColors.Red, TestPdfAssert.PixelAt(result.Pdf, 1, marginX, marginY));
+        Assert.Equal(SKColors.Red, TestPdfAssert.PixelAt(result.Pdf, 1, 350, 620));
+    }
+
+    /// <summary>
+    /// Replacement text longer than what it replaces has to survive intact. The region handed to the
+    /// stamper is the measured bounding box of the words being replaced, and laying the paragraph out
+    /// inside it meant iText dropped whatever did not fit: "HELLO" replaced by "WORLD" came back as
+    /// "WORL", with no warning and no error.
+    /// </summary>
+    [Fact]
+    public void ReplaceTextInRegion_KeepsReplacementTextThatIsLongerThanTheOriginal()
+    {
+        byte[] pdf = TestPdfs.WithText(("HELLO", 120, 600, 14));
+        var match = Assert.Single(TextTools.FindText(pdf, "HELLO"));
+        var region = new RectRegion(1, match.X, match.Y, match.Width, match.Height);
+
+        var result = TextTools.ReplaceTextInRegion(pdf, region, "WORLDWIDE");
+
+        Assert.Contains("WORLDWIDE", TestPdfAssert.ExtractText(result.Pdf), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void GetTextInRegion_ReturnsTextAndFontSize()
     {

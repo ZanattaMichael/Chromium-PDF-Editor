@@ -79,6 +79,35 @@ public static class TestPdfs
     }
 
     /// <summary>
+    /// Text drawn on top of a solid-red image — the ordinary shape of a document with a
+    /// letterhead, a watermark or a scanned background behind its text. Editing that text means
+    /// touching a region that overlaps the image, so this is the fixture that shows whether an
+    /// edit disturbs the artwork underneath it.
+    /// </summary>
+    public static byte[] WithTextOverImage(string text, float x, float y, float size)
+    {
+        using var bitmap = new SKBitmap(120, 80);
+        using (var c = new SKCanvas(bitmap)) c.Clear(SKColors.Red);
+        using var img = SKImage.FromBitmap(bitmap);
+        byte[] png = img.Encode(SKEncodedImageFormat.Png, 100).ToArray();
+
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            var canvas = new PdfCanvas(page);
+            // The image spans the whole band the text sits in, so any region around the text is
+            // necessarily inside the image too.
+            canvas.AddImageFittedIntoRectangle(ImageDataFactory.Create(png),
+                new Rectangle(x - 40, y - 40, 300, 140), false);
+            var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+            canvas.BeginText().SetFontAndSize(font, size)
+                .MoveText(x, y).ShowText(text).EndText();
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>
     /// A "scan": one page whose entire surface is a JPEG (DCTDecode) photo of some text — the
     /// shape of document people actually run OCR over.
     /// </summary>

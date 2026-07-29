@@ -46,9 +46,10 @@ public static class TextTools
         string? colorHex = null, string? password = null)
     {
         float size = fontSize ?? GetTextInRegion(pdf, region, password).FontSize;
-        var removed = Redactor.RemoveContent(pdf, new[] { region }, password);
+        var removed = Redactor.RemoveContent(pdf, new[] { region }, password, ContentKinds.TextOnly);
         var stamped = StampText(removed.Pdf, region, newText, size, password,
-            fontName: ResolveFont(fontFamily, bold, italic), color: ParseColor(colorHex));
+            fontName: ResolveFont(fontFamily, bold, italic), color: ParseColor(colorHex),
+            confineToRegion: false);
         return new EditResult(stamped, removed.Warnings);
     }
 
@@ -63,7 +64,7 @@ public static class TextTools
         var found = GetTextInRegion(pdf, source, password);
         if (string.IsNullOrWhiteSpace(found.Text)) return EditResult.Of(pdf);
 
-        var removed = Redactor.RemoveContent(pdf, new[] { source }, password);
+        var removed = Redactor.RemoveContent(pdf, new[] { source }, password, ContentKinds.TextOnly);
         var dest = new RectRegion(source.Page, source.X + dx, source.Y + dy, source.Width, source.Height);
         var stamped = StampText(removed.Pdf, dest, found.Text, found.FontSize, password,
             fontName: ResolveFont(found.FontFamily, found.Bold, found.Italic), wrap: false);
@@ -170,7 +171,7 @@ public static class TextTools
         // the boundary are not removed with it.
         var regions = matches.Select(m => new RectRegion(m.Page,
             m.X + 0.2f, m.Y + 0.2f, Math.Max(0.1f, m.Width - 0.4f), Math.Max(0.1f, m.Height - 0.4f))).ToList();
-        var removed = Redactor.RemoveContent(current, regions, password);
+        var removed = Redactor.RemoveContent(current, regions, password, ContentKinds.TextOnly);
         warnings.AddRange(removed.Warnings);
         current = removed.Pdf;
 
@@ -182,9 +183,33 @@ public static class TextTools
         return (new EditResult(current, warnings), matches.Count);
     }
 
+    /// <summary>
+    /// A layout box starting at the region's top-left and running to the page's right and bottom
+    /// edges, so replacement text longer than what it replaces has somewhere to go instead of being
+    /// clipped away. It can now overlap whatever follows on the line — reflowing the rest of the
+    /// paragraph is not something this editor can do — but showing the text in the wrong place beats
+    /// dropping characters without a word.
+    /// </summary>
+    private static Rectangle ToPageEdge(PdfPage page, RectRegion region)
+    {
+        var size = page.GetPageSize();
+        float top = region.Y + region.Height;
+        return new Rectangle(region.X, size.GetBottom(),
+            Math.Max(1f, size.GetRight() - region.X),
+            Math.Max(1f, top - size.GetBottom()));
+    }
+
+    /// <param name="confineToRegion">
+    /// Whether the wrapped text must fit inside <paramref name="region"/>. True for "add text",
+    /// where the region is a box the user dragged and wrapping to it is the point. False when
+    /// replacing existing text, where the region is only the measured bounding box of the words
+    /// being replaced: confining the layout to it silently swallowed any replacement longer than
+    /// the original, because iText drops a paragraph line that does not fit the canvas
+    /// ("HELLO" replaced by "WORLD" came out as "WORL").
+    /// </param>
     private static byte[] StampText(byte[] pdf, RectRegion region, string text, float fontSize,
         string? password, bool wrap = true, string? fontName = null,
-        iText.Kernel.Colors.Color? color = null)
+        iText.Kernel.Colors.Color? color = null, bool confineToRegion = true)
     {
         using var output = new MemoryStream();
         using (var doc = PdfIo.Open(pdf, output, password))
@@ -196,7 +221,8 @@ public static class TextTools
             var pdfCanvas = PdfContentGuard.InDefaultUserSpace(page, doc);
             if (wrap)
             {
-                var box = new Rectangle(region.X, region.Y, region.Width, region.Height);
+                var box = confineToRegion ? new Rectangle(region.X, region.Y, region.Width, region.Height)
+                    : ToPageEdge(page, region);
                 using var canvas = new Canvas(pdfCanvas, box);
                 var paragraph = new Paragraph(text).SetFont(font).SetFontSize(fontSize)
                     .SetMargin(0).SetMultipliedLeading(1.05f)

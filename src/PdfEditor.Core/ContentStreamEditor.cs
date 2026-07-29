@@ -9,6 +9,22 @@ using iText.Kernel.Pdf.Xobject;
 namespace PdfEditor.Core;
 
 /// <summary>
+/// Which kinds of content an edit is allowed to take out of a region.
+/// </summary>
+internal enum ContentKinds
+{
+    /// <summary>Text and images alike — what redaction means: nothing in the region survives.</summary>
+    All,
+
+    /// <summary>
+    /// Text only; images in the region are left exactly as they are. Text editing needs this:
+    /// replacing a word sits on a region that usually overlaps whatever is behind the text, and
+    /// scrubbing that too punches a black rectangle through a letterhead, watermark or scan.
+    /// </summary>
+    TextOnly,
+}
+
+/// <summary>
 /// Rewrites a page's content stream, dropping every piece of content that falls inside
 /// one of the supplied regions. Text is removed at per-string granularity (dropped strings
 /// are replaced by equivalent-width TJ displacements so surrounding text does not shift),
@@ -25,6 +41,7 @@ internal sealed class ContentStreamEditor : PdfCanvasProcessor
     private readonly List<string> _warnings;
     private readonly CollectingListener _collector;
     private readonly int _depth;
+    private readonly ContentKinds _kinds;
 
     private PdfCanvas _canvas = null!;
     private PdfResources _editResources = null!;
@@ -32,18 +49,19 @@ internal sealed class ContentStreamEditor : PdfCanvasProcessor
     public bool RemovedAnything { get; private set; }
 
     private ContentStreamEditor(CollectingListener collector, IList<Rectangle> regions,
-        PdfDocument document, List<string> warnings, int depth) : base(collector)
+        PdfDocument document, List<string> warnings, int depth, ContentKinds kinds) : base(collector)
     {
         _collector = collector;
         _regions = regions;
         _document = document;
         _warnings = warnings;
         _depth = depth;
+        _kinds = kinds;
     }
 
     public static ContentStreamEditor Create(IList<Rectangle> regions, PdfDocument document,
-        List<string> warnings, int depth = 0)
-        => new(new CollectingListener(), regions, document, warnings, depth);
+        List<string> warnings, int depth = 0, ContentKinds kinds = ContentKinds.All)
+        => new(new CollectingListener(), regions, document, warnings, depth, kinds);
 
     /// <summary>Rewrites the content of <paramref name="page"/> in place.</summary>
     public void EditPage(PdfPage page)
@@ -225,7 +243,7 @@ internal sealed class ContentStreamEditor : PdfCanvasProcessor
             _collector.Images.Clear();
             original?.Invoke(this, oper, operands);
             var bbox = _collector.Images.Count > 0 ? _collector.Images[0] : null;
-            if (bbox != null && IntersectsAnyRegion(bbox))
+            if (bbox != null && IntersectsAnyRegion(bbox) && _kinds != ContentKinds.TextOnly)
             {
                 RemovedAnything = true;
                 if (ContainedInAnyRegion(bbox))
@@ -264,7 +282,7 @@ internal sealed class ContentStreamEditor : PdfCanvasProcessor
                 var formResources = new PdfResources(
                     cloned.GetAsDictionary(PdfName.Resources) ?? _editResources.GetPdfObject());
                 var innerRegions = TransformRegionsInto(full);
-                var inner = Create(innerRegions, _document, _warnings, _depth + 1);
+                var inner = Create(innerRegions, _document, _warnings, _depth + 1, _kinds);
                 inner.EditFormStream(cloned, formResources);
                 RemovedAnything |= inner.RemovedAnything;
                 var newName = _editResources.AddForm(new PdfFormXObject(cloned));
@@ -283,7 +301,7 @@ internal sealed class ContentStreamEditor : PdfCanvasProcessor
         _collector.Images.Clear();
         original?.Invoke(this, oper, operands);
         var bbox = _collector.Images.Count > 0 ? _collector.Images[0] : null;
-        if (bbox != null && IntersectsAnyRegion(bbox))
+        if (bbox != null && IntersectsAnyRegion(bbox) && _kinds != ContentKinds.TextOnly)
         {
             RemovedAnything = true;
             return; // drop inline image touching a region (safe over-redaction)

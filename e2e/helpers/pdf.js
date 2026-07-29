@@ -171,6 +171,26 @@ function buildLinkPdf(url = 'https://github.com/example/repo') {
 }
 
 /**
+ * A single page carrying one URI link annotation per URL, stacked down the page. Fixture for the
+ * link-heavy documents the async link pipeline (#19) has to stay responsive on, and for telling a
+ * stale document's overlay apart from the current one by hotspot count.
+ */
+function buildMultiLinkPdf(urls) {
+  const annotStart = 4; // objects 1..3 are the catalog, page tree and page
+  const refs = urls.map((_, i) => `${annotStart + i} 0 R`).join(' ');
+  return assemble([
+    `<< /Type /Catalog /Pages 2 0 R >>`,
+    `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Annots [${refs}] >>`,
+    ...urls.map((url, i) => {
+      const y = 760 - i * 30;
+      return `<< /Type /Annot /Subtype /Link /Rect [72 ${y} 372 ${y + 20}] /Border [0 0 1] ` +
+        `/A << /S /URI /URI (${url}) >> >>`;
+    }),
+  ]);
+}
+
+/**
  * A two-page document with a link annotation on the SECOND page. Regression fixture for the
  * on-page link overlay: the hotspot must still be drawn once you scroll down to a later page
  * (even when that page's image comes from the render cache).
@@ -221,5 +241,5 @@ function buildJsLinkPdf(script = 'window.close();') {
 
 module.exports = {
   buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildFormWithButtonScriptPdf, buildJavaScriptPdf,
-  buildLinkPdf, buildJsLinkPdf, buildLinkOnPage2Pdf, buildLinkOverTextPdf,
+  buildLinkPdf, buildJsLinkPdf, buildLinkOnPage2Pdf, buildLinkOverTextPdf, buildMultiLinkPdf,
 };

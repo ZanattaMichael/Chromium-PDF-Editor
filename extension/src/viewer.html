@@ -276,6 +276,8 @@
 
   <footer id="statusbar">
     <span id="status"></span>
+    <!-- Background link parsing reports here, so it can never overwrite #status (#19). -->
+    <span id="link-status" aria-live="polite" hidden></span>
   </footer>
 
   <div id="busy-overlay" hidden>

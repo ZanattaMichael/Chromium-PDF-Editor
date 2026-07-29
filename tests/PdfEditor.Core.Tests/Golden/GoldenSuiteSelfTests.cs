@@ -83,7 +83,7 @@ public class GoldenSuiteSelfTests
         Assert.Contains("rotate=90", after, StringComparison.Ordinal);
 
         // ...and the comparator reports it as a mismatch against the real recording, with a diff.
-        string? failure = GoldenFile.Compare(doc.Name, after);
+        string? failure = GoldenFile.Compare(doc.Name, after, allowUpdate: false);
         Assert.NotNull(failure);
         Assert.Contains("no longer matches", failure, StringComparison.Ordinal);
         Assert.Contains("expected:", failure, StringComparison.Ordinal);
@@ -175,6 +175,27 @@ public class GoldenSuiteSelfTests
     }
 
     /// <summary>
+    /// A regeneration run must not let a probe overwrite a real recording. The self-tests that
+    /// deliberately feed the comparator non-matching content name a real corpus document, so
+    /// without an opt-out `PDFEDITOR_UPDATE_GOLDENS=1` truncated `plain-multipage.txt` down to a
+    /// probe's payload — turning the documented "update the goldens" command into a way to
+    /// silently destroy them.
+    /// </summary>
+    [Fact]
+    public void Regeneration_CannotBeTriggeredByAProbeThatExpectsAMismatch()
+    {
+        var doc = GoldenCorpus.Documents.Single(d => d.Name == "plain-multipage");
+        string path = GoldenFile.PathFor(doc.Name);
+        string before = File.ReadAllText(path);
+
+        string? failure = GoldenFile.Compare(doc.Name, "obviously not the projection\n",
+            allowUpdate: false);
+
+        Assert.NotNull(failure);
+        Assert.Equal(before, File.ReadAllText(path));
+    }
+
+    /// <summary>
     /// The comparator must be blind to line-ending style, or the suite is red for every developer
     /// on Windows and green for everyone else.
     /// </summary>
@@ -183,6 +204,6 @@ public class GoldenSuiteSelfTests
     {
         var doc = GoldenCorpus.Documents[0];
         string recorded = File.ReadAllText(GoldenFile.PathFor(doc.Name));
-        Assert.Null(GoldenFile.Compare(doc.Name, recorded.ReplaceLineEndings("\r\n")));
+        Assert.Null(GoldenFile.Compare(doc.Name, recorded.ReplaceLineEndings("\r\n"), allowUpdate: false));
     }
 }

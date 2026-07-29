@@ -38,12 +38,17 @@ internal static class GoldenFile
     /// Compares <paramref name="actual"/> against the recording for <paramref name="name"/>.
     /// Returns null when they match, otherwise the failure message to report.
     /// </summary>
-    public static string? Compare(string name, string actual)
+    /// <param name="allowUpdate">
+    /// Set false by callers that deliberately pass content they expect NOT to match, so a
+    /// regeneration run cannot overwrite a real recording with a probe's payload. Without this,
+    /// `PDFEDITOR_UPDATE_GOLDENS=1` truncated `plain-multipage.txt` to a self-test's fixture.
+    /// </param>
+    public static string? Compare(string name, string actual, bool allowUpdate = true)
     {
         actual = actual.ReplaceLineEndings("\n");
         string path = PathFor(name);
 
-        if (UpdateRequested)
+        if (UpdateRequested && allowUpdate)
         {
             System.IO.Directory.CreateDirectory(Directory);
             File.WriteAllText(path, actual, new UTF8Encoding(false));

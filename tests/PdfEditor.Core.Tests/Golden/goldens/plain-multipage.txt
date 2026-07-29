@@ -1,0 +1,163 @@
+# plain-multipage
+# Three plain pages, hand-written and byte-reproducible.
+== source ==
+bytes: ~1024
+pdf-version: PDF-1.7
+pages: 3
+encrypted: no
+info: has-CreationDate=no has-ModDate=no has-ID=no
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 1 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 2: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 2 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 3: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 3 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+acroform: none
+validation: clean
+== redact ==
+bytes: ~1792
+pdf-version: PDF-1.7
+pages: 3
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: <empty>
+  ops: BTx1 ETx1 Qx1 TJx1 Tdx1 Tfx1 fx2 qx1 rex2 rgx2
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 2: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 2 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 3: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 3 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+acroform: none
+validation: clean
+== rotate-90 ==
+bytes: ~1536
+pdf-version: PDF-1.7
+pages: 3
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 400 600] crop=none rotate=90 annots=0 group=none
+  text: Page 1 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 2: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 2 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 3: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 3 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+acroform: none
+validation: clean
+== merge-with-self ==
+bytes: ~2560
+pdf-version: PDF-1.7
+pages: 6
+encrypted: no
+info: has-CreationDate=yes has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 1 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 2: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 2 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 3: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 3 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 4: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 1 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 5: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 2 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 6: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 3 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+acroform: none
+validation: clean
+== sanitize ==
+bytes: ~1536
+pdf-version: PDF-1.7
+pages: 3
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 1 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 2: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 2 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 3: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 3 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+acroform: none
+validation: clean
+== add-text-field ==
+bytes: ~2304
+pdf-version: PDF-1.7
+pages: 3
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 400 600] crop=none rotate=0 annots=1 group=none
+  text: Page 1 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 2: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 2 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 3: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 3 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+acroform: needAppearances=none fields=1
+  field: name=(golden.added) type=Tx value=(filled) hasAppearance=yes
+validation: clean
+== sign-image ==
+bytes: ~2304
+pdf-version: PDF-1.7
+pages: 3
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 1 payload
+  ops: BTx1 Dox1 ETx1 Qx2 Tdx1 Tfx1 Tjx1 cmx1 fx1 qx2 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+  xobject Im1: subtype=Image size=24x12 cs=/DeviceRGB bpc=8 filter=/FlateDecode smask=yes mask=no
+page 2: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 2 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+page 3: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: Page 3 payload
+  ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1 fx1 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+acroform: none
+validation: clean

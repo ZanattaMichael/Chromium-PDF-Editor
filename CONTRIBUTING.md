@@ -96,6 +96,33 @@ If you touch `PdfEditor.Core` or `PdfEditor.NativeHost`, add or update unit test
 the matching project. If you touch the extension ↔ host wire protocol, add a case to
 `PdfEditor.IntegrationTests` too.
 
+### Golden-file regression suite
+
+`tests/PdfEditor.Core.Tests/Golden/` runs a corpus of deliberately awkward documents
+(Type 3 and Identity-H fonts, `/ToUnicode` CMaps, soft masks, nested transparency
+groups, malformed streams) through every export operation and compares the result
+against a recording in `Golden/goldens/*.txt`. It runs as part of `dotnet test`; no
+extra setup.
+
+The recordings are **not** raw PDF bytes. iText stamps a timestamp-derived `/ID` and
+`/ModDate` into everything it writes, so the same operation on the same input produces
+different bytes every time; the goldens hold a *semantic projection* instead — page
+geometry, extracted text, the font/XObject/graphics-state inventory, an operator census
+per content stream, and the `ExportValidator` findings.
+
+If you change the engine on purpose, the diff on those files is your review artefact.
+Re-record them **explicitly**:
+
+```bash
+PDFEDITOR_UPDATE_GOLDENS=1 dotnet test tests/PdfEditor.Core.Tests \
+    --filter FullyQualifiedName~Corpus_MatchesRecordedGolden
+```
+
+That rewrites the files **and still fails the run**, on purpose: a regeneration must
+never look like a green build. Read the diff, convince yourself each change is one you
+meant, commit it, then re-run without the variable. Nothing else — least of all a
+failing run — ever rewrites a golden.
+
 ### Coverage
 
 ```bash

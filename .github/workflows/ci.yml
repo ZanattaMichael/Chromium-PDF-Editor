@@ -18,6 +18,16 @@ jobs:
         # `tesseract` binary is absent, so without this they pass without executing anything --
         # leaving OcrTool.cs at 0% coverage on new code and the regressions unguarded in CI.
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - name: Extension unit tests
+        # These had never run in CI, so extension/test/ was effectively unenforced.
+        run: node --test "extension/test/**/*.test.mjs"
+      - name: No interpolated innerHTML under extension/src (#74)
+        # A dedicated step as well as a node --test case, so the failure message points straight
+        # at the offending file:line rather than at an assertion.
+        run: node scripts/check-innerhtml.mjs
       - name: Build
         run: dotnet build --configuration Release
       - name: Test with coverage (gated at 90% line coverage)

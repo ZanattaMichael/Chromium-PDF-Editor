@@ -60,6 +60,15 @@ jobs:
       # really being scanned. begin/build/test/end is the .NET-specific flow that actually
       # runs the C# analyzers, with coverage imported from the same test run.
       - name: Begin SonarQube analysis
+        # sonar.coverage.exclusions must list every language the imported report cannot measure.
+        # That report is opencover from `dotnet test`, so it covers C# only: .py/.mjs/.ps1/.sh and
+        # the extension/e2e JavaScript would otherwise each count as 0% covered on new code and
+        # fail the gate. `.mjs` is separate from the `extension/**/*.js` entry because the glob
+        # matches on the literal extension -- a .mjs file is not a .js file to Sonar.
+        #
+        # Keep comments HERE, above the folded scalar. A `#` line inside the `>` block below is
+        # not a YAML comment: it is folded into the command, and the shell then treats it as a
+        # comment and silently discards everything after it -- which dropped this whole setting.
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: >
@@ -70,7 +79,7 @@ jobs:
           /d:sonar.host.url="https://sonarcloud.io"
           /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,coverage-report/**,coverage-results/**,coverage-sonar/**,dist/**,e2e/test-results/**,e2e/playwright-report/**"
           /d:sonar.cs.opencover.reportsPaths="coverage-sonar/**/coverage.opencover.xml"
-          /d:sonar.coverage.exclusions="**/*.css,**/*.html,**/*.yml,**/*.yaml,**/*.ps1,**/*.sh,**/*.py,extension/**/*.js,e2e/**/*.js"
+          /d:sonar.coverage.exclusions="**/*.css,**/*.html,**/*.yml,**/*.yaml,**/*.ps1,**/*.sh,**/*.py,**/*.mjs,extension/**/*.js,e2e/**/*.js"
       - name: Build
         run: dotnet build --configuration Release
       - name: Test with coverage

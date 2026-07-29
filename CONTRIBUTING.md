@@ -96,6 +96,21 @@ If you touch `PdfEditor.Core` or `PdfEditor.NativeHost`, add or update unit test
 the matching project. If you touch the extension ↔ host wire protocol, add a case to
 `PdfEditor.IntegrationTests` too.
 
+The extension's own unit tests are plain `node --test`, and CI runs them:
+
+```bash
+node --test "extension/test/**/*.test.mjs"
+node scripts/check-innerhtml.mjs   # also run as one of the tests above
+```
+
+### Never assign interpolated `innerHTML` in `extension/src/`
+
+The viewer renders text that comes straight out of the document being edited — form
+field names, file names, link URLs, host error strings — on an extension page with
+`chrome.*` privileges. Build nodes with `createElement`/`textContent`. Clearing a
+container with `innerHTML = ''` and assigning a static string literal are both fine;
+anything interpolated is not, and `scripts/check-innerhtml.mjs` fails CI on it.
+
 ### Golden-file regression suite
 
 `tests/PdfEditor.Core.Tests/Golden/` runs a corpus of deliberately awkward documents

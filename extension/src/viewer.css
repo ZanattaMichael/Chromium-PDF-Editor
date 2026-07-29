@@ -597,6 +597,15 @@ textarea.code-editor:focus { outline: 1px solid var(--accent-2); }
   min-height: 24px;
 }
 
+/* Background link parsing (#19): its own slot on the right of the status bar, so a long link
+   scan reports progress without a modal overlay and without overwriting #status. */
+#link-status {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .badge {
   display: inline-block;
   border-radius: 10px;

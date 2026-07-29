@@ -115,6 +115,31 @@ function setStatus(text, busy = false) {
   }
 }
 
+/**
+ * Progress for work that runs in the background while the document stays usable (#19: parsing and
+ * rating links). It reuses the status bar's spinner, but in its own slot: a background task must
+ * never dim the page behind the busy overlay, and must never overwrite a real message in #status.
+ * Pass '' to clear it — every caller has to, on failure as well as on success.
+ */
+function setBackgroundStatus(text) {
+  const el = $('link-status');
+  el.textContent = '';
+  if (!text) {
+    el.hidden = true;
+    return;
+  }
+  const spinner = document.createElement('span');
+  spinner.className = 'spinner';
+  el.appendChild(spinner);
+  el.appendChild(document.createTextNode(text)); // textContent — never interpolated HTML
+  el.hidden = false;
+}
+
+/** Clears a busy status only if it is still the one showing, so a newer message survives. */
+function clearBusyStatus(text) {
+  if ($('busy-text').textContent === text) setStatus('');
+}
+
 function toast(text) {
   setStatus(text);
   setTimeout(() => { if ($('status').textContent === text) setStatus(''); }, 5000);
@@ -163,13 +188,18 @@ function cssToPdf(pageNum, img, cssX, cssY) {
   return { x: p.x + fx * p.width, y: p.y + fy * p.height };
 }
 
-function pdfRectToCss(pageNum, img, region) {
+/**
+ * PDF user-space rect → CSS box on the page image. `size` optionally supplies the image's
+ * {w, h} measured once by the caller: reading clientWidth per call forces a synchronous layout,
+ * which on a page carrying hundreds of link hotspots turns the overlay build into layout thrash.
+ */
+function pdfRectToCss(pageNum, img, region, size = null) {
   const p = pageSize(pageNum);
   const [ua, va] = pageToDisplay(p.rotation, (region.x - p.x) / p.width, (region.y - p.y) / p.height);
   const [ub, vb] = pageToDisplay(p.rotation,
     (region.x + region.width - p.x) / p.width, (region.y + region.height - p.y) / p.height);
-  const w = img.clientWidth;
-  const h = img.clientHeight;
+  const w = size ? size.w : img.clientWidth;
+  const h = size ? size.h : img.clientHeight;
   return {
     left: Math.min(ua, ub) * w,
     top: Math.min(va, vb) * h,
@@ -2512,6 +2542,8 @@ function enableCodeEditorTab(textarea) {
 
 // ---------------------------------------------------------------- links / URLs
 
+const FINDING_LINKS = 'Finding links…';
+
 // Human labels for non-URL link actions (URL links show the URL instead).
 const LINK_KIND_LABELS = {
   javascript: 'JavaScript action',
@@ -2523,7 +2555,37 @@ const LINK_KIND_LABELS = {
   link: 'Link',
 };
 
-/** On load, fetch every link annotation (with hotspot rects), rate the web ones, and draw them. */
+// Only the newest link run may touch link state or the progress indicator. A run is stale as soon
+// as the document changes (state.version) or a newer run of the same pipeline starts, and a stale
+// run's results are dropped — otherwise a scan begun on document A repaints document B's overlay
+// and panel, which is exactly how #24 (the panel showing the previous document's links) would come
+// back. The overlay and the panel are counted separately: they are fetched independently and run
+// concurrently, so one must not cancel the other.
+const linkRuns = { overlay: 0, panel: 0 };
+
+/**
+ * Starts a link run of one pipeline ('overlay' or 'panel'). Every `await` in a link pipeline has
+ * to be followed by `stale()` before anything is written to state or the DOM. `current()` is the
+ * weaker test used for the progress indicator: only a superseded run must keep its hands off it,
+ * or a run cut short by an edit (which bumps the version without starting a new run) would leave
+ * the spinner turning forever.
+ */
+function beginLinkRun(kind) {
+  const run = ++linkRuns[kind];
+  const version = state.version;
+  return {
+    stale: () => run !== linkRuns[kind] || version !== state.version,
+    current: () => run === linkRuns[kind],
+  };
+}
+
+/**
+ * On load, fetch every link annotation (with hotspot rects), rate the web ones, and draw them.
+ *
+ * Runs in the background in two phases so a link-heavy document is usable immediately: the
+ * hotspots are drawn as soon as the annotations are listed (rated "unknown"), and recoloured when
+ * the risk scan — which may reach out to Cloudflare and take seconds — finally comes back.
+ */
 async function refreshLinks() {
   if (!URL_SCANNING_ENABLED) {
     state.linkHotspots = [];
@@ -2531,44 +2593,94 @@ async function refreshLinks() {
     drawLinks();
     return;
   }
+  const link = beginLinkRun('overlay');
+  setBackgroundStatus('Reading links…');
   try {
     const result = await host.call('list-link-hotspots', { pdf: state.pdfB64, pdfPassword: state.password });
+    if (link.stale()) return;
     state.linkHotspots = result.links ?? [];
-    if (state.linkHotspots.some((l) => l.kind === 'uri')) {
-      try {
-        const creds = await chrome.storage.local.get({ cfAccountId: '', cfApiToken: '' });
-        const scan = await host.call('scan-urls', {
-          pdf: state.pdfB64, pdfPassword: state.password,
-          cfAccountId: creds.cfAccountId, cfApiToken: creds.cfApiToken,
-        });
-        state.urlVerdicts = scan.verdicts ?? [];
-      } catch { /* colour falls back to "unknown" */ }
-    } else {
-      state.urlVerdicts = [];
-    }
-    drawLinks();
-  } catch { /* links are a nicety; never block on them */ }
+    state.urlVerdicts = [];
+    drawLinks(); // phase 1: show the hotspots now, unrated, rather than after the scan
+    const uriCount = state.linkHotspots.filter((l) => l.kind === 'uri').length;
+    if (uriCount === 0) return;
+    setBackgroundStatus(`Checking ${uriCount} link${uriCount === 1 ? '' : 's'}…`);
+    try {
+      const creds = await chrome.storage.local.get({ cfAccountId: '', cfApiToken: '' });
+      if (link.stale()) return;
+      const scan = await host.call('scan-urls', {
+        pdf: state.pdfB64, pdfPassword: state.password,
+        cfAccountId: creds.cfAccountId, cfApiToken: creds.cfApiToken,
+      });
+      if (link.stale()) return;
+      state.urlVerdicts = scan.verdicts ?? [];
+      drawLinks(); // phase 2: recolour by risk
+    } catch { /* colour falls back to "unknown" */ }
+  } catch { /* links are a nicety; never block on them */
+  } finally {
+    // Clears on failure as well as on success — but only for the run that is still current, so a
+    // superseded run cannot wipe the newer document's indicator.
+    if (link.current()) setBackgroundStatus('');
+  }
 }
 
-/** (Re)draws the clickable, risk-coloured link hotspots on every laid-out page. */
+/** (Re)draws the clickable, risk-coloured link hotspots on every page that has been rendered. */
 function drawLinks() {
   for (const pe of pageEls) {
-    if (pe.wrap.isConnected) buildLinkLayer(pe, Number(pe.wrap.dataset.page));
+    // Pages that have not rendered yet get their overlay built by renderPageEl when they do;
+    // building it here as well would cost a layout pass per page for nothing.
+    if (pe.wrap.isConnected && pe.renderedKey) buildLinkLayer(pe, Number(pe.wrap.dataset.page));
   }
+}
+
+// Link lookups are memoised on the identity of the arrays they index (both are replaced wholesale,
+// never mutated), because the overlay is rebuilt per page: scanning every hotspot and every verdict
+// for each page made drawing a link-heavy document quadratic in the number of links.
+let hotspotsByPage = { source: null, map: new Map() };
+let verdictsByKey = { source: null, map: new Map() };
+
+/** The drawable hotspots on one page. */
+function hotspotsOnPage(pageNum) {
+  const list = state.linkHotspots ?? [];
+  if (hotspotsByPage.source !== list) {
+    const map = new Map();
+    for (const l of list) {
+      if (!(l.width > 0 && l.height > 0)) continue;
+      const onPage = map.get(l.page);
+      if (onPage) onPage.push(l);
+      else map.set(l.page, [l]);
+    }
+    hotspotsByPage = { source: list, map };
+  }
+  return hotspotsByPage.map.get(pageNum) ?? [];
+}
+
+/** The risk verdict for one link, or undefined when it has not been rated. */
+function verdictForLink(page, url) {
+  const list = state.urlVerdicts ?? [];
+  if (verdictsByKey.source !== list) {
+    const map = new Map();
+    for (const v of list) map.set(`${v.page}|${v.url}`, v);
+    verdictsByKey = { source: list, map };
+  }
+  return verdictsByKey.map.get(`${page}|${url}`);
 }
 
 /** Lays link hotspots over one page, each tinted + dotted by its risk rating. */
 function buildLinkLayer(pe, pageNum) {
   pe.wrap.querySelector('.link-layer')?.remove();
-  const links = (state.linkHotspots ?? []).filter((l) => l.page === pageNum && l.width > 0 && l.height > 0);
+  const links = hotspotsOnPage(pageNum);
   if (links.length === 0) return;
+  // Measure the page image once: the removal above invalidates layout, so reading it per hotspot
+  // forces a reflow per link and makes a link-heavy page take seconds to draw.
+  const size = { w: pe.img.clientWidth, h: pe.img.clientHeight };
   const layer = document.createElement('div');
   layer.className = 'link-layer';
   for (const link of links) {
-    const css = pdfRectToCss(pageNum, pe.img, { x: link.x, y: link.y, width: link.width, height: link.height });
+    const css = pdfRectToCss(
+      pageNum, pe.img, { x: link.x, y: link.y, width: link.width, height: link.height }, size);
     if (css.width <= 0 || css.height <= 0) continue;
     const isUri = link.kind === 'uri' && !!link.url;
-    const verdict = isUri ? state.urlVerdicts.find((v) => v.url === link.url && v.page === link.page) : null;
+    const verdict = isUri ? verdictForLink(link.page, link.url) : null;
     const level = isUri ? (verdict?.level ?? 'unknown') : 'unknown';
     // A web link becomes a real, clickable anchor only once the user has enabled links; until then
     // (and for in-document actions) it's shown, risk-coloured, but inert — never auto-navigable.
@@ -2776,16 +2888,21 @@ function showFieldPopup(marker, field) {
 }
 
 async function openLinks() {
+  const link = beginLinkRun('panel');
   try {
-    setStatus('Finding links…', true);
+    setStatus(FINDING_LINKS, true);
     const result = await host.call('list-urls', { pdf: state.pdfB64, pdfPassword: state.password });
+    // The document may have been replaced while the list was being fetched; filling the panel with
+    // the previous document's URLs is #24 all over again, so drop the answer instead.
+    if (link.stale()) { clearBusyStatus(FINDING_LINKS); return; }
     setStatus('');
     state.links = result.links ?? [];
     $('links-enable').checked = state.keepLinks;
     showPanel('panel-links');
-    if (state.urlVerdicts.length === 0) await scanLinks();
+    if (state.urlVerdicts.length === 0) await scanLinks(link);
     else { renderLinks(); drawLinks(); }
   } catch (e) {
+    if (link.stale()) { clearBusyStatus(FINDING_LINKS); return; }
     fail(e);
   }
 }
@@ -2799,13 +2916,12 @@ function renderLinks() {
   $('links-hint').hidden = !has || state.keepLinks;
   $('links-rescan').hidden = !has || !state.keepLinks;
 
-  const verdictFor = (l) => state.urlVerdicts.find((v) => v.url === l.url && v.page === l.page);
   for (const link of state.links) {
     const li = document.createElement('li');
     if (!state.keepLinks) li.className = 'link-disabled';
     const row = document.createElement('div');
     row.className = 'link-row';
-    const verdict = state.keepLinks ? verdictFor(link) : null;
+    const verdict = state.keepLinks ? verdictForLink(link.page, link.url) : null;
 
     const dot = document.createElement('span');
     dot.className = `link-dot ${verdict ? verdict.level : 'unknown'}`;
@@ -2838,22 +2954,28 @@ function renderLinks() {
   }
 }
 
-async function scanLinks() {
+/** Rates the panel's URLs. `link` continues an existing run (from openLinks); otherwise a new one. */
+async function scanLinks(link = beginLinkRun('panel')) {
   if (state.links.length === 0) { renderLinks(); return; }
   const creds = await chrome.storage.local.get({ cfAccountId: '', cfApiToken: '' });
+  if (link.stale()) return;
   const usingCf = !!(creds.cfAccountId && creds.cfApiToken);
+  const busyText = usingCf ? 'Scanning links with Cloudflare…' : 'Rating links…';
   try {
-    setStatus(usingCf ? 'Scanning links with Cloudflare…' : 'Rating links…', true);
+    setStatus(busyText, true);
     const result = await host.call('scan-urls', {
       pdf: state.pdfB64, pdfPassword: state.password,
       cfAccountId: creds.cfAccountId, cfApiToken: creds.cfApiToken,
     });
+    // Verdicts for a document that is no longer open must not colour the one that is.
+    if (link.stale()) { clearBusyStatus(busyText); return; }
     state.urlVerdicts = result.verdicts ?? [];
     setStatus('');
     renderLinks();
     drawLinks();
     if (!usingCf) toast('Rated links offline. Add a Cloudflare token in Options for live scanning.');
   } catch (e) {
+    if (link.stale()) { clearBusyStatus(busyText); return; }
     fail(e);
     renderLinks();
   }

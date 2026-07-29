@@ -7,8 +7,9 @@ const path = require('node:path');
 const { launchExtension } = require('../helpers/harness');
 const {
   buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildFormWithButtonScriptPdf, buildJavaScriptPdf,
-  buildLinkPdf, buildJsLinkPdf, buildLinkOnPage2Pdf, buildLinkOverTextPdf,
+  buildLinkPdf, buildJsLinkPdf, buildLinkOnPage2Pdf, buildLinkOverTextPdf, buildMultiLinkPdf,
 } = require('../helpers/pdf');
+const { installHostGate } = require('../helpers/hostgate');
 
 /** @type {Awaited<ReturnType<typeof launchExtension>>} */
 let ext;
@@ -721,6 +722,108 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await hotspot.hover();
     await expect(page.locator('#link-popup')).toBeVisible();
     await expect(page.locator('#link-popup .lp-url')).toHaveText('https://github.com/example/repo');
+    await page.close();
+  });
+
+  test('links: hotspots are drawn before the risk scan finishes, with a progress hint (#19)', async () => {
+    // #19: the link pipeline used to draw nothing until the URL risk scan had come back, so a
+    // link-heavy document showed no hotspots at all for as long as the scan took. The hotspots
+    // must now appear as soon as the annotations are listed and be recoloured afterwards, with a
+    // non-blocking indicator saying the rating is still running.
+    const file = path.join(fixtureDir, 'link-async.pdf');
+    fs.writeFileSync(file, buildLinkPdf('https://github.com/example/repo'));
+
+    const page = await ext.context.newPage();
+    await installHostGate(page, { hold: ['scan-urls'] });
+    await page.goto(ext.viewerUrl);
+    const chooser = page.waitForEvent('filechooser');
+    await page.click('#btn-open-empty');
+    await (await chooser).setFiles(file);
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+
+    // The hotspot is on the page while the rating is still parked, shown as not-yet-rated.
+    const hotspot = page.locator('.page[data-page="1"] .link-hotspot');
+    await expect(hotspot).toHaveCount(1, { timeout: 15000 });
+    await expect(hotspot).toHaveClass(/risk-unknown/);
+
+    // The indicator says so — and does not clobber the active-content warning in the status bar.
+    await expect(page.locator('#link-status')).toBeVisible();
+    await expect(page.locator('#link-status')).toContainText(/link/i);
+    await expect(page.locator('#status')).toContainText('disabled and removed when you save');
+
+    // Releasing the scan recolours the hotspot and clears the indicator.
+    await page.evaluate(() => window.__hostGate.release());
+    await expect(hotspot).toHaveClass(/risk-yellow/, { timeout: 15000 });
+    await expect(page.locator('#link-status')).toBeHidden();
+    await page.close();
+  });
+
+  test('links: a failed link scan clears the progress indicator (#19)', async () => {
+    // A spinner that never stops is worse than none: the indicator has to clear on failure too.
+    const file = path.join(fixtureDir, 'link-fail.pdf');
+    fs.writeFileSync(file, buildLinkPdf('https://github.com/example/repo'));
+
+    const page = await ext.context.newPage();
+    await installHostGate(page, { fail: ['list-link-hotspots'] });
+    await page.goto(ext.viewerUrl);
+    const chooser = page.waitForEvent('filechooser');
+    await page.click('#btn-open-empty');
+    await (await chooser).setFiles(file);
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+
+    // No hotspots (the listing failed) and, crucially, no stuck spinner. The indicator element has
+    // to exist for "hidden" to mean anything — otherwise this assertion would pass vacuously.
+    await expect(page.locator('#link-status')).toHaveCount(1);
+    await expect(page.locator('#link-status')).toBeHidden({ timeout: 15000 });
+    await expect(page.locator('#link-status')).toHaveText('');
+    await expect(page.locator('.page[data-page="1"] .link-hotspot')).toHaveCount(0);
+    await page.close();
+  });
+
+  test('links: a scan that lands after another document is opened is discarded (#19)', async () => {
+    // The race that making the link pipeline asynchronous invites, and the back door into #24:
+    // results for document A must never populate the panel or the overlay of document B. The gate
+    // parks A's link responses until B is fully on screen, so A's results land strictly last.
+    const stale = path.join(fixtureDir, 'link-stale-a.pdf');
+    fs.writeFileSync(stale, buildMultiLinkPdf([
+      'https://example.com/STALE-DOC-A/one',
+      'https://example.com/STALE-DOC-A/two',
+      'https://example.com/STALE-DOC-A/three',
+    ]));
+    const fresh = path.join(fixtureDir, 'link-fresh-b.pdf');
+    fs.writeFileSync(fresh, buildLinkPdf('https://example.com/FRESH-DOC-B'));
+
+    const page = await ext.context.newPage();
+    await installHostGate(page, { hold: ['list-link-hotspots', 'scan-urls', 'list-urls'] });
+    await page.goto(ext.viewerUrl);
+    const chooserA = page.waitForEvent('filechooser');
+    await page.click('#btn-open-empty');
+    await (await chooserA).setFiles(stale);
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+
+    // Ask for A's Links panel too, so the panel fetch is in flight as well, then wait until every
+    // one of A's link requests is parked.
+    await ui(page, '#btn-links');
+    await expect.poll(() => page.evaluate(() => window.__hostGate.heldCount()), { timeout: 20000 })
+      .toBeGreaterThanOrEqual(2);
+
+    // Let document B load unimpeded; A's responses stay parked.
+    await page.evaluate(() => window.__hostGate.stopHolding());
+    const chooserB = page.waitForEvent('filechooser');
+    await ui(page, '#btn-open');
+    await (await chooserB).setFiles(fresh);
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+    const hotspots = page.locator('.page[data-page="1"] .link-hotspot');
+    await expect(hotspots).toHaveCount(1, { timeout: 20000 });
+    if (await page.locator('#panel-links').isHidden()) await ui(page, '#btn-links');
+    await expect(page.locator('#links-list')).toContainText('FRESH-DOC-B');
+
+    // Now deliver document A's results. They must be dropped on the floor.
+    expect(await page.evaluate(() => window.__hostGate.release())).toBeGreaterThan(0);
+    await page.waitForTimeout(1500); // give the stale continuations every chance to apply
+    await expect(hotspots).toHaveCount(1);
+    await expect(page.locator('#links-list')).not.toContainText('STALE-DOC-A');
+    await expect(page.locator('#links-list')).toContainText('FRESH-DOC-B');
     await page.close();
   });
 

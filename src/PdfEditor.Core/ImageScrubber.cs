@@ -65,8 +65,8 @@ internal static class ImageScrubber
     /// <summary>
     /// Reads the scrubbed bitmap out as packed 8-bit RGB, the form the PDF stream wants.
     /// <para>
-    /// One bulk <see cref="SKPixmap.ReadPixels(SKImageInfo, IntPtr, int, int, int)"/> into a pinned
-    /// buffer, then a walk to drop the alpha byte. This used to encode the bitmap to PNG, decode that
+    /// A row-at-a-time <see cref="SKPixmap.ReadPixels(SKImageInfo, IntPtr, int, int, int)"/> into a
+    /// pinned buffer, dropping the alpha byte as it goes. This used to encode the bitmap to PNG, decode that
     /// PNG straight back into a second bitmap, and read the copy a pixel at a time through
     /// <c>GetPixel</c> — one managed-to-native call per pixel, 16.7 million of them on a 4096-square
     /// image, on top of a PNG compress/decompress round trip whose output was never otherwise used
@@ -83,27 +83,35 @@ internal static class ImageScrubber
     private static byte[]? ReadRgb(SKBitmap bitmap)
     {
         int width = bitmap.Width, height = bitmap.Height;
-        var info = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-        int rowBytes = info.RowBytes;
-        var rgba = new byte[checked(rowBytes * height)];
+        // A row at a time, into one reused buffer. Reading the whole surface in a single call would
+        // need a second full-size copy on the managed heap (4 bytes per pixel, 64 MiB on a
+        // 4096-square image) purely to strip its alpha byte; a row costs kilobytes, the extra
+        // ReadPixels calls are one per row rather than one per pixel, and it measured faster.
+        var rowInfo = new SKImageInfo(width, 1, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        int rowBytes = rowInfo.RowBytes;
+        var row = new byte[rowBytes];
+        var rgb = new byte[checked(width * height * 3)];
 
         using var pixels = bitmap.PeekPixels();
         if (pixels == null) return null;
 
-        var pin = GCHandle.Alloc(rgba, GCHandleType.Pinned);
+        var pin = GCHandle.Alloc(row, GCHandleType.Pinned);
         try
         {
-            if (!pixels.ReadPixels(info, pin.AddrOfPinnedObject(), rowBytes, 0, 0)) return null;
+            IntPtr buffer = pin.AddrOfPinnedObject();
+            int dst = 0;
+            for (int y = 0; y < height; y++)
+            {
+                if (!pixels.ReadPixels(rowInfo, buffer, rowBytes, 0, y)) return null;
+                for (int src = 0; src < rowBytes; src += 4)
+                {
+                    rgb[dst++] = row[src];
+                    rgb[dst++] = row[src + 1];
+                    rgb[dst++] = row[src + 2];
+                }
+            }
         }
         finally { pin.Free(); }
-
-        var rgb = new byte[checked(width * height * 3)];
-        for (int src = 0, dst = 0; src < rgba.Length; src += 4)
-        {
-            rgb[dst++] = rgba[src];
-            rgb[dst++] = rgba[src + 1];
-            rgb[dst++] = rgba[src + 2];
-        }
         return rgb;
     }
 

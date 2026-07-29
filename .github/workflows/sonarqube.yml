@@ -70,7 +70,10 @@ jobs:
           /d:sonar.host.url="https://sonarcloud.io"
           /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,coverage-report/**,coverage-results/**,coverage-sonar/**,dist/**,e2e/test-results/**,e2e/playwright-report/**"
           /d:sonar.cs.opencover.reportsPaths="coverage-sonar/**/coverage.opencover.xml"
-          /d:sonar.coverage.exclusions="**/*.css,**/*.html,**/*.yml,**/*.yaml,**/*.ps1,**/*.sh,**/*.py,extension/**/*.js,e2e/**/*.js"
+          # `**/*.mjs` for the same reason as `**/*.py`: the imported coverage report is C#-only
+          # (opencover from `dotnet test`), so any language it cannot measure must be excluded or
+          # it counts as 0% covered on new code. The .mjs files are covered by `node --test`.
+          /d:sonar.coverage.exclusions="**/*.css,**/*.html,**/*.yml,**/*.yaml,**/*.ps1,**/*.sh,**/*.py,**/*.mjs,extension/**/*.js,e2e/**/*.js"
       - name: Build
         run: dotnet build --configuration Release
       - name: Test with coverage

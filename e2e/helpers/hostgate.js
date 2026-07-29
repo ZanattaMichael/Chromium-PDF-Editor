@@ -11,18 +11,23 @@
  * In the page, `window.__hostGate` exposes:
  *   hold(actions)   — start holding responses for these actions (replaces the current set)
  *   fail(actions)   — answer these actions with an error instead of forwarding them
+ *   failWith(text)  — set the message the injected error carries. The viewer surfaces host error
+ *                    strings verbatim (status line, activity console), and a hostile document can
+ *                    influence them, so a test needs to be able to choose that text.
  *   stopHolding()   — let *new* requests through; already-parked responses stay parked
  *   release()       — deliver every parked response, in arrival order
  *   heldCount()     — how many responses are currently parked
  */
-async function installHostGate(page, { hold = [], fail = [] } = {}) {
-  await page.addInitScript(([heldActions, failedActions]) => {
+async function installHostGate(page, { hold = [], fail = [], failMessage } = {}) {
+  await page.addInitScript(([heldActions, failedActions, failedMessage]) => {
     const gate = {
       held: new Set(heldActions),
       failed: new Set(failedActions),
+      message: failedMessage,
       parked: [],
       hold(actions) { gate.held = new Set(actions); },
       fail(actions) { gate.failed = new Set(actions); },
+      failWith(text) { gate.message = text; },
       stopHolding() { gate.held = new Set(); },
       release() {
         const queued = gate.parked.splice(0);
@@ -56,7 +61,7 @@ async function installHostGate(page, { hold = [], fail = [] } = {}) {
     };
 
     const answerWithFailure = (listeners, id) => setTimeout(
-      () => notify(listeners, { id, ok: false, result: { error: 'injected host failure' } }), 0);
+      () => notify(listeners, { id, ok: false, result: { error: gate.message } }), 0);
 
     const connect = chrome.runtime.connectNative.bind(chrome.runtime);
     chrome.runtime.connectNative = (name) => {
@@ -79,7 +84,7 @@ async function installHostGate(page, { hold = [], fail = [] } = {}) {
         disconnect: () => port.disconnect(),
       };
     };
-  }, [hold, fail]);
+  }, [hold, fail, failMessage ?? 'injected host failure']);
 }
 
 module.exports = { installHostGate };

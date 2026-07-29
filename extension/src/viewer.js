@@ -3,8 +3,31 @@
 
 import { HostClient, bytesToBase64, base64ToBytes } from './host-client.js';
 import { runFormScript } from './formScript.js';
+import { ActivityLog, formatTime } from './activity-log.js';
 
 const host = new HostClient();
+
+// Everything the viewer does gets recorded here and shown by Help ▸ Activity console. The point
+// (#72) is that a failure the UI recovers from — a page that renders blank, a forms panel that
+// says "no fields" because listing them threw — still leaves a trace someone can read.
+const activity = new ActivityLog();
+
+// Every host round-trip is timed and logged: the action name and its duration, which is the one
+// number worth having when the editor feels slow, plus the error when it fails. Wrapping `call`
+// once here means no call site can forget, and no failure can be swallowed before it is recorded.
+const rawHostCall = host.call.bind(host);
+host.call = async (action, payload = {}) => {
+  const started = performance.now();
+  const elapsed = () => `${Math.round(performance.now() - started)} ms`;
+  try {
+    const result = await rawHostCall(action, payload);
+    activity.add('info', action, elapsed());
+    return result;
+  } catch (e) {
+    activity.add('error', `${action} failed`, `${e?.message ?? e} (after ${elapsed()})`);
+    throw e;
+  }
+};
 
 // URL/link handling: a document with links shows a warning badge, links are disabled (stripped on
 // save) by default, and the 🔗 Links panel lists every URL (the "source") so the user can review
@@ -78,6 +101,7 @@ function setWorkingPdf(bytes, base64) {
   thumbCache.clear();
   spanCache.clear();
   inkByPage.clear();  // uncommitted freehand strokes belong to the old document
+  pageRenderFailures.clear(); // a new document's pages have not failed yet
   prefetchToken++; // cancel any in-flight prefetch for the previous document
 }
 
@@ -147,7 +171,132 @@ function toast(text) {
 
 function fail(err) {
   console.error(err);
+  activity.add('error', 'error', err?.message ?? String(err));
   setStatus(`⚠ ${err.message ?? err}`);
+}
+
+// -------------------------------------------------------- activity console
+// A dockable log at the bottom of the window. It is strictly additive: it never touches #status,
+// so a toast can't be clobbered by a log entry the way placeField()'s once was.
+
+const CONSOLE_OPEN_KEY = 'activityConsoleOpen';
+let consoleRenderedSeq = 0;   // seq of the newest entry that is in the DOM
+let consoleFlushQueued = false;
+
+function consoleOpen() { return !$('console-pane').hidden; }
+
+/**
+ * One row, built entirely from nodes. Messages and details carry document-derived text — host
+ * error strings, file names, form-field names, link URLs — so this must never grow an innerHTML
+ * (#74); scripts/check-innerhtml.mjs enforces that.
+ */
+function consoleEntryEl(entry) {
+  const row = document.createElement('div');
+  row.className = `console-entry ${entry.level}`;
+  const time = document.createElement('span');
+  time.className = 'console-time';
+  time.textContent = formatTime(entry.time);
+  const level = document.createElement('span');
+  level.className = 'console-level';
+  level.textContent = entry.level;
+  const message = document.createElement('span');
+  message.className = 'console-message';
+  message.textContent = entry.message;
+  if (entry.detail) {
+    const detail = document.createElement('span');
+    detail.className = 'console-detail';
+    detail.textContent = ` — ${entry.detail}`;
+    message.appendChild(detail);
+  }
+  row.append(time, level, message);
+  return row;
+}
+
+/**
+ * Appends everything logged since the last flush in one batch on the next frame — and does
+ * nothing at all while the pane is closed, so rendering a link- or field-heavy page cannot pay
+ * for per-entry DOM work (#19). Opening the pane rebuilds from the store.
+ */
+function scheduleConsoleFlush() {
+  if (consoleFlushQueued || !consoleOpen()) return;
+  consoleFlushQueued = true;
+  requestAnimationFrame(flushConsole);
+}
+
+function flushConsole() {
+  consoleFlushQueued = false;
+  const logEl = $('console-log');
+  const pending = activity.entries.filter((e) => e.seq > consoleRenderedSeq);
+  if (pending.length > 0) {
+    const batch = document.createDocumentFragment();
+    for (const entry of pending) batch.appendChild(consoleEntryEl(entry));
+    logEl.appendChild(batch);
+    consoleRenderedSeq = pending[pending.length - 1].seq;
+    // The store caps what it retains; drop the rows it no longer holds so a long session's DOM
+    // stays bounded too.
+    while (logEl.childElementCount > activity.capacity) logEl.firstElementChild.remove();
+    if ($('console-autoscroll').checked) logEl.scrollTop = logEl.scrollHeight;
+  }
+  updateConsoleCount();
+}
+
+function updateConsoleCount() {
+  const total = activity.entries.length;
+  const dropped = activity.dropped;
+  $('console-count').textContent = total === 0
+    ? 'no entries yet'
+    : `${total} entr${total === 1 ? 'y' : 'ies'}${dropped > 0 ? `, oldest ${dropped} dropped` : ''}`;
+}
+
+function setConsoleOpen(open, persist = true) {
+  $('console-pane').hidden = !open;
+  $('btn-console').setAttribute('aria-pressed', String(open));
+  if (open) {
+    $('console-log').textContent = '';  // rebuild from the store, which kept logging while closed
+    consoleRenderedSeq = 0;
+    flushConsole();
+  }
+  // Remembering the pane's state is a one-key write; the log itself is deliberately not persisted.
+  if (persist) {
+    chrome.storage?.local?.set({ [CONSOLE_OPEN_KEY]: open })
+      ?.catch((e) => activity.add('warn', 'could not save the console state', e?.message ?? e));
+  }
+}
+
+async function copyConsole() {
+  try {
+    await navigator.clipboard.writeText(activity.toText());
+    toast('Activity log copied to the clipboard.');
+  } catch (e) {
+    fail(e);
+  }
+}
+
+function initConsole() {
+  activity.subscribe((entry) => {
+    if (entry === null) {
+      $('console-log').textContent = '';
+      consoleRenderedSeq = 0;
+      updateConsoleCount();
+      return;
+    }
+    scheduleConsoleFlush();
+  });
+  $('btn-console').addEventListener('click', () => setConsoleOpen(!consoleOpen()));
+  $('console-close').addEventListener('click', () => setConsoleOpen(false));
+  $('console-clear').addEventListener('click', () => activity.clear());
+  $('console-copy').addEventListener('click', copyConsole);
+  updateConsoleCount();
+}
+
+/** Restores the pane's last open/closed state (the log itself never persists). */
+async function restoreConsoleState() {
+  try {
+    const stored = await chrome.storage.local.get({ [CONSOLE_OPEN_KEY]: false });
+    if (stored[CONSOLE_OPEN_KEY]) setConsoleOpen(true, false);
+  } catch (e) {
+    activity.add('warn', 'could not read the console state', e?.message ?? e);
+  }
 }
 
 function pageSize(pageNum = state.page) {
@@ -308,7 +457,11 @@ async function refreshSignatures() {
       pdf: state.pdfB64, pdfPassword: state.password,
     });
     state.signatures = result.signatures ?? [];
-  } catch {
+  } catch (e) {
+    // Kept non-fatal — but "this document is unsigned" and "we could not tell" are different
+    // claims, and the badge only shows the first. Say which one this is (#72).
+    activity.add('warn', 'signatures could not be listed',
+      `${e?.message ?? e} — the document will be shown as unsigned`);
     state.signatures = [];
   }
 }
@@ -319,7 +472,11 @@ async function refreshSafety() {
     state.safety = await host.call('scan-safety', {
       pdf: state.pdfB64, pdfPassword: state.password,
     });
-  } catch {
+  } catch (e) {
+    // A failed scan is not a clean document: nothing gets badged, and the strip-on-save default
+    // has nothing to strip. That silence is exactly what #72 is about.
+    activity.add('warn', 'active-content scan failed',
+      `${e?.message ?? e} — embedded JavaScript and link URLs are unknown for this document`);
     state.safety = null;
   }
 }
@@ -373,8 +530,11 @@ function prefetchAround(centerPage, dpi) {
         if (renderCache.has(cacheKey(page, dpi))) continue;
         try {
           await renderToCache(page, dpi);
-        } catch {
-          /* a prefetch failure is never fatal — the page renders on demand instead */
+        } catch (e) {
+          // Never fatal — the page renders on demand instead. host.call already logged the error
+          // itself; this records which page it cost us, so a document that only ever fails to
+          // prefetch is distinguishable from one that never tried.
+          activity.add('info', `prefetch of page ${page} abandoned`, e?.message ?? e);
         }
         await new Promise((r) => setTimeout(r, 0)); // yield so the UI stays responsive
       }
@@ -460,6 +620,7 @@ async function renderPageEl(pageNum) {
   if (cached !== undefined) {
     pe.img.src = `data:image/png;base64,${cached}`;
     pe.renderedKey = key;
+    clearPageError(pe, pageNum);
     ensureTextLayer(pe, pageNum);
     buildLinkLayer(pe, pageNum); // a cached page still needs its overlays (re)built for this page
     buildFieldLayer(pe, pageNum);
@@ -470,12 +631,43 @@ async function renderPageEl(pageNum) {
     if (cacheKey(pageNum, currentDpi()) !== key || !pe.wrap.isConnected) return;
     pe.img.src = `data:image/png;base64,${png}`;
     pe.renderedKey = key;
+    clearPageError(pe, pageNum);
     ensureTextLayer(pe, pageNum);
     buildLinkLayer(pe, pageNum); // draw any link hotspots for this page
     buildFieldLayer(pe, pageNum); // outline any form fields for this page
-  } catch {
-    /* leave the placeholder blank; it renders again when it next scrolls into view */
+  } catch (e) {
+    // Retrying on scroll is deliberate, so this still doesn't throw and still leaves the
+    // placeholder in place. What changes (#72) is that the failure is no longer invisible: it is
+    // always logged, and a page that fails *twice running for the same render* is not a hiccup
+    // during fast scrolling — it gets a visible placeholder rather than the silent blank
+    // rectangle an out-of-memory rasteriser produced in #20.
+    const failures = (pageRenderFailures.get(pageNum) ?? 0) + 1;
+    pageRenderFailures.set(pageNum, failures);
+    const repeated = failures >= PAGE_ERROR_AFTER;
+    activity.add(repeated ? 'error' : 'warn', `page ${pageNum} did not render`,
+      `${e?.message ?? e}${repeated ? ' (repeated)' : ' — retrying when it scrolls back into view'}`);
+    if (repeated && pe.renderedKey !== key && pe.wrap.isConnected) showPageError(pe);
   }
+}
+
+// Consecutive render failures per page, cleared the moment one succeeds (and on a new document,
+// via setWorkingPdf). Keyed by page rather than by page element because zooming rebuilds every
+// element, and by page rather than by render key because the observer retries the same key.
+const pageRenderFailures = new Map();
+const PAGE_ERROR_AFTER = 2;
+
+/** Replaces a persistently blank page with something that says so. */
+function showPageError(pe) {
+  if (pe.wrap.querySelector('.page-error')) return;
+  const note = document.createElement('div');
+  note.className = 'page-error';
+  note.textContent = '⚠ This page could not be rendered. See Help ▸ Activity console for details.';
+  pe.wrap.insertBefore(note, pe.overlay);
+}
+
+function clearPageError(pe, pageNum) {
+  pageRenderFailures.delete(pageNum);
+  pe.wrap.querySelector('.page-error')?.remove();
 }
 
 // ------------------------------------------------------ selectable text layer
@@ -491,8 +683,12 @@ async function ensureTextLayer(pe, pageNum) {
       });
       spans = result.spans ?? [];
       spanCache.set(key, spans);
-    } catch {
-      return; // selection is a nicety; never block rendering on it
+    } catch (e) {
+      // Selection is a nicety; never block rendering on it. But "this page has no selectable
+      // text" and "we could not read its text" look identical on screen (#72).
+      activity.add('warn', `text layer unavailable on page ${pageNum}`,
+        `${e?.message ?? e} — text on this page cannot be selected or right-click edited`);
+      return;
     }
   }
   if (!pe.wrap.isConnected || pe.textKey === key) return;
@@ -634,8 +830,10 @@ async function renderThumb(pageNum) {
     t.img.src = `data:image/png;base64,${png}`;
     if (t.skeleton.parentNode) t.skeleton.replaceWith(t.img);
     t.renderedKey = key;
-  } catch {
-    /* leave the skeleton; it retries when it next scrolls into view */
+  } catch (e) {
+    // Leave the skeleton; it retries when it next scrolls into view. Logged so a rail that stays
+    // grey is traceable to the failure that caused it rather than looking like slow rendering.
+    activity.add('warn', `thumbnail for page ${pageNum} did not render`, e?.message ?? e);
   }
 }
 
@@ -763,7 +961,9 @@ function renderRedactList() {
   list.innerHTML = '';
   for (const [index, region] of state.regions.entries()) {
     const item = document.createElement('li');
-    item.innerHTML = `<span>#${index + 1} — page ${region.page}</span>`;
+    const label = document.createElement('span');
+    label.textContent = `#${index + 1} — page ${region.page}`;
+    item.appendChild(label);
     const remove = document.createElement('button');
     remove.textContent = '✕';
     remove.addEventListener('click', () => {
@@ -1108,6 +1308,7 @@ function hidePanels() {
 }
 
 function setTool(tool) {
+  if (state.tool !== tool) activity.add('info', 'tool changed', `${state.tool} → ${tool}`);
   if (state.tool === 'draw' && tool !== 'draw') clearDrawing(); // drop uncommitted strokes
   state.tool = tool;
   for (const button of document.querySelectorAll('.tool')) button.classList.remove('active');
@@ -1129,7 +1330,13 @@ function setTool(tool) {
 /** Small form dialog; resolves with {fieldId: value} or null when cancelled. */
 function promptDialog(title, fields, confirmLabel = 'OK') {
   return new Promise((resolve) => {
-    modal.innerHTML = `<h2>${title}</h2>`;
+    // The heading is built as a node, not interpolated HTML: every current caller passes a
+    // hardcoded title, but nothing in the signature says so, and the rule in
+    // scripts/check-innerhtml.mjs is only enforceable with no exemptions (#74).
+    modal.innerHTML = '';
+    const heading = document.createElement('h2');
+    heading.textContent = title;
+    modal.appendChild(heading);
     const inputs = {};
     for (const field of fields) {
       const label = document.createElement('label');
@@ -1388,7 +1595,13 @@ async function applyHighlight(region) {
       });
       spans = r.spans ?? [];
       spanCache.set(`${state.version}|${region.page}`, spans);
-    } catch { spans = []; }
+    } catch (e) {
+      // Falls back to highlighting the whole dragged box instead of snapping to words — a
+      // visibly different result, so record why (#72).
+      activity.add('warn', 'highlight could not snap to words',
+        `${e?.message ?? e} — highlighting the whole selected box instead`);
+      spans = [];
+    }
   }
   const covered = spans.filter((s) => rectsIntersect(s, region))
     .map((s) => ({ x: s.x, y: s.y, width: s.width, height: s.height }));
@@ -1868,7 +2081,9 @@ async function openFromBytes(bytes, name) {
     state.keepActiveContent = false; // re-arm the strip-on-save default for each new document
     state.keepLinks = false;
     state.urlVerdicts = [];
+    activity.add('info', 'opening document', `${name} (${bytes.length} bytes)`);
     await loadDocument(bytes, name);
+    activity.add('info', 'document opened', `${name} — ${state.info.pageCount} page(s)`);
     toast(`Opened ${name}.`);
   } catch (e) {
     fail(e);
@@ -1912,7 +2127,10 @@ function looksLikePdfUrl(rawUrl) {
     if (!/^https?:|^file:/.test(parsed.protocol)) return false;
     if (parsed.protocol !== 'file:' && isPrivateOrLocalHost(parsed.hostname)) return false;
     return parsed.pathname.toLowerCase().endsWith('.pdf');
-  } catch {
+  } catch (e) {
+    // Unparseable input is a rejection, not a crash — but record what was rejected and why, so a
+    // legitimate URL the viewer refuses can be diagnosed instead of guessed at (#72).
+    activity.add('warn', 'rejected the src parameter', `${rawUrl} — ${e?.message ?? e}`);
     return false;
   }
 }
@@ -1979,7 +2197,11 @@ async function showSafetyDialog() {
     pre.textContent = sources.length
       ? sources.map((src, i) => `/* — script ${i + 1} — */\n${src}`).join('\n\n')
       : (s.samples?.join('\n') || '(source unavailable)');
-  } catch {
+  } catch (e) {
+    // Falls back to the scan's samples. Worth recording: the dialog then shows a *partial* view
+    // of the active content it is warning about, which is not what it appears to be (#72).
+    activity.add('warn', 'full script sources unavailable',
+      `${e?.message ?? e} — showing the scan's samples instead`);
     pre.textContent = s.samples?.join('\n') || '(source unavailable)';
   }
 
@@ -2614,8 +2836,17 @@ async function refreshLinks() {
       if (link.stale()) return;
       state.urlVerdicts = scan.verdicts ?? [];
       drawLinks(); // phase 2: recolour by risk
-    } catch { /* colour falls back to "unknown" */ }
-  } catch { /* links are a nicety; never block on them */
+    } catch (e) {
+      // Every hotspot's colour falls back to "unknown" — which reads as "not yet rated", not as
+      // "rating failed". Say which it was (#72).
+      activity.add('warn', 'link rating failed',
+        `${e?.message ?? e} — links stay shown as unrated`);
+    }
+  } catch (e) {
+    // Links are a nicety; never block on them. But with no hotspots the document looks like it
+    // simply has none, which is the same class of silent lie as an empty forms panel (#72).
+    activity.add('warn', 'links could not be read',
+      `${e?.message ?? e} — the document will appear to contain no links`);
   } finally {
     // Clears on failure as well as on success — but only for the run that is still current, so a
     // superseded run cannot wipe the newer document's indicator.
@@ -2763,7 +2994,15 @@ async function refreshFormFields() {
   try {
     const result = await host.call('form-fields', { pdf: state.pdfB64, pdfPassword: state.password });
     state.formFields = result.fields ?? [];
-  } catch { state.formFields = []; }
+  } catch (e) {
+    // The named case in #72: an empty list makes the panel say "This document has no fillable
+    // form fields", which is a claim about the document, not about a failed call. The panel's
+    // behaviour is unchanged (there is nothing to fill either way) but the reason is now on
+    // record instead of being invented.
+    activity.add('error', 'form fields could not be listed',
+      `${e?.message ?? e} — the document will appear to have no fillable fields`);
+    state.formFields = [];
+  }
   drawFormFields();
 }
 
@@ -3022,7 +3261,9 @@ function printDocument() {
       frame.contentWindow.print();
       toast('Opening the browser print dialog…');
       cleanup();
-    } catch {
+    } catch (e) {
+      activity.add('warn', 'in-page printing was blocked',
+        `${e?.message ?? e} — opening the document in a new tab instead`);
       handled = false; // let the tab fallback take over
       openInTab();
     }
@@ -3036,6 +3277,7 @@ function printDocument() {
 
 async function save() {
   let bytes = state.pdf;
+  activity.add('info', 'saving document', state.fileName);
   const stripJs = state.safety?.javaScriptCount > 0 && !state.keepActiveContent;
   // URL scanning is off for now: leave link URLs untouched on save.
   const stripUrls = URL_SCANNING_ENABLED && state.safety?.urlCount > 0 && !state.keepLinks;
@@ -3064,18 +3306,25 @@ async function save() {
       const writable = await handle.createWritable();
       await writable.write(blob);
       await writable.close();
+      activity.add('info', 'document saved', handle.name);
       toast(`Saved ${handle.name}.`);
       return;
     }
   } catch (e) {
-    if (e.name === 'AbortError') return;
+    if (e.name === 'AbortError') {
+      activity.add('info', 'save cancelled', state.fileName);
+      return;
+    }
     // fall through to the downloads API
+    activity.add('warn', 'the save dialog failed',
+      `${e?.message ?? e} — falling back to the downloads API`);
   }
   chrome.downloads.download({
     url: URL.createObjectURL(blob),
     filename: suggested,
     saveAs: true,
   });
+  activity.add('info', 'document saved via downloads', suggested);
   toast('Saving via downloads…');
 }
 
@@ -3232,6 +3481,7 @@ function wire() {
   $('sign-cancel').addEventListener('click', () => { hidePanels(); setTool('select'); });
 
   initMenus();
+  initConsole();
   initSignaturePad();
   window.addEventListener('resize', drawRegions);
 }
@@ -3263,6 +3513,8 @@ function closeAllMenus() {
 
 async function start() {
   wire();
+  await restoreConsoleState();
+  activity.add('info', 'viewer started');
   try {
     await host.call('ping');
     $('host-status').textContent = '✓ Native host connected.';

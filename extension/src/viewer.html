@@ -64,6 +64,17 @@
       </div>
     </div>
 
+    <!-- Help. Unlike Read/Edit this is never disabled: the activity console is at its most
+         useful before a document loads, and while an open is failing. -->
+    <div class="menu-group" id="menu-help">
+      <button class="menu-trigger" id="menu-help-trigger" aria-haspopup="true"
+        aria-expanded="false" title="Help">❔ Help ▾</button>
+      <div class="menu-panel" role="menu">
+        <button id="btn-console" class="menu-item" role="menuitem"
+          aria-pressed="false" title="Show a log of actions, timings and errors">🧾 Activity console</button>
+      </div>
+    </div>
+
     <!-- Navigation + zoom (pushed to the right) -->
     <fieldset class="group" id="nav" aria-label="Navigation">
       <button id="btn-prev" title="Previous page" disabled>◀</button>
@@ -273,6 +284,23 @@
       </div>
     </aside>
   </main>
+
+  <!-- Activity console (Help ▸ Activity console): a dockable log of every host action, its
+       round-trip time, and every failure — including ones that are otherwise recovered from
+       silently (#72). Entries are built with createElement/textContent only; they carry
+       document-derived text and must never be interpolated into HTML (#74). -->
+  <section id="console-pane" aria-label="Activity console" hidden>
+    <div id="console-bar">
+      <span class="console-title">🧾 Activity console</span>
+      <span id="console-count" class="muted"></span>
+      <span class="console-spacer"></span>
+      <label class="console-option"><input id="console-autoscroll" type="checkbox" checked /> Auto-scroll</label>
+      <button id="console-copy" title="Copy the whole log to the clipboard">Copy all</button>
+      <button id="console-clear" title="Discard every entry">Clear</button>
+      <button id="console-close" title="Hide the console">✕</button>
+    </div>
+    <div id="console-log" tabindex="0" role="log" aria-label="Activity log"></div>
+  </section>
 
   <footer id="statusbar">
     <span id="status"></span>

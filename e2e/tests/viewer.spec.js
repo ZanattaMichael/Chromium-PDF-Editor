@@ -1745,6 +1745,144 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  // ------------------------------------------------------- activity console (#72)
+
+  /** Opens a viewer with the host gate installed, loads `file`, and returns the page. */
+  async function openGatedViewerWith(file, gateOptions) {
+    const page = await ext.context.newPage();
+    await installHostGate(page, gateOptions);
+    await page.goto(ext.viewerUrl);
+    const chooser = page.waitForEvent('filechooser');
+    await page.click('#btn-open-empty');
+    await (await chooser).setFiles(file);
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+    return page;
+  }
+
+  /**
+   * Opens the activity console from the Help menu. The pane's open/closed state is remembered in
+   * chrome.storage.local, which is shared by every page in this suite's one persistent profile —
+   * so a plain toggle would close it for whichever test ran after one that left it open.
+   */
+  async function openConsole(page) {
+    if (await page.locator('#console-pane').isHidden()) await ui(page, '#btn-console');
+    await expect(page.locator('#console-pane')).toBeVisible();
+  }
+
+  test('activity console: the Help menu opens a docked log of what the viewer did', async () => {
+    const page = await openViewerWith(fixture('console.pdf', [[{ text: 'Console test', x: 72, y: 700 }]]));
+
+    // Closed by default. Help is reachable straight away — unlike Read/Edit it is never disabled,
+    // because the console matters most before a document loads and while an open is failing.
+    await expect(page.locator('#console-pane')).toBeHidden();
+    await expect(page.locator('#menu-help-trigger')).toBeEnabled();
+    await openConsole(page);
+    await expect(page.locator('#btn-console')).toHaveAttribute('aria-pressed', 'true');
+
+    // The open we just performed is in it: the document open itself, and the host round-trips.
+    const log = page.locator('#console-log');
+    await expect(log.locator('.console-entry', { hasText: 'document opened' })).toHaveCount(1);
+    const renders = log.locator('.console-entry', { hasText: 'render' });
+    expect(await renders.count()).toBeGreaterThan(0);
+
+    // Round-trip time is the single most useful thing here, so every host entry carries one.
+    await expect(renders.first().locator('.console-detail')).toContainText(/\d+ ms/);
+    // Timestamped and levelled.
+    await expect(log.locator('.console-entry').first().locator('.console-time'))
+      .toContainText(/^\d\d:\d\d:\d\d\.\d\d\d$/);
+    await expect(log.locator('.console-entry').first().locator('.console-level'))
+      .toContainText(/^(info|warn|error)$/);
+
+    // A tool change is an action too...
+    await ui(page, '#tool-highlight');
+    const toolEntry = log.locator('.console-entry', { hasText: 'tool changed' });
+    await expect(toolEntry).toHaveCount(1);
+    await expect(toolEntry).toContainText('select → highlight');
+    // ...and logging it did not touch the shared status line.
+    await expect(page.locator('#status')).not.toContainText('tool changed');
+
+    // Clear discards what was there.
+    await page.locator('#console-clear').click();
+    await expect(log.locator('.console-entry', { hasText: 'document opened' })).toHaveCount(0);
+
+    // The pane's state survives a reload; the log itself deliberately does not.
+    await page.reload();
+    await expect(page.locator('#console-pane')).toBeVisible();
+    await expect(log.locator('.console-entry', { hasText: 'document opened' })).toHaveCount(0);
+
+    await page.locator('#console-close').click();
+    await expect(page.locator('#console-pane')).toBeHidden();
+    await page.close();
+  });
+
+  test('activity console: a forced host failure is logged instead of swallowed (#72)', async () => {
+    // `form-fields` is the case #72 names by hand: its bare `catch { state.formFields = []; }`
+    // turned any failure into the claim "this document has no fillable form fields".
+    const page = await openGatedViewerWith(
+      fixture('console-fail.pdf', [[{ text: 'Console failure test', x: 72, y: 700 }]]), { fail: ['form-fields'] });
+
+    await openConsole(page);
+    const log = page.locator('#console-log');
+    // Both halves: the raw round-trip failure, and what it cost the user.
+    const raw = log.locator('.console-entry', { hasText: 'form-fields failed' });
+    await expect(raw).toHaveCount(1);
+    await expect(raw).toContainText('injected host failure');
+    await expect(log.locator('.console-entry', { hasText: 'form fields could not be listed' }))
+      .toHaveCount(1);
+    await expect(log.locator('.console-entry.error').first()).toBeVisible();
+
+    // Additive, not a replacement: the failure never overwrote the shared status line.
+    await expect(page.locator('#status')).not.toContainText('form-fields');
+    await page.locator('#console-close').click();
+    await page.close();
+  });
+
+  test('activity console: untrusted entry text is rendered as text, never as HTML', async () => {
+    // Host error strings reach the console verbatim, and a hostile document can influence them.
+    // A console built with innerHTML would be a worse sink than the one #73 fixed.
+    const payload = '<img src=x onerror="window.__pwned = 1">';
+    const page = await openGatedViewerWith(fixture('console-xss.pdf', [[{ text: 'XSS test', x: 72, y: 700 }]]),
+      { fail: ['form-fields'], failMessage: payload });
+
+    await openConsole(page);
+    const log = page.locator('#console-log');
+    await expect(log.locator('.console-entry.error').first()).toBeVisible();
+    // The payload is shown, as text...
+    await expect(log).toContainText(payload);
+    // ...and produced no element and ran no script.
+    await expect(log.locator('img')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__pwned)).toBeUndefined();
+    await page.locator('#console-close').click();
+    await page.close();
+  });
+
+  test('a page that keeps failing to render says so instead of staying blank (#72/#20)', async () => {
+    const page = await openGatedViewerWith(fixture('render-fail.pdf', [[{ text: 'Page one', x: 72, y: 700 }], [{ text: 'Page two', x: 72, y: 700 }]]), {});
+    // No placeholder on a healthy document.
+    await expect(page.locator('.page-error')).toHaveCount(0);
+
+    // Now every render fails. Zooming invalidates the render cache, so the page re-renders.
+    // Retrying on scroll stays deliberate: only repeated failures for a page get a placeholder,
+    // so a single hiccup during fast scrolling still just retries, silently.
+    await page.evaluate(() => window.__hostGate.fail(['render']));
+    await page.click('#btn-zoom-in');
+    await page.click('#btn-zoom-in');
+    await expect(page.locator('.page-error').first()).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('.page-error').first())
+      .toContainText('This page could not be rendered');
+
+    await openConsole(page);
+    await expect(page.locator('#console-log')
+      .locator('.console-entry', { hasText: 'did not render' }).first()).toBeVisible();
+
+    // Recovering clears the placeholder again — it is a state, not a permanent tombstone.
+    await page.evaluate(() => window.__hostGate.fail([]));
+    await page.click('#btn-zoom-out');
+    await expect(page.locator('.page-error')).toHaveCount(0, { timeout: 30000 });
+    await page.locator('#console-close').click();
+    await page.close();
+  });
+
   test('open-from-url: refuses a src param pointing at a private/internal host', async () => {
     const page = await ext.context.newPage();
     await page.goto(`${ext.viewerUrl}?src=${encodeURIComponent('http://169.254.169.254/latest/meta-data/doc.pdf')}`);

@@ -211,6 +211,23 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
 
 .page-image { display: block; width: 100%; height: 100%; }
 
+/* Shown only after a page has failed to render twice running for the same render (#72): a
+   transient hiccup during fast scrolling still just retries, silently. A blank white rectangle
+   is indistinguishable from an empty page, which is how the #20 rasteriser OOM presented. */
+.page-error {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  background: #f5f2f2;
+  color: #7a1f1f;
+  font-size: 13px;
+}
+
 /* Per-page layer stacking (all absolute/inset:0 over the image). Pinned with explicit z-index so
    the order never depends on which layer's builder (some async) inserted last: text at the bottom,
    then link hotspots, then form-field markers, then the tool-drawing overlay on top. Without this,
@@ -584,6 +601,60 @@ textarea.code-editor:focus { outline: 1px solid var(--accent-2); }
 .tab.active { background: var(--accent-2); color: #fff; }
 
 #sign-pad { background: #fff; border-radius: 4px; touch-action: none; width: 100%; }
+
+/* -------------------------------------------------------- activity console */
+/* Docked at the bottom of the window, above the status bar. Styled after the JavaScript code
+   editor (textarea.code-editor above): monospace on a near-black surface, scrollable. It is
+   additive — it never writes to #status, so a toast can't be clobbered by a log entry. */
+#console-pane {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  height: 30vh;
+  min-height: 120px;
+  background: #1e1e24;
+  border-top: 1px solid #55555e;
+}
+
+#console-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--surface-2);
+  border-bottom: 1px solid #55555e;
+  font-size: 12px;
+}
+#console-bar .console-title { font-weight: 600; }
+#console-bar .console-spacer { flex: 1; }
+#console-bar button { padding: 2px 8px; font-size: 12px; }
+/* `label { display: block }` further down would otherwise stack the checkbox above its text. */
+#console-bar .console-option { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+#console-bar .console-option input { width: auto; margin: 0; }
+#console-count { color: var(--muted); }
+
+#console-log {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 8px;
+  font: 12.5px/1.5 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color: #e6e6ec;
+  word-break: break-word;
+  tab-size: 2;
+}
+#console-log:focus-visible { outline: 1px solid var(--accent-2); }
+
+.console-entry { display: flex; gap: 8px; align-items: baseline; }
+.console-time { flex: none; color: #7f7f8c; }
+.console-level { flex: none; width: 40px; text-transform: uppercase; font-size: 11px; color: #6fa8f5; }
+.console-message { flex: 1; min-width: 0; white-space: pre-wrap; }
+.console-detail { color: var(--muted); }
+.console-entry.warn, .console-entry.warn .console-level { color: #ffcf70; }
+.console-entry.error, .console-entry.error .console-level { color: #ff8f86; }
+.console-entry.warn .console-detail, .console-entry.error .console-detail { color: inherit; }
+.console-empty { color: var(--muted); }
 
 /* -------------------------------------------------------------- statusbar */
 #statusbar {

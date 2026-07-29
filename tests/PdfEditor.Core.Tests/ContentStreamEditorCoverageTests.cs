@@ -1,4 +1,5 @@
 using PdfEditor.Core;
+using SkiaSharp;
 using Xunit;
 
 namespace PdfEditor.Tests;
@@ -127,6 +128,32 @@ public class ContentStreamEditorCoverageTests
         var result = Redactor.Redact(pdf, new[] { new RectRegion(1, 0, 0, 20, 20) });
 
         Assert.Equal(1, TestPdfAssert.CountImages(result.Pdf));
+    }
+
+    /// <summary>
+    /// A partially-covered image is pixel-scrubbed rather than dropped, and the surviving part must
+    /// come through unchanged. Nothing asserted the scrubbed <em>pixels</em> before — the other image
+    /// tests only count draw calls, so a scrub that wrote the channels in the wrong order, misread
+    /// the row stride, or mangled alpha would leave a visibly wrong image and still pass.
+    /// <para>
+    /// Solid red is the probe on purpose: it is the one primary that survives a correct RGB write and
+    /// comes back blue if the buffer is ever read as BGR.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void PartiallyRedactedImage_BlacksOutTheOverlapAndLeavesTheRestIntact()
+    {
+        // A solid-red image occupying x 100..300, y 500..600.
+        byte[] pdf = TestPdfs.WithImage(100, 500, 200, 100);
+        Assert.Equal(SKColors.Red, TestPdfAssert.PixelAt(pdf, 1, 250, 550));
+
+        // Covers the image's left half only, so the scrub path runs instead of the whole-image drop.
+        var result = Redactor.Redact(pdf, new[] { new RectRegion(1, 90, 490, 100, 120) });
+
+        Assert.Equal(1, TestPdfAssert.CountImages(result.Pdf));
+        Assert.Empty(result.Warnings);
+        Assert.Equal(SKColors.Black, TestPdfAssert.PixelAt(result.Pdf, 1, 150, 550));
+        Assert.Equal(SKColors.Red, TestPdfAssert.PixelAt(result.Pdf, 1, 250, 550));
     }
 
     [Fact]

@@ -1239,6 +1239,35 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('highlight: choosing "Draw a box" marks the rectangle even over selectable text', async () => {
+    // Sweeping is the default, but a box has to stay reachable: it is the only thing that works on
+    // a scan, and it is what you want over a table or a figure. Over text the two compete for the
+    // pointer, so the mode has to actually switch which one gets it.
+    const file = fixture('modebox.pdf', [[
+      { text: 'AAAAA BBBBB CCCCC', x: 72, y: 700 },
+    ]]);
+    const page = await openViewerWith(file);
+    await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
+
+    await ui(page, '#tool-highlight');
+    // Sweep is the default the panel opens on.
+    await expect(page.locator('input[name="highlight-mode"][value="sweep"]')).toBeChecked();
+
+    await page.locator('input[name="highlight-mode"][value="box"]').check();
+    await dragPdfRect(page, { x: 66, y: 694, width: 160, height: 22 });
+    await expect(page.locator('#status')).toContainText('Highlighted');
+
+    // The discriminating band: inside the rectangle dragged (y 694..716) but outside the text run
+    // (y 697.1..710.1). Run-snapping paints the run and nothing else, so it leaves this blank —
+    // only a real box fills it. Sampling over the words instead would prove nothing and would not
+    // even reach 0.9, since their dark glyphs are not yellow.
+    expect(await yellowFraction(page, { x0: 100, x1: 200, y0: 694.5, y1: 696.5 })).toBeGreaterThan(0.9);
+    expect(await yellowFraction(page, { x0: 100, x1: 200, y0: 711.5, y1: 715 })).toBeGreaterThan(0.9);
+    // ...and it stops at the rectangle: past its right edge nothing is marked.
+    expect(await yellowFraction(page, { x0: 240, x1: 300, y0: 694, y1: 716 })).toBeLessThan(0.02);
+    await page.close();
+  });
+
   test('highlight: a page with no selectable text still falls back to a box drag', async () => {
     const file = fixture('highlightbox.pdf', [[]]); // no text runs: nothing to select
     const page = await openViewerWith(file);

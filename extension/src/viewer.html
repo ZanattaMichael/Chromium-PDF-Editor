@@ -219,6 +219,12 @@
       <div id="panel-highlight" class="panel-section" hidden>
         <h2>Highlight</h2>
         <p class="muted">Sweep across the words you want, the way you would select them — press, move, release. The text stays readable underneath.</p>
+        <fieldset id="highlight-mode-field">
+          <legend>How to mark</legend>
+          <label><input type="radio" name="highlight-mode" value="sweep" checked /> Sweep across text</label>
+          <label><input type="radio" name="highlight-mode" value="box" /> Draw a box</label>
+          <p id="highlight-mode-hint" class="muted"></p>
+        </fieldset>
         <div id="edit-style">
           <label class="color-field" title="Highlight colour">Colour <input id="highlight-color" type="color" value="#ffeb3b" /></label>
         </div>

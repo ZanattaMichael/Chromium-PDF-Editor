@@ -57,6 +57,11 @@ const state = {
   drawColor: '#e53935',
   drawWidth: 2.5,
   highlightColor: '#ffeb3b',
+  // 'sweep' marks the characters swept over (#23); 'box' marks the rectangle dragged. Sweep is the
+  // default because it is what a highlighter does to text, but a box is the only thing that works
+  // on a page with nothing selectable — a scan — and is sometimes just what is wanted over a table
+  // or a figure, so it stays available rather than being inferred.
+  highlightMode: 'sweep',
   safety: null,         // { hasActiveContent, javaScriptCount, urlCount, samples }
   keepActiveContent: false, // false = strip JavaScript on save until the user opts in
   keepLinks: false,     // false = strip link URLs on save until the user enables them
@@ -1150,7 +1155,8 @@ pagesEl.addEventListener('pointerup', async (e) => {
     if (Math.abs(x1 - x0) < 5 && Math.abs(y1 - y0) < 5) return; // ignore a click
     const a = cssToPdf(pageNum, pe.img, Math.min(x0, x1), Math.max(y0, y1));
     const b = cssToPdf(pageNum, pe.img, Math.max(x0, x1), Math.min(y0, y1));
-    applyHighlight({ page: pageNum, x: a.x, y: a.y, width: b.x - a.x, height: Math.max(b.y - a.y, 1) });
+    applyHighlight({ page: pageNum, x: a.x, y: a.y, width: b.x - a.x, height: Math.max(b.y - a.y, 1) },
+      { snap: state.highlightMode !== 'box' });
     return;
   }
   if (tiny) return;
@@ -1330,7 +1336,7 @@ function setTool(tool) {
   // In select mode the text layer is interactive (select/copy); tools capture the overlay instead.
   pagesEl.classList.toggle('select-mode', tool === 'select');
   // Highlight sweeps text rather than drawing a box (#23), so it too needs the text layer live.
-  pagesEl.classList.toggle('highlight-mode', tool === 'highlight');
+  applyHighlightMode();
   pagesEl.classList.toggle('move-mode', tool === 'move'); // a "move" cursor over the page
   if (tool === 'redact') showPanel('panel-redact');
   else if (tool === 'draw') showPanel('panel-draw');
@@ -1597,7 +1603,12 @@ function rectsIntersect(a, b) {
 }
 
 /** Highlights the text runs a dragged box covers (or the box itself if the page has no text). */
-async function applyHighlight(region) {
+async function applyHighlight(region, { snap = true } = {}) {
+  // An explicitly chosen box marks the rectangle drawn, full stop. Snapping is a helpful guess when
+  // the box is only a way of pointing at words; when the user has asked for a box it would quietly
+  // widen the mark to whole runs — the very behaviour the box mode exists as an alternative to.
+  if (!snap) return highlightRects(region.page, [
+    { x: region.x, y: region.y, width: region.width, height: region.height }]);
   // Use the cached text runs; if the text layer hasn't built yet, fetch this page's runs now so a
   // highlight drawn immediately still snaps to the words instead of colouring the whole box.
   let spans = spanCache.get(`${state.version}|${region.page}`);
@@ -1621,16 +1632,38 @@ async function applyHighlight(region) {
   const rects = covered.length > 0
     ? covered
     : [{ x: region.x, y: region.y, width: region.width, height: region.height }];
+  return highlightRects(region.page, rects);
+}
+
+/** Stamps rects onto one page in the current highlight colour. */
+async function highlightRects(page, rects) {
   try {
     setStatus('Highlighting…', true);
     const result = await host.call('add-highlight', {
-      pdf: state.pdfB64, page: region.page, rects,
+      pdf: state.pdfB64, page, rects,
       color: state.highlightColor, pdfPassword: state.password,
     });
-    await applyContentEdit(result.pdf, [region.page],
+    await applyContentEdit(result.pdf, [page],
       `Highlighted ${rects.length} ${rects.length === 1 ? 'run' : 'runs'}.`);
   } catch (e) {
     fail(e);
+  }
+}
+
+/**
+ * Puts the pages into sweep mode or leaves them to the overlay's box drag, and says which is which
+ * in the panel. Only sweep mode hands the pointer to the text layer, so switching to a box is what
+ * makes the rectangle drag reachable again over text — otherwise the two would fight for the
+ * pointer and which one won would depend on where the press happened to land.
+ */
+function applyHighlightMode() {
+  const sweeping = state.tool === 'highlight' && state.highlightMode === 'sweep';
+  pagesEl.classList.toggle('highlight-mode', sweeping);
+  const hint = $('highlight-mode-hint');
+  if (hint) {
+    hint.textContent = state.highlightMode === 'sweep'
+      ? 'Pages with no selectable text — scans — fall back to a box.'
+      : 'Marks the whole rectangle, including any blank space in it.';
   }
 }
 
@@ -1801,6 +1834,7 @@ let sweepDrag = null; // { node, offset } anchor of the sweep in progress
 
 pagesEl.addEventListener('pointerdown', (e) => {
   if (state.tool !== 'highlight' || !state.pdf || e.button !== 0) return;
+  if (state.highlightMode !== 'sweep') return;   // box mode: the overlay drag handles it
   if (e.target.closest('.overlay')) return; // no text layer on this page: box-drag fallback
   const anchor = caretNear(e.clientX, e.clientY);
   if (!anchor) return;
@@ -3611,6 +3645,14 @@ function wire() {
     state.highlightColor = $('highlight-color').value;
     pagesEl.style.setProperty('--sweep', state.highlightColor);
   });
+  for (const radio of document.querySelectorAll('input[name="highlight-mode"]')) {
+    radio.addEventListener('change', () => {
+      if (!radio.checked) return;
+      state.highlightMode = radio.value;
+      activity.add('info', 'highlight mode', radio.value);
+      applyHighlightMode();
+    });
+  }
   $('highlight-done').addEventListener('click', () => setTool('select'));
 
   $('draw-color').addEventListener('input', () => { state.drawColor = $('draw-color').value; redrawInk(); });

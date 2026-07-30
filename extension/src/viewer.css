@@ -262,6 +262,13 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
    with no selectable text (a scan) has no .text-layer at all, keeps its overlay, and so keeps the
    box-drag fallback — the only thing that can be expressed there. */
 #pages { --sweep: #ffeb3b; }
+/* Sweep / box chooser in the highlight panel. `highlight-mode` is only on the pages while the
+   sweep is the chosen mode, so picking "Draw a box" hands the pointer back to the overlay. */
+#highlight-mode-field { border: 0; margin: 0 0 8px; padding: 0; }
+#highlight-mode-field legend { padding: 0; font-size: 12px; color: #9aa4b2; }
+#highlight-mode-field label { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+#highlight-mode-hint { margin: 4px 0 0; font-size: 11px; }
+
 #pages.highlight-mode .text-layer { pointer-events: auto; user-select: text; }
 #pages.highlight-mode .page:has(.text-layer) .overlay { pointer-events: none; }
 #pages.highlight-mode .text-layer span::selection {

@@ -422,7 +422,10 @@ public static class MessageProcessor
             fontSize = text.FontSize,
             fontFamily = text.FontFamily,
             bold = text.Bold,
-            italic = text.Italic
+            italic = text.Italic,
+            // The font as the document names it, so the viewer can report what it matched against
+            // — 'helvetica' alone hides the fact that the original was, say, DejaVuSans.
+            sourceFont = text.SourceFont
         };
     }
 
@@ -431,8 +434,10 @@ public static class MessageProcessor
         var result = TextTools.ReplaceTextInRegion(Pdf(p), Region(p[RegionKey]!.AsObject()),
             p["text"]?.GetValue<string>() ?? "", p["fontSize"]?.GetValue<float>(),
             p["fontFamily"]?.GetValue<string>(),
-            p["bold"]?.GetValue<bool>() ?? false,
-            p["italic"]?.GetValue<bool>() ?? false,
+            // Left absent, family and style inherit the run being replaced rather than
+            // resetting it to plain Helvetica.
+            p["bold"]?.GetValue<bool>(),
+            p["italic"]?.GetValue<bool>(),
             p[ColorKey]?.GetValue<string>(),
             Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };

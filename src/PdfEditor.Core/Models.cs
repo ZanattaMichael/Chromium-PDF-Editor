@@ -37,8 +37,16 @@ public sealed record DocumentInfo(int PageCount, IReadOnlyList<PageInfo> Pages, 
 /// Text found inside a region, with the dominant font size (user-space points) and a
 /// best-effort read of the dominant font: family (<c>helvetica</c>/<c>times</c>/<c>courier</c>)
 /// and whether it is bold/italic — used to pre-fill the edit controls.
+/// <para>
+/// <paramref name="FontSize"/> is the size the glyphs are <em>drawn</em> at (transforms applied),
+/// not the height of their ascender-to-descender box — see
+/// <c>TextTools.EmSizeFromBoxHeight</c>. <paramref name="SourceFont"/> is the PostScript name of
+/// the dominant font as the document declares it, kept so an edit can tell whether the face it is
+/// about to stamp is the original or a substitute.
+/// </para>
 /// </summary>
-public sealed record RegionText(string Text, float FontSize, string FontFamily, bool Bold, bool Italic);
+public sealed record RegionText(string Text, float FontSize, string FontFamily, bool Bold, bool Italic,
+    string SourceFont = "");
 
 /// <summary>Result of an operation that rewrites the document.</summary>
 public sealed record EditResult(byte[] Pdf, IReadOnlyList<string> Warnings)

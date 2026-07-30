@@ -57,6 +57,11 @@ const state = {
   drawColor: '#e53935',
   drawWidth: 2.5,
   highlightColor: '#ffeb3b',
+  // 'sweep' marks the characters swept over (#23); 'box' marks the rectangle dragged. Sweep is the
+  // default because it is what a highlighter does to text, but a box is the only thing that works
+  // on a page with nothing selectable — a scan — and is sometimes just what is wanted over a table
+  // or a figure, so it stays available rather than being inferred.
+  highlightMode: 'sweep',
   safety: null,         // { hasActiveContent, javaScriptCount, urlCount, samples }
   keepActiveContent: false, // false = strip JavaScript on save until the user opts in
   keepLinks: false,     // false = strip link URLs on save until the user enables them
@@ -1143,13 +1148,15 @@ pagesEl.addEventListener('pointerup', async (e) => {
     beginAddText({ page: pageNum, x: at.x, y: at.y - h, width: 240, height: h });
     return;
   }
-  // Highlight is a box drag: draw a rectangle over text (a swipe along a line also works). Any
-  // real drag counts — every run the box covers gets highlighted.
+  // Highlight normally never reaches here: over a page carrying a text layer the sweep is a real
+  // selection (see highlightSelection). This is the fallback for a page with no selectable text
+  // — a scan — where there is nothing to select, so a box is all the user can express.
   if (state.tool === 'highlight') {
     if (Math.abs(x1 - x0) < 5 && Math.abs(y1 - y0) < 5) return; // ignore a click
     const a = cssToPdf(pageNum, pe.img, Math.min(x0, x1), Math.max(y0, y1));
     const b = cssToPdf(pageNum, pe.img, Math.max(x0, x1), Math.min(y0, y1));
-    applyHighlight({ page: pageNum, x: a.x, y: a.y, width: b.x - a.x, height: Math.max(b.y - a.y, 1) });
+    applyHighlight({ page: pageNum, x: a.x, y: a.y, width: b.x - a.x, height: Math.max(b.y - a.y, 1) },
+      { snap: state.highlightMode !== 'box' });
     return;
   }
   if (tiny) return;
@@ -1226,12 +1233,22 @@ function buildContextItems(e) {
   const selText = (window.getSelection()?.toString() ?? '').trim();
   const region = selText ? selectionRegion() : spanRegion(e.target);
   const runText = !selText && region ? null : selText;
+  // Measured now, while the selection is still live: clicking an item in the menu moves focus and
+  // can collapse it, so reading the selection inside the action would find nothing to highlight.
+  const sweptRects = selText ? selectionHighlightRects() : null;
 
   if (region) {
     // Text context: act on the selected text / clicked run.
     items.push(ctxItem('✏ Edit text', () => { state.pendingEditRegion = region; setTool('select'); beginTextEdit(region); }));
     items.push(ctxItem('⬛ Redact this', () => { state.regions.push(region); setTool('redact'); drawRegions(); toast('Marked for redaction — review and Apply.'); }));
-    items.push(ctxItem('🖍 Highlight', () => applyHighlight(region)));
+    // Highlighting a selection marks the characters selected, exactly as the sweep tool does.
+    // Going through applyHighlight(region) instead would paint selectionRegion()'s single bounding
+    // rectangle — a block covering both lines and the gap between them for any selection spanning
+    // a line break, which is the box-drawing #23 exists to get rid of. With nothing selected there
+    // is only the run under the pointer to go on, so that whole run is still what gets marked.
+    items.push(ctxItem('🖍 Highlight', () => (sweptRects?.size
+      ? applyHighlightRects(sweptRects)
+      : applyHighlight(region))));
     if (runText) items.push(ctxItem('📋 Copy', () => navigator.clipboard?.writeText(runText).catch(() => {})));
     const url = selText.match(URL_IN_TEXT)?.[0];
     if (url) { items.push(CTX_SEP); items.push(ctxItem('🔗 Open link', () => window.open(url, '_blank', 'noreferrer'))); }
@@ -1318,6 +1335,8 @@ function setTool(tool) {
   for (const pe of pageEls) pe.overlay.classList.toggle('tool-active', tool !== 'select');
   // In select mode the text layer is interactive (select/copy); tools capture the overlay instead.
   pagesEl.classList.toggle('select-mode', tool === 'select');
+  // Highlight sweeps text rather than drawing a box (#23), so it too needs the text layer live.
+  applyHighlightMode();
   pagesEl.classList.toggle('move-mode', tool === 'move'); // a "move" cursor over the page
   if (tool === 'redact') showPanel('panel-redact');
   else if (tool === 'draw') showPanel('panel-draw');
@@ -1584,7 +1603,12 @@ function rectsIntersect(a, b) {
 }
 
 /** Highlights the text runs a dragged box covers (or the box itself if the page has no text). */
-async function applyHighlight(region) {
+async function applyHighlight(region, { snap = true } = {}) {
+  // An explicitly chosen box marks the rectangle drawn, full stop. Snapping is a helpful guess when
+  // the box is only a way of pointing at words; when the user has asked for a box it would quietly
+  // widen the mark to whole runs — the very behaviour the box mode exists as an alternative to.
+  if (!snap) return highlightRects(region.page, [
+    { x: region.x, y: region.y, width: region.width, height: region.height }]);
   // Use the cached text runs; if the text layer hasn't built yet, fetch this page's runs now so a
   // highlight drawn immediately still snaps to the words instead of colouring the whole box.
   let spans = spanCache.get(`${state.version}|${region.page}`);
@@ -1608,18 +1632,241 @@ async function applyHighlight(region) {
   const rects = covered.length > 0
     ? covered
     : [{ x: region.x, y: region.y, width: region.width, height: region.height }];
+  return highlightRects(region.page, rects);
+}
+
+/** Stamps rects onto one page in the current highlight colour. */
+async function highlightRects(page, rects) {
   try {
     setStatus('Highlighting…', true);
     const result = await host.call('add-highlight', {
-      pdf: state.pdfB64, page: region.page, rects,
+      pdf: state.pdfB64, page, rects,
       color: state.highlightColor, pdfPassword: state.password,
     });
-    await applyContentEdit(result.pdf, [region.page],
+    await applyContentEdit(result.pdf, [page],
       `Highlighted ${rects.length} ${rects.length === 1 ? 'run' : 'runs'}.`);
   } catch (e) {
     fail(e);
   }
 }
+
+/**
+ * Puts the pages into sweep mode or leaves them to the overlay's box drag, and says which is which
+ * in the panel. Only sweep mode hands the pointer to the text layer, so switching to a box is what
+ * makes the rectangle drag reachable again over text — otherwise the two would fight for the
+ * pointer and which one won would depend on where the press happened to land.
+ */
+function applyHighlightMode() {
+  const sweeping = state.tool === 'highlight' && state.highlightMode === 'sweep';
+  pagesEl.classList.toggle('highlight-mode', sweeping);
+  const hint = $('highlight-mode-hint');
+  if (hint) {
+    hint.textContent = state.highlightMode === 'sweep'
+      ? 'Pages with no selectable text — scans — fall back to a box.'
+      : 'Marks the whole rectangle, including any blank space in it.';
+  }
+}
+
+// ------------------------------------------------- sweep-to-highlight (#23)
+//
+// Highlighting is a text selection, not a box: press, sweep across the words, release. The
+// selectable text layer that already sits over each page does the selecting (the browser knows
+// where characters begin and end), and the resulting selection is mapped back to PDF space.
+// A box could only ever mark whole runs plus the whitespace around them, which is the complaint
+// in #23. Pages with no text layer (scans) keep the box drag — there is nothing to select there.
+
+/** Overlap of two PDF-space rects, or null when they don't overlap meaningfully. */
+function intersectRect(a, b) {
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  const right = Math.min(a.x + a.width, b.x + b.width);
+  const top = Math.min(a.y + a.height, b.y + b.height);
+  if (right - x <= 0.05 || top - y <= 0.05) return null;
+  return { x, y, width: right - x, height: top - y };
+}
+
+/** The part of `range` that falls inside `el`, or null if it covers none of it. */
+function rangeWithin(range, el) {
+  const part = document.createRange();
+  part.selectNodeContents(el);
+  // Clamping to a boundary that lies outside the element collapses the range, which is exactly
+  // how "the selection does not reach this run" should read.
+  if (part.compareBoundaryPoints(Range.START_TO_START, range) < 0) {
+    part.setStart(range.startContainer, range.startOffset);
+  }
+  if (part.compareBoundaryPoints(Range.END_TO_END, range) > 0) {
+    part.setEnd(range.endContainer, range.endOffset);
+  }
+  return part.collapsed ? null : part;
+}
+
+/**
+ * PDF-space rects covering the current text selection, grouped by page number.
+ * Nothing is written to the DOM in here, so the per-run measurements all read one already-clean
+ * layout — no forced reflow per rect, which is what made link hotspots slow in #19.
+ */
+function selectionHighlightRects() {
+  const byPage = new Map();
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return byPage;
+  const range = sel.getRangeAt(0);
+  for (const pe of pageEls) {
+    const layer = pe.wrap.querySelector('.text-layer');
+    if (!layer || !range.intersectsNode(layer)) continue;
+    const pageNum = Number(pe.wrap.dataset.page);
+    const box = pe.img.getBoundingClientRect(); // once per page, not once per run
+    const rects = [];
+    for (const el of layer.children) {
+      if (!el.dataset.region || !range.intersectsNode(el)) continue;
+      const part = rangeWithin(range, el);
+      if (!part) continue;
+      const r = part.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      const a = cssToPdf(pageNum, pe.img, r.left - box.left, r.bottom - box.top);
+      const b = cssToPdf(pageNum, pe.img, r.right - box.left, r.top - box.top);
+      const swept = {
+        x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
+        width: Math.abs(b.x - a.x), height: Math.abs(b.y - a.y),
+      };
+      // Clip to the run's true PDF box. The swept box comes from the browser laying the run out
+      // in a substitute font, so where it cuts *within* a run is a good approximation; the run's
+      // own extent is exact, and clipping keeps the highlight off the neighbouring whitespace.
+      const clipped = intersectRect(swept, JSON.parse(el.dataset.region));
+      if (clipped) rects.push(clipped);
+    }
+    if (rects.length > 0) byPage.set(pageNum, rects);
+  }
+  return byPage;
+}
+
+/** Stamps the swept rects in, chaining page by page so a selection may cross a page break. */
+async function applyHighlightRects(byPage) {
+  const pages = [...byPage.keys()].sort((p, q) => p - q);
+  try {
+    setStatus('Highlighting…', true);
+    let pdfB64 = state.pdfB64;
+    let total = 0;
+    for (const page of pages) {
+      const rects = byPage.get(page);
+      const result = await host.call('add-highlight', {
+        pdf: pdfB64, page, rects, color: state.highlightColor, pdfPassword: state.password,
+      });
+      pdfB64 = result.pdf; // chain each page's rects onto the growing document
+      total += rects.length;
+    }
+    const across = pages.length > 1 ? ` across ${pages.length} pages` : '';
+    await applyContentEdit(pdfB64, pages,
+      `Highlighted ${total} ${total === 1 ? 'run' : 'runs'}${across}.`);
+  } catch (e) {
+    fail(e);
+  }
+}
+
+/**
+ * End of a sweep: turn whatever is selected into a highlight. A plain click selects nothing and
+ * so does nothing. Safe to call twice — the selection is cleared as soon as it is measured.
+ */
+async function highlightSelection() {
+  const sel = window.getSelection();
+  const anchor = sel?.anchorNode?.nodeType === Node.ELEMENT_NODE
+    ? sel.anchorNode : sel?.anchorNode?.parentElement;
+  if (!anchor?.closest('.text-layer')) return; // the sweep did not start over page text
+  const byPage = selectionHighlightRects();
+  if (byPage.size === 0) return;
+  sel.removeAllRanges(); // measured already; drop it before the page re-renders under it
+  await applyHighlightRects(byPage);
+}
+
+// --- driving the selection ---------------------------------------------------------------
+// The browser's own drag-selection is not usable over this text layer: its runs are absolutely
+// positioned boxes with gaps between them, so the moment the pointer leaves a run — past the end
+// of a line, in the leading above it, between two lines — the hit test lands on the layer itself
+// and Chrome collapses the selection. Measured: a sweep from x=60 to x=300 across a line ending
+// at x=219 selected nothing at all. So the sweep is driven here instead: each endpoint snaps to
+// the nearest run, which is also what makes a sloppy diagonal drag still mark the line under it.
+
+/** The page (with selectable text) nearest a client Y — the one a sweep is over. */
+function pageNearY(clientY) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const pe of pageEls) {
+    if (!pe.wrap.querySelector('.text-layer')) continue;
+    const b = pe.wrap.getBoundingClientRect();
+    const d = Math.max(b.top - clientY, clientY - b.bottom, 0);
+    if (d < bestDist) { bestDist = d; best = pe; }
+  }
+  return best;
+}
+
+/** Caret range at a client point, or null when the point isn't over a run of page text. */
+function caretOnRun(clientX, clientY) {
+  const range = document.caretRangeFromPoint?.(clientX, clientY);
+  return range?.startContainer?.parentElement?.dataset?.region ? range : null;
+}
+
+/** Caret {node, offset} nearest a client point, snapped onto the closest run of text. */
+function caretNear(clientX, clientY) {
+  const direct = caretOnRun(clientX, clientY);
+  if (direct) return { node: direct.startContainer, offset: direct.startOffset };
+
+  const layer = pageNearY(clientY)?.wrap.querySelector('.text-layer');
+  if (!layer) return null;
+  let best = null;
+  let bestScore = Infinity;
+  for (const el of layer.children) {
+    const r = el.getBoundingClientRect();
+    const dy = Math.max(r.top - clientY, clientY - r.bottom, 0);
+    const dx = Math.max(r.left - clientX, clientX - r.right, 0);
+    const score = dy * 1000 + dx; // the run's own line first, then the nearest run along it
+    if (score < bestScore) { bestScore = score; best = { el, r }; }
+  }
+  if (!best) return null;
+  // Re-ask for the caret from a point that is definitely inside the chosen run.
+  const inside = caretOnRun(
+    Math.min(Math.max(clientX, best.r.left + 0.5), best.r.right - 0.5),
+    (best.r.top + best.r.bottom) / 2);
+  if (inside) return { node: inside.startContainer, offset: inside.startOffset };
+  const node = best.el.firstChild;
+  return node ? { node, offset: clientX > best.r.right ? node.length : 0 } : null;
+}
+
+let sweepDrag = null; // { node, offset } anchor of the sweep in progress
+
+pagesEl.addEventListener('pointerdown', (e) => {
+  if (state.tool !== 'highlight' || !state.pdf || e.button !== 0) return;
+  if (state.highlightMode !== 'sweep') return;   // box mode: the overlay drag handles it
+  if (e.target.closest('.overlay')) return; // no text layer on this page: box-drag fallback
+  const anchor = caretNear(e.clientX, e.clientY);
+  if (!anchor) return;
+  sweepDrag = anchor;
+  window.getSelection()?.removeAllRanges();
+  e.preventDefault(); // stop the browser starting its own (collapsing) selection drag
+  pagesEl.setPointerCapture(e.pointerId); // keep the sweep alive past the edge of the page
+});
+
+pagesEl.addEventListener('pointermove', (e) => {
+  if (!sweepDrag) return;
+  const focus = caretNear(e.clientX, e.clientY);
+  if (focus) window.getSelection()?.setBaseAndExtent(sweepDrag.node, sweepDrag.offset, focus.node, focus.offset);
+});
+
+pagesEl.addEventListener('pointerup', () => {
+  if (!sweepDrag) return;
+  sweepDrag = null;
+  highlightSelection();
+});
+
+pagesEl.addEventListener('pointercancel', () => {
+  if (!sweepDrag) return; // gesture taken over (scroll/zoom): drop the sweep, stamp nothing
+  sweepDrag = null;
+  window.getSelection()?.removeAllRanges();
+});
+
+// Preventing the default on pointerdown suppresses the compatibility mouse events, so this fires
+// only for selections made some other way (a double-click word grab, an accessibility tool).
+document.addEventListener('mouseup', () => {
+  if (state.tool === 'highlight' && state.pdf) highlightSelection();
+});
 
 // ----------------------------------------------------------- draw (ink) tool
 
@@ -3393,7 +3640,19 @@ function wire() {
   $('tool-redact').addEventListener('click', () => setTool('redact'));
   $('tool-sign').addEventListener('click', () => setTool('sign'));
 
-  $('highlight-color').addEventListener('input', () => { state.highlightColor = $('highlight-color').value; });
+  // The live selection is tinted in the chosen colour, so a sweep previews what it will stamp.
+  $('highlight-color').addEventListener('input', () => {
+    state.highlightColor = $('highlight-color').value;
+    pagesEl.style.setProperty('--sweep', state.highlightColor);
+  });
+  for (const radio of document.querySelectorAll('input[name="highlight-mode"]')) {
+    radio.addEventListener('change', () => {
+      if (!radio.checked) return;
+      state.highlightMode = radio.value;
+      activity.add('info', 'highlight mode', radio.value);
+      applyHighlightMode();
+    });
+  }
   $('highlight-done').addEventListener('click', () => setTool('select'));
 
   $('draw-color').addEventListener('input', () => { state.drawColor = $('draw-color').value; redrawInk(); });

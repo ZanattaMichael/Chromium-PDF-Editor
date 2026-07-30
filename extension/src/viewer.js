@@ -1130,19 +1130,30 @@ pagesEl.addEventListener('pointerup', async (e) => {
   // — a scan — where there is nothing to select, so a box is all the user can express.
   if (state.tool === 'highlight') {
     if (Math.abs(x1 - x0) < 5 && Math.abs(y1 - y0) < 5) return; // ignore a click
-    const a = cssToPdf(pageNum, pe.img, Math.min(x0, x1), Math.max(y0, y1));
-    const b = cssToPdf(pageNum, pe.img, Math.max(x0, x1), Math.min(y0, y1));
-    applyHighlight({ page: pageNum, x: a.x, y: a.y, width: b.x - a.x, height: Math.max(b.y - a.y, 1) },
-      { snap: state.highlightMode !== 'box' });
+    // min/max in PDF space, not screen space, so the box is not negative-sized on a rotated page
+    // (same fix as the main region below).
+    const h1 = cssToPdf(pageNum, pe.img, x0, y0);
+    const h2 = cssToPdf(pageNum, pe.img, x1, y1);
+    applyHighlight({
+      page: pageNum, x: Math.min(h1.x, h2.x), y: Math.min(h1.y, h2.y),
+      width: Math.abs(h2.x - h1.x), height: Math.max(Math.abs(h2.y - h1.y), 1),
+    }, { snap: state.highlightMode !== 'box' });
     return;
   }
   if (tiny) return;
 
-  const a = cssToPdf(pageNum, pe.img, Math.min(x0, x1), Math.max(y0, y1)); // bottom-left
-  const b = cssToPdf(pageNum, pe.img, Math.max(x0, x1), Math.min(y0, y1)); // top-right
+  // Map both dragged corners to PDF space, then take min/max there. Picking the "bottom-left" and
+  // "top-right" in *screen* space only lines up with PDF min/max on an unrotated page: on a
+  // /Rotate 90/270 page cssToPdf swaps the axes, so screen-min maps to PDF-max and the region
+  // came out with a negative width/height. A negative-width rect still draws (the black box
+  // appeared) but fails the redactor's glyph-intersection test (left > right matches nothing), so
+  // the text under the box was never removed — recoverable under an opaque rectangle (#rotate-90).
+  const c1 = cssToPdf(pageNum, pe.img, x0, y0);
+  const c2 = cssToPdf(pageNum, pe.img, x1, y1);
   const region = {
     page: pageNum,
-    x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y,
+    x: Math.min(c1.x, c2.x), y: Math.min(c1.y, c2.y),
+    width: Math.abs(c2.x - c1.x), height: Math.abs(c2.y - c1.y),
   };
 
   if (state.tool === 'redact') {

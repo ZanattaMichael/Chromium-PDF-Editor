@@ -4,6 +4,7 @@
 import { HostClient, bytesToBase64, base64ToBytes } from './host-client.js';
 import { runFormScript } from './formScript.js';
 import { ActivityLog, formatTime } from './activity-log.js';
+import { displayToPage, pageToDisplay } from './geometry.js';
 
 const host = new HostClient();
 
@@ -308,32 +309,8 @@ function pageSize(pageNum = state.page) {
   return state.info.pages[pageNum - 1];
 }
 
-// The rendered image is the page's crop box (origin x,y; size width×height in PDF user
-// space) with the page's clockwise rotation applied. So mapping between the image and the
-// document has to account for both the crop-box origin AND the rotation, or redactions land
-// shifted/rotated. (fx,fy) below are fractions across the *unrotated* crop box — fx from its
-// left, fy from its bottom — and (u,v) are fractions across the *displayed* image, u from
-// its left, v from its top.
-
-/** Fraction across the displayed image (u,v) → fraction across the unrotated crop box. */
-function displayToPage(rotation, u, v) {
-  switch (rotation) {
-    case 90: return [v, u];
-    case 180: return [1 - u, v];
-    case 270: return [1 - v, 1 - u];
-    default: return [u, 1 - v];
-  }
-}
-
-/** Fraction across the unrotated crop box (fx,fy) → fraction across the displayed image. */
-function pageToDisplay(rotation, fx, fy) {
-  switch (rotation) {
-    case 90: return [fy, fx];
-    case 180: return [1 - fx, fy];
-    case 270: return [1 - fy, 1 - fx];
-    default: return [fx, 1 - fy];
-  }
-}
+// Rotation transforms between the displayed image and the unrotated crop box now live in
+// geometry.js (imported above); cssToPdf/pdfRectToCss below add the crop-box origin and scale.
 
 /** CSS pixel (relative to a page's image) → PDF user-space point on that page. */
 function cssToPdf(pageNum, img, cssX, cssY) {

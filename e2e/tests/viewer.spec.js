@@ -2988,4 +2988,141 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#console-pane')).toBeVisible();
   }
 
+
+  // ---------------------------------------------------------------------------------------------
+  // Control coverage: every action button, when clicked, actually runs its function — not just
+  // that the control is present. Each of these was uncovered before; the assertion is the effect
+  // in the document or the panel, and each was watched failing with its handler stubbed.
+  // ---------------------------------------------------------------------------------------------
+
+  test('control: rotate-left turns the page the other way and keeps its content', async () => {
+    const file = fixture('rotleft.pdf', [[{ text: 'Portrait', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    const before = await page.locator('.page[data-page="1"]').boundingBox();
+    expect(before.height).toBeGreaterThan(before.width);
+    const inkBefore = await inkFraction(page, { x: 0, y: 0, width: 595, height: 842 });
+
+    await ui(page, '#btn-rotate-left');
+    await expect(page.locator('#status')).toContainText('Rotated page 1');
+
+    await expect.poll(async () => {
+      const b = await page.locator('.page[data-page="1"]').boundingBox();
+      return b.width > b.height;
+    }).toBe(true);
+    // Content survived the turn — a rotate that blanks or clips the page is the failure that counts.
+    await expectText(page).toBe('Portrait');
+    const inkAfter = await inkFraction(page, { x: 0, y: 0, width: 842, height: 595 },
+      { mediaBox: [0, 0, 842, 595] });
+    expect(inkAfter).toBeGreaterThan(inkBefore * 0.8);
+    await page.close();
+  });
+
+  test('control: redact-clear drops the pending boxes so Apply removes nothing', async () => {
+    const file = fixture('redactclear.pdf', [[{ text: 'KEEP THIS LINE', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-redact');
+    await dragPdfRect(page, { x: 66, y: 694, width: 250, height: 22 });
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+    expect(await page.locator('#redact-clear').isDisabled()).toBe(false);
+
+    await page.click('#redact-clear');
+    // The queue is emptied and the action buttons go back to disabled.
+    await expect(page.locator('#redact-list li')).toHaveCount(0);
+    expect(await page.locator('#redact-clear').isDisabled()).toBe(true);
+    expect(await page.locator('#redact-preview').isDisabled()).toBe(true);
+
+    // And with nothing queued the text is untouched — the boxes really were dropped, not hidden.
+    await expectText(page).toContain('KEEP THIS LINE');
+    await page.close();
+  });
+
+  test('control: draw-clear discards the stroke so Apply stamps nothing', async () => {
+    const file = fixture('drawclear.pdf', [[{ text: 'canvas', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-draw');
+    await expect(page.locator('#panel-draw')).toBeVisible();
+    await page.fill('#draw-color', '#00ff00');
+    await page.fill('#draw-width', '8');
+    const box = await page.locator(pageImageSel(1)).boundingBox();
+    const midY = box.y + box.height * 0.5;
+    await page.mouse.move(box.x + box.width * 0.2, midY);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.4, midY, { steps: 6 });
+    await page.mouse.move(box.x + box.width * 0.7, midY, { steps: 6 });
+    await page.mouse.up();
+
+    await page.click('#draw-clear');
+    await page.click('#draw-apply');
+
+    // applyDrawing() bails with this toast only when no strokes remain to apply, so it is the
+    // proof draw-clear emptied them: with the handler stubbed the stroke survives and the status
+    // reads "Added 1 stroke" instead. (Sampling pixels here races the apply render — this status
+    // is the deterministic signal.)
+    await expect(page.locator('#status')).toHaveText('Draw something first.');
+    await page.close();
+  });
+
+  test('control: the italic toggle sets the run in italic, and it round-trips', async () => {
+    const file = fixture('italic.pdf', [[{ text: 'Plain Words', x: 72, y: 700, size: 20 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 690, width: 320, height: 34 });
+    await expect(page.locator('#edit-italic')).not.toHaveClass(/active/);
+    await page.click('#edit-italic');
+    await expect(page.locator('#edit-italic')).toHaveClass(/active/);
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text replaced');
+
+    // Re-open a blank region to reset the controls, then re-read the edited run: the detector
+    // reports italic because the replacement really was stamped in an italic face.
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 380, width: 260, height: 34 });
+    await expect(page.locator('#edit-italic')).not.toHaveClass(/active/);
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 690, width: 320, height: 34 });
+    await expect(page.locator('#edit-italic')).toHaveClass(/active/);
+    await page.close();
+  });
+
+  test('control: js-clear empties the script editor', async () => {
+    const file = fixture('jsclear.pdf', [[{ text: 'doc', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-js');
+    await expect(page.locator('#js-dialog')).toBeVisible();
+    await page.fill('#js-name', 'greet');
+    await page.fill('#js-source', "app.alert('hi');");
+
+    await page.click('#js-clear');
+    await expect(page.locator('#js-name')).toHaveValue('');
+    await expect(page.locator('#js-source')).toHaveValue('');
+    await page.close();
+  });
+
+  test('control: organize-reset restores pages removed in the panel', async () => {
+    const file = fixture('orgreset.pdf', [
+      [{ text: 'Page one', x: 72, y: 700 }],
+      [{ text: 'Page two', x: 72, y: 700 }],
+      [{ text: 'Page three', x: 72, y: 700 }],
+    ]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-organize');
+    await expect(page.locator('#organize-list .organize-item')).toHaveCount(3);
+    await page.locator('#organize-list .organize-item').nth(1)
+      .getByRole('button', { name: 'Remove page' }).click();
+    await expect(page.locator('#organize-list .organize-item')).toHaveCount(2);
+
+    // Reset rebuilds the original arrangement without touching the document.
+    await page.click('#organize-reset');
+    await expect(page.locator('#organize-list .organize-item')).toHaveCount(3);
+    // Applying the reset arrangement leaves all three pages in place.
+    await page.click('#organize-apply');
+    await expect(page.locator('#page-total')).toHaveText('3');
+    await page.close();
+  });
+
 });

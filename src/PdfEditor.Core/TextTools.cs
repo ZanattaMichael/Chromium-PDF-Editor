@@ -145,8 +145,15 @@ public static class TextTools
         string? fontFamily = null, bool bold = false, bool italic = false,
         string? colorHex = null, string? password = null)
     {
+        // Lay the text out from the region's top-left to the page edge rather than confining it to
+        // the box. A click places a fixed 240x26 default box and defaults the size to its height, so
+        // any caption that does not fit used to be clipped and *lost* — "STAMPED CAPTION" became
+        // "STAMPED CAPTIO" (#86 family; the same clipping ReplaceTextInRegion fixed in #29). Adding
+        // text must never silently drop characters; the trade is that a caption longer than the box
+        // extends past its right edge instead of wrapping inside it.
         var stamped = StampText(pdf, region, text, fontSize, password,
-            fontName: ResolveFont(fontFamily, bold, italic), color: ParseColor(colorHex));
+            fontName: ResolveFont(fontFamily, bold, italic), color: ParseColor(colorHex),
+            confineToRegion: false);
         return EditResult.Of(stamped);
     }
 

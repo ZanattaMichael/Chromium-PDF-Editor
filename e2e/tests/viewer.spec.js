@@ -2633,7 +2633,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
   });
 
   // eslint-disable-next-line playwright/no-skipped-test
-  test.fixme('add text: a caption longer than its box is stamped in full, not clipped', async () => {
+  test('add text: a caption longer than its box is stamped in full, not clipped', async () => {
     // LIVE BUG. Placing text with a plain click gives a 240x26pt box and defaults the type size
     // to the box height (26pt). "STAMPED CAPTION" does not fit 240pt at 26pt, and TextTools.
     // StampText lays the string into a fixed-size iText Canvas, so the overflow is *clipped and
@@ -2748,7 +2748,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
   });
 
   // eslint-disable-next-line playwright/no-skipped-test
-  test.fixme('text edit: the type size survives repeated edits (#29/#84)', async () => {
+  test('text edit: the type size survives repeated edits (#29/#84)', async () => {
     // LIVE BUG. TextTools.GetTextInRegion reports the type size as the *glyph* box height —
     // chunks.Max(c => c.FontHeight), the ascent-to-descent span of the rendered characters —
     // rather than the em size the text was set in. For Helvetica that is 0.925 em, so every
@@ -2787,7 +2787,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
   });
 
   // eslint-disable-next-line playwright/no-skipped-test
-  test.fixme('text edit: a replacement longer than the original is not truncated', async () => {
+  test('text edit: a replacement longer than the original is not truncated', async () => {
     // LIVE BUG, and the one the maintainer reported as "HELLO" becoming "WORL". TextTools.
     // StampText lays the replacement into an iText Canvas sized to the *original* region, so
     // anything that does not fit is clipped away and lost. Replacing "HELLO" (24pt, in a
@@ -3337,5 +3337,6 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expectText(page).not.toContain('Original Sentence');
     await page.close();
   });
+
 
 });

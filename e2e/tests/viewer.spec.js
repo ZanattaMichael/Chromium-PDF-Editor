@@ -3309,4 +3309,33 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+
+  test('text edit: editing highlighted (selected) text applies (#90)', async () => {
+    // #90 reported that right-clicking highlighted text, choosing Edit and pressing Apply did
+    // nothing. That is the selection path (selectionRegion), distinct from the run-under-cursor
+    // path #85/#89 fixed. This holds the whole selection route end to end so it cannot regress.
+    const file = fixture('sel-edit.pdf', [[{ text: 'Original Sentence Here', x: 72, y: 700, size: 18 }]]);
+    const page = await openViewerWith(file);
+    await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
+
+    // Highlight the run, then right-click the selection and choose Edit text.
+    await page.evaluate(() => {
+      const span = document.querySelector('.page[data-page="1"] .text-layer span');
+      window.getSelection().selectAllChildren(span);
+    });
+    await page.locator('.page[data-page="1"] .text-layer span').first().click({ button: 'right' });
+    await page.locator('#context-menu').getByRole('button', { name: /Edit text/ }).click();
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-text')).toHaveValue(/Original Sentence Here/);
+
+    await page.fill('#edit-text', 'Replaced Sentence');
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text replaced');
+
+    // The document really changed — Apply ran, it was not a no-op.
+    await expectText(page).toContain('Replaced Sentence');
+    await expectText(page).not.toContain('Original Sentence');
+    await page.close();
+  });
+
 });

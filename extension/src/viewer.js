@@ -1227,12 +1227,22 @@ function buildContextItems(e) {
   const selText = (window.getSelection()?.toString() ?? '').trim();
   const region = selText ? selectionRegion() : spanRegion(e.target);
   const runText = !selText && region ? null : selText;
+  // Measured now, while the selection is still live: clicking an item in the menu moves focus and
+  // can collapse it, so reading the selection inside the action would find nothing to highlight.
+  const sweptRects = selText ? selectionHighlightRects() : null;
 
   if (region) {
     // Text context: act on the selected text / clicked run.
     items.push(ctxItem('✏ Edit text', () => { state.pendingEditRegion = region; setTool('select'); beginTextEdit(region); }));
     items.push(ctxItem('⬛ Redact this', () => { state.regions.push(region); setTool('redact'); drawRegions(); toast('Marked for redaction — review and Apply.'); }));
-    items.push(ctxItem('🖍 Highlight', () => applyHighlight(region)));
+    // Highlighting a selection marks the characters selected, exactly as the sweep tool does.
+    // Going through applyHighlight(region) instead would paint selectionRegion()'s single bounding
+    // rectangle — a block covering both lines and the gap between them for any selection spanning
+    // a line break, which is the box-drawing #23 exists to get rid of. With nothing selected there
+    // is only the run under the pointer to go on, so that whole run is still what gets marked.
+    items.push(ctxItem('🖍 Highlight', () => (sweptRects?.size
+      ? applyHighlightRects(sweptRects)
+      : applyHighlight(region))));
     if (runText) items.push(ctxItem('📋 Copy', () => navigator.clipboard?.writeText(runText).catch(() => {})));
     const url = selText.match(URL_IN_TEXT)?.[0];
     if (url) { items.push(CTX_SEP); items.push(ctxItem('🔗 Open link', () => window.open(url, '_blank', 'noreferrer'))); }

@@ -1203,6 +1203,42 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('highlight: the right-click menu marks the selection, not a block around it', async () => {
+    // The sweep tool was fixed for #23 but the context menu still went through applyHighlight(),
+    // which paints selectionRegion()'s single bounding rectangle. Across a line break that is one
+    // block covering both lines and the gap — the box behaviour #23 is about, reached by the other
+    // route. Selecting and right-clicking must mark what a sweep would.
+    const file = fixture('ctxsweep.pdf', [[
+      { text: 'AAAAA BBBBB CCCCC', x: 72, y: 700 },
+      { text: 'DDDDD EEEEE FFFFF', x: 72, y: 670 },
+    ]]);
+    const page = await openViewerWith(file);
+    await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
+
+    // Select from the last word of line 1 into the first word of line 2, then right-click on it.
+    await page.evaluate(() => {
+      const runs = [...document.querySelectorAll('.page[data-page="1"] .text-layer span')];
+      window.getSelection().setBaseAndExtent(runs[0].firstChild, 12, runs[1].firstChild, 5);
+    });
+    // Right-click *inside* the selection (over "CCCCC"): clicking outside it makes Chrome collapse
+    // the selection first, which is a different scenario from the one under test.
+    const imgBox = await page.locator(pageImageSel(1)).boundingBox();
+    const scale = imgBox.width / 595;
+    await page.mouse.click(imgBox.x + 190 * scale, imgBox.y + (842 - 703) * scale, { button: 'right' });
+    await page.locator('#context-menu').getByRole('button', { name: /Highlight/ }).click();
+    await expect(page.locator('#status')).toContainText('Highlighted');
+
+    const l1 = { y0: 698, y1: 709 };
+    const l2 = { y0: 668, y1: 679 };
+    expect(await yellowFraction(page, { x0: 175, x1: 218, ...l1 })).toBeGreaterThan(0.3); // CCCCC
+    expect(await yellowFraction(page, { x0: 74, x1: 117, ...l1 })).toBeLessThan(0.02);    // AAAAA
+    expect(await yellowFraction(page, { x0: 74, x1: 120, ...l2 })).toBeGreaterThan(0.3);  // DDDDD
+    expect(await yellowFraction(page, { x0: 179, x1: 218, ...l2 })).toBeLessThan(0.02);   // FFFFF
+    // The block a bounding rectangle would have painted: the gap between the two lines.
+    expect(await yellowFraction(page, { x0: 74, x1: 218, y0: 683, y1: 694 })).toBeLessThan(0.02);
+    await page.close();
+  });
+
   test('highlight: a page with no selectable text still falls back to a box drag', async () => {
     const file = fixture('highlightbox.pdf', [[]]); // no text runs: nothing to select
     const page = await openViewerWith(file);

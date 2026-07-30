@@ -46,11 +46,38 @@ public static class TextTools
         string? colorHex = null, string? password = null)
     {
         float size = fontSize ?? GetTextInRegion(pdf, region, password).FontSize;
-        var removed = Redactor.RemoveContent(pdf, new[] { region }, password, ContentKinds.TextOnly);
+        var removed = Redactor.RemoveContent(pdf, new[] { region }, password,
+            RemovalKindFor(pdf, region, password));
         var stamped = StampText(removed.Pdf, region, newText, size, password,
             fontName: ResolveFont(fontFamily, bold, italic), color: ParseColor(colorHex),
             confineToRegion: false);
         return new EditResult(stamped, removed.Warnings);
+    }
+
+    /// <summary>
+    /// Decides how much an edit is allowed to remove from a region, from what the text in it is.
+    /// <para>
+    /// Text drawn in rendering mode 3 paints nothing, so if that is what the region holds, the words
+    /// the user is looking at are not this text at all — they are pixels in the page image, and this
+    /// is the invisible OCR layer a searchable scan carries over them. Removing only the layer would
+    /// leave the old words on screen with the replacement stamped across them, so the pixels have to
+    /// be erased too.
+    /// </para>
+    /// <para>
+    /// Anything else is ordinary text that really does draw itself: removing it is enough, and the
+    /// image under the region is a letterhead or watermark that must survive the edit.
+    /// </para>
+    /// </summary>
+    private static ContentKinds RemovalKindFor(byte[] pdf, RectRegion region, string? password)
+    {
+        using var doc = PdfIo.OpenReadOnly(pdf, password);
+        var rect = new Rectangle(region.X, region.Y, region.Width, region.Height);
+        var chunks = CollectChunks(doc, region.Page).Where(c => ContainsCenter(rect, c.BBox)).ToList();
+        // "All of it", not "any of it": one stray invisible glyph among visible text is not a scan,
+        // and erasing the picture behind real text is the more destructive way to be wrong.
+        return chunks.Count > 0 && chunks.TrueForAll(c => c.Invisible)
+            ? ContentKinds.TextAndPixelsBeneath
+            : ContentKinds.TextOnly;
     }
 
     /// <summary>
@@ -283,7 +310,7 @@ public static class TextTools
 
     // ------------------------------------------------------------ extraction
 
-    private sealed record Chunk(string Text, Rectangle BBox, float FontHeight, string FontName);
+    private sealed record Chunk(string Text, Rectangle BBox, float FontHeight, string FontName, bool Invisible);
 
     private static List<Chunk> CollectChunks(PdfDocument doc, int pageNumber)
     {
@@ -317,8 +344,13 @@ public static class TextTools
                 string fontName = "";
                 try { fontName = single.GetFont()?.GetFontProgram()?.GetFontNames()?.GetFontName() ?? ""; }
                 catch { /* some embedded fonts expose no usable name; family detection just falls back */ }
+                // Rendering mode 3 draws nothing. It is how a searchable scan carries its OCR
+                // layer: the words you see are pixels in the page image, and this text only exists
+                // to be selected and searched.
+                bool invisible = single.GetTextRenderMode() == 3;
                 _chunks.Add(new Chunk(single.GetText(),
-                    new Rectangle(minX, minY, maxX - minX, maxY - minY), maxY - minY, fontName));
+                    new Rectangle(minX, minY, maxX - minX, maxY - minY), maxY - minY, fontName,
+                    invisible));
             }
         }
 

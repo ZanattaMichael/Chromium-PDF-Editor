@@ -17,11 +17,20 @@ internal enum ContentKinds
     All,
 
     /// <summary>
-    /// Text only; images in the region are left exactly as they are. Text editing needs this:
-    /// replacing a word sits on a region that usually overlaps whatever is behind the text, and
-    /// scrubbing that too punches a black rectangle through a letterhead, watermark or scan.
+    /// Text only; images in the region are left exactly as they are. Editing ordinary text needs
+    /// this: the region under a word usually overlaps whatever sits behind it, and scrubbing that
+    /// too punches a rectangle through a letterhead or watermark.
     /// </summary>
     TextOnly,
+
+    /// <summary>
+    /// Text, plus the region erased from any image beneath it and filled with the surrounding paper
+    /// colour. This is for editing a <em>searchable scan</em>, where the words on screen are pixels
+    /// in the page image and the only real text is an invisible OCR layer over them. Removing just
+    /// that layer leaves the old words visibly in place with the replacement stamped on top, so the
+    /// pixels have to go too — but painted out in paper, not the black redaction uses.
+    /// </summary>
+    TextAndPixelsBeneath,
 }
 
 /// <summary>
@@ -246,9 +255,14 @@ internal sealed class ContentStreamEditor : PdfCanvasProcessor
             if (bbox != null && IntersectsAnyRegion(bbox) && _kinds != ContentKinds.TextOnly)
             {
                 RemovedAnything = true;
-                if (ContainedInAnyRegion(bbox))
+                // Erasing for an edit never drops the image: the region is a few words on a scanned
+                // page, and losing the whole page image to replace one of them is not a trade any
+                // user would make. Redaction still drops it, because leaving it is a disclosure.
+                if (ContainedInAnyRegion(bbox) && _kinds != ContentKinds.TextAndPixelsBeneath)
                     return; // fully covered: drop the draw call entirely
-                if (ImageScrubber.TryScrubPixels(stream, bbox, _regions))
+                var fill = _kinds == ContentKinds.TextAndPixelsBeneath
+                    ? ScrubFill.SurroundingPaper : ScrubFill.Black;
+                if (ImageScrubber.TryScrubPixels(stream, bbox, _regions, fill))
                 {
                     WriteOperands(operands);
                     return;

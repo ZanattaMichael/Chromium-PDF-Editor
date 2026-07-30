@@ -108,6 +108,44 @@ public static class TestPdfs
     }
 
     /// <summary>
+    /// A <em>searchable</em> scan, the shape OCR leaves behind: the words are pixels in a page
+    /// image, and the only real text is an invisible (rendering mode 3) layer laid over them so the
+    /// page can be selected and searched. Editing one of those words has to deal with the pixels,
+    /// because removing the invisible layer changes nothing anybody can see.
+    /// </summary>
+    public static byte[] SearchableScan(string words, float x, float y, float size)
+    {
+        using var bitmap = new SKBitmap(600, 100);
+        using (var c = new SKCanvas(bitmap))
+        {
+            c.Clear(SKColors.White);
+            using var paint = new SKPaint { Color = SKColors.Black, IsAntialias = true };
+            using var f = new SKFont(SKTypeface.Default, 48);
+            c.DrawText(words, 10, 60, SKTextAlign.Left, f, paint);
+        }
+        using var image = SKImage.FromBitmap(bitmap);
+        byte[] png = image.Encode(SKEncodedImageFormat.Png, 100).ToArray();
+
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            var canvas = new PdfCanvas(page);
+            // The 600x100 bitmap is drawn at half scale, so its 48px type lands as 24pt and its
+            // baseline (bitmap y=60) lands 20pt up from the image's bottom edge. Placing the image
+            // from that baseline keeps the invisible layer sitting on the scanned words, the way
+            // real OCR output does — a layer offset from the pixels it describes would make this
+            // fixture prove nothing.
+            canvas.AddImageFittedIntoRectangle(ImageDataFactory.Create(png),
+                new Rectangle(x - 5, y - 20, 300, 50), false);
+            var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+            canvas.BeginText().SetFontAndSize(font, size).SetTextRenderingMode(3)
+                .MoveText(x, y).ShowText(words).EndText();
+        }
+        return output.ToArray();
+    }
+
+    /// <summary>
     /// A "scan": one page whose entire surface is a JPEG (DCTDecode) photo of some text — the
     /// shape of document people actually run OCR over.
     /// </summary>

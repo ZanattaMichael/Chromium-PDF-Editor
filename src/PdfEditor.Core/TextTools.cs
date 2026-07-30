@@ -57,9 +57,10 @@ public static class TextTools
         string stampFont = ResolveFont(fontFamily ?? found.FontFamily,
             bold ?? found.Bold, italic ?? found.Italic);
 
-        var removed = Redactor.RemoveContent(pdf, new[] { region }, password);
+        var removed = Redactor.RemoveContent(pdf, new[] { region }, password,
+            RemovalKindFor(pdf, region, password));
         var stamped = StampText(removed.Pdf, region, newText, size, password,
-            fontName: stampFont, color: ParseColor(colorHex));
+            fontName: stampFont, color: ParseColor(colorHex), confineToRegion: false);
 
         var warnings = new List<string>(removed.Warnings);
         if (DescribeSubstitution(found.SourceFont, stampFont) is { } note) warnings.Add(note);
@@ -93,6 +94,32 @@ public static class TextTools
     }
 
     /// <summary>
+    /// Decides how much an edit is allowed to remove from a region, from what the text in it is.
+    /// <para>
+    /// Text drawn in rendering mode 3 paints nothing, so if that is what the region holds, the words
+    /// the user is looking at are not this text at all — they are pixels in the page image, and this
+    /// is the invisible OCR layer a searchable scan carries over them. Removing only the layer would
+    /// leave the old words on screen with the replacement stamped across them, so the pixels have to
+    /// be erased too.
+    /// </para>
+    /// <para>
+    /// Anything else is ordinary text that really does draw itself: removing it is enough, and the
+    /// image under the region is a letterhead or watermark that must survive the edit.
+    /// </para>
+    /// </summary>
+    private static ContentKinds RemovalKindFor(byte[] pdf, RectRegion region, string? password)
+    {
+        using var doc = PdfIo.OpenReadOnly(pdf, password);
+        var rect = new Rectangle(region.X, region.Y, region.Width, region.Height);
+        var chunks = CollectChunks(doc, region.Page).Where(c => ContainsCenter(rect, c.BBox)).ToList();
+        // "All of it", not "any of it": one stray invisible glyph among visible text is not a scan,
+        // and erasing the picture behind real text is the more destructive way to be wrong.
+        return chunks.Count > 0 && chunks.TrueForAll(c => c.Invisible)
+            ? ContentKinds.TextAndPixelsBeneath
+            : ContentKinds.TextOnly;
+    }
+
+    /// <summary>
     /// Moves the text found in <paramref name="source"/> by (<paramref name="dx"/>,
     /// <paramref name="dy"/>) in PDF user space: the original text is removed and re-stamped at the
     /// shifted position, preserving its detected font, size, and style. A no-op if the region holds
@@ -103,7 +130,7 @@ public static class TextTools
         var found = GetTextInRegion(pdf, source, password);
         if (string.IsNullOrWhiteSpace(found.Text)) return EditResult.Of(pdf);
 
-        var removed = Redactor.RemoveContent(pdf, new[] { source }, password);
+        var removed = Redactor.RemoveContent(pdf, new[] { source }, password, ContentKinds.TextOnly);
         var dest = new RectRegion(source.Page, source.X + dx, source.Y + dy, source.Width, source.Height);
         var stamped = StampText(removed.Pdf, dest, found.Text, found.FontSize, password,
             fontName: ResolveFont(found.FontFamily, found.Bold, found.Italic), wrap: false);
@@ -210,7 +237,7 @@ public static class TextTools
         // the boundary are not removed with it.
         var regions = matches.Select(m => new RectRegion(m.Page,
             m.X + 0.2f, m.Y + 0.2f, Math.Max(0.1f, m.Width - 0.4f), Math.Max(0.1f, m.Height - 0.4f))).ToList();
-        var removed = Redactor.RemoveContent(current, regions, password);
+        var removed = Redactor.RemoveContent(current, regions, password, ContentKinds.TextOnly);
         warnings.AddRange(removed.Warnings);
         current = removed.Pdf;
 
@@ -222,9 +249,33 @@ public static class TextTools
         return (new EditResult(current, warnings), matches.Count);
     }
 
+    /// <summary>
+    /// A layout box starting at the region's top-left and running to the page's right and bottom
+    /// edges, so replacement text longer than what it replaces has somewhere to go instead of being
+    /// clipped away. It can now overlap whatever follows on the line — reflowing the rest of the
+    /// paragraph is not something this editor can do — but showing the text in the wrong place beats
+    /// dropping characters without a word.
+    /// </summary>
+    private static Rectangle ToPageEdge(PdfPage page, RectRegion region)
+    {
+        var size = page.GetPageSize();
+        float top = region.Y + region.Height;
+        return new Rectangle(region.X, size.GetBottom(),
+            Math.Max(1f, size.GetRight() - region.X),
+            Math.Max(1f, top - size.GetBottom()));
+    }
+
+    /// <param name="confineToRegion">
+    /// Whether the wrapped text must fit inside <paramref name="region"/>. True for "add text",
+    /// where the region is a box the user dragged and wrapping to it is the point. False when
+    /// replacing existing text, where the region is only the measured bounding box of the words
+    /// being replaced: confining the layout to it silently swallowed any replacement longer than
+    /// the original, because iText drops a paragraph line that does not fit the canvas
+    /// ("HELLO" replaced by "WORLD" came out as "WORL").
+    /// </param>
     private static byte[] StampText(byte[] pdf, RectRegion region, string text, float fontSize,
         string? password, bool wrap = true, string? fontName = null,
-        iText.Kernel.Colors.Color? color = null)
+        iText.Kernel.Colors.Color? color = null, bool confineToRegion = true)
     {
         using var output = new MemoryStream();
         using (var doc = PdfIo.Open(pdf, output, password))
@@ -236,7 +287,8 @@ public static class TextTools
             var pdfCanvas = PdfContentGuard.InDefaultUserSpace(page, doc);
             if (wrap)
             {
-                var box = new Rectangle(region.X, region.Y, region.Width, region.Height);
+                var box = confineToRegion ? new Rectangle(region.X, region.Y, region.Width, region.Height)
+                    : ToPageEdge(page, region);
                 using var canvas = new Canvas(pdfCanvas, box);
                 var paragraph = new Paragraph(text).SetFont(font).SetFontSize(fontSize)
                     .SetMargin(0).SetMultipliedLeading(1.05f)
@@ -297,7 +349,8 @@ public static class TextTools
 
     // ------------------------------------------------------------ extraction
 
-    private sealed record Chunk(string Text, Rectangle BBox, float FontHeight, float FontSize, string FontName);
+    private sealed record Chunk(string Text, Rectangle BBox, float FontHeight, float FontSize,
+        string FontName, bool Invisible);
 
     /// <summary>
     /// Recovers the type size a run was set in from the height of its transformed
@@ -382,9 +435,13 @@ public static class TextTools
                 catch { /* some embedded fonts expose no usable name; family detection just falls back */ }
                 float boxHeight = maxY - minY;
                 var (ascender, descender) = VerticalMetrics(font);
+                // Rendering mode 3 draws nothing. It is how a searchable scan carries its OCR
+                // layer: the words you see are pixels in the page image, and this text only exists
+                // to be selected and searched.
+                bool invisible = single.GetTextRenderMode() == 3;
                 _chunks.Add(new Chunk(single.GetText(),
                     new Rectangle(minX, minY, maxX - minX, boxHeight), boxHeight,
-                    EmSizeFromBoxHeight(boxHeight, ascender, descender), fontName));
+                    EmSizeFromBoxHeight(boxHeight, ascender, descender), fontName, invisible));
             }
         }
 

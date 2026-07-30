@@ -1,10 +1,88 @@
 using PdfEditor.Core;
+using SkiaSharp;
 using Xunit;
 
 namespace PdfEditor.Tests;
 
 public class TextToolsTests
 {
+    /// <summary>
+    /// Editing a word that sits on top of artwork must not disturb the artwork. Text editing removes
+    /// the original content through the same machinery redaction uses, and that machinery blacks out
+    /// the pixels of any image the region touches — so editing a line over a letterhead, watermark or
+    /// scanned page punched a black rectangle through it. The text is what is being replaced; the
+    /// picture behind it is not.
+    /// </summary>
+    [Fact]
+    public void ReplaceTextInRegion_OverAnImage_LeavesTheImageAlone()
+    {
+        byte[] pdf = TestPdfs.WithTextOverImage("HELLO", 120, 600, 14);
+        var match = Assert.Single(TextTools.FindText(pdf, "HELLO"));
+        // A box dragged slightly proud of the text, which is what the Edit tool actually produces —
+        // and it leaves a margin of plain image inside the region to sample, away from the
+        // antialiased glyph edges.
+        const float pad = 6;
+        var region = new RectRegion(1, match.X - pad, match.Y - pad,
+            match.Width + 2 * pad, match.Height + 2 * pad);
+
+        float marginX = match.X - pad / 2, marginY = match.Y + match.Height / 2;
+        Assert.Equal(SKColors.Red, TestPdfAssert.PixelAt(pdf, 1, marginX, marginY));
+
+        var result = TextTools.ReplaceTextInRegion(pdf, region, "WORLD");
+
+        // Inside the edited region, and elsewhere in the image: both still the original artwork.
+        Assert.Equal(SKColors.Red, TestPdfAssert.PixelAt(result.Pdf, 1, marginX, marginY));
+        Assert.Equal(SKColors.Red, TestPdfAssert.PixelAt(result.Pdf, 1, 350, 620));
+    }
+
+    /// <summary>
+    /// The other half of the rule: on a searchable scan the words on screen <em>are</em> the image,
+    /// and the only real text is the invisible OCR layer over them. Removing just that layer leaves
+    /// the old words visibly in place with the replacement stamped across them — two texts on top of
+    /// each other. So here the pixels must go too, painted out in the surrounding paper colour
+    /// rather than the black redaction uses.
+    /// </summary>
+    [Fact]
+    public void ReplaceTextInRegion_OnASearchableScan_ErasesTheScannedWordsInPaperNotBlack()
+    {
+        byte[] pdf = TestPdfs.SearchableScan("SALARY 100", 77, 663, 24);
+        var match = Assert.Single(TextTools.FindText(pdf, "SALARY 100"));
+        var region = new RectRegion(1, match.X, match.Y, match.Width, match.Height);
+
+        // The band holding "ALARY 100" — past the first glyph, which the replacement will occupy.
+        const float x0 = 95, x1 = 210, y0 = 664, y1 = 678;
+        Assert.True(TestPdfAssert.InkFraction(pdf, 1, x0, y0, x1, y1) > 0.1,
+            "the scanned words should be on the page to begin with");
+
+        // Replaced with something short, so most of the old word's area is left bare and what the
+        // band measures is the erase, not the replacement's own glyphs.
+        var result = TextTools.ReplaceTextInRegion(pdf, region, "X");
+
+        Assert.Equal("X", TestPdfAssert.ExtractText(result.Pdf).Trim());
+        Assert.True(TestPdfAssert.InkFraction(result.Pdf, 1, x0, y0, x1, y1) < 0.01,
+            "the scanned words should have been erased with the replacement");
+        // Erased in paper, not in redaction black — a black bar here is the bug from the other side.
+        Assert.Equal(SKColors.White, TestPdfAssert.PixelAt(result.Pdf, 1, 150, 670));
+    }
+
+    /// <summary>
+    /// Replacement text longer than what it replaces has to survive intact. The region handed to the
+    /// stamper is the measured bounding box of the words being replaced, and laying the paragraph out
+    /// inside it meant iText dropped whatever did not fit: "HELLO" replaced by "WORLD" came back as
+    /// "WORL", with no warning and no error.
+    /// </summary>
+    [Fact]
+    public void ReplaceTextInRegion_KeepsReplacementTextThatIsLongerThanTheOriginal()
+    {
+        byte[] pdf = TestPdfs.WithText(("HELLO", 120, 600, 14));
+        var match = Assert.Single(TextTools.FindText(pdf, "HELLO"));
+        var region = new RectRegion(1, match.X, match.Y, match.Width, match.Height);
+
+        var result = TextTools.ReplaceTextInRegion(pdf, region, "WORLDWIDE");
+
+        Assert.Contains("WORLDWIDE", TestPdfAssert.ExtractText(result.Pdf), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void GetTextInRegion_ReturnsTextAndFontSize()
     {

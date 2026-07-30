@@ -1363,6 +1363,34 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('text edit: the right-click route applies, not just opens the panel', async () => {
+    // The context-menu route had its own bug: it opened a correctly pre-filled panel and then did
+    // nothing at all on Apply, because setTool('select') hid the panels and cleared the pending
+    // region before the edit could use it. The existing context-menu test stops at "the panel is
+    // pre-filled", which is exactly why that shipped — so this one presses Apply and checks the
+    // document actually changed.
+    const file = fixture('ctxedit.pdf', [[{ text: 'Invoice Total 500', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    const span = page.locator('.page[data-page="1"] .text-layer span', { hasText: 'Invoice' });
+    await span.waitFor({ timeout: 15000 });
+    await span.click({ button: 'right' });
+    await page.locator('#context-menu').getByRole('button', { name: /Edit text/ }).click();
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-text')).toHaveValue(/Invoice Total 500/);
+
+    await page.fill('#edit-text', 'Invoice Total 750');
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text replaced');
+
+    // Re-reading the region proves the file changed, not just the panel.
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 685, width: 300, height: 40 });
+    await expect(page.locator('#edit-text')).toHaveValue(/750/);
+    await expect(page.locator('#edit-text')).not.toHaveValue(/500/);
+    await page.close();
+  });
+
   test('move text: grab a run of text and drag it to a new position', async () => {
     const file = fixture('movetext.pdf', [[{ text: 'MOVE ME', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);

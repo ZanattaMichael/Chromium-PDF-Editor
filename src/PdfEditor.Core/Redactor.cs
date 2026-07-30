@@ -15,11 +15,18 @@ public static class Redactor
     public static EditResult Redact(byte[] pdf, IEnumerable<RectRegion> regions, string? password = null)
         => Apply(pdf, regions, drawBoxes: true, password);
 
-    /// <summary>Removes the content in the regions without painting black boxes (used by text editing).</summary>
-    internal static EditResult RemoveContent(byte[] pdf, IEnumerable<RectRegion> regions, string? password = null)
-        => Apply(pdf, regions, drawBoxes: false, password);
+    /// <summary>
+    /// Removes the content in the regions without painting black boxes (used by text and image
+    /// editing). <paramref name="kinds"/> selects what may be taken out: text editing passes
+    /// <see cref="ContentKinds.TextOnly"/> so artwork behind the text is left alone, while moving an
+    /// image needs the default and must take the image with it.
+    /// </summary>
+    internal static EditResult RemoveContent(byte[] pdf, IEnumerable<RectRegion> regions,
+        string? password = null, ContentKinds kinds = ContentKinds.All)
+        => Apply(pdf, regions, drawBoxes: false, password, kinds);
 
-    private static EditResult Apply(byte[] pdf, IEnumerable<RectRegion> regions, bool drawBoxes, string? password)
+    private static EditResult Apply(byte[] pdf, IEnumerable<RectRegion> regions, bool drawBoxes,
+        string? password, ContentKinds kinds = ContentKinds.All)
     {
         var byPage = regions.GroupBy(r => r.Page).ToDictionary(g => g.Key, g => g.ToList());
         if (byPage.Count == 0) return EditResult.Of(pdf);
@@ -35,7 +42,7 @@ public static class Redactor
                 var page = doc.GetPage(pageNumber);
                 var rects = pageRegions.Select(r => new Rectangle(r.X, r.Y, r.Width, r.Height)).ToList();
 
-                var editor = ContentStreamEditor.Create(rects, doc, warnings);
+                var editor = ContentStreamEditor.Create(rects, doc, warnings, kinds: kinds);
                 editor.EditPage(page);
 
                 RemoveAnnotationsIn(page, rects);

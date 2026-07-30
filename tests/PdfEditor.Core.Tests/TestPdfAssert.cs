@@ -78,6 +78,35 @@ public static class TestPdfAssert
         return bitmap.GetPixel(Math.Clamp(px, 0, bitmap.Width - 1), Math.Clamp(py, 0, bitmap.Height - 1));
     }
 
+    /// <summary>
+    /// Fraction of pixels in a user-space band that are dark — i.e. how much ink is in it. Sampling
+    /// a band rather than a point is what you want for "are these words still on the page": a single
+    /// coordinate can land between the legs of an A and report white on a page full of text.
+    /// </summary>
+    public static double InkFraction(byte[] pdf, int page, float x0, float y0, float x1, float y1,
+        int dpi = 72)
+    {
+        byte[] png = PdfEditor.Core.PageRenderer.RenderPagePng(pdf, page, dpi);
+        using var bitmap = SKBitmap.Decode(png);
+        float scale = dpi / 72f;
+        using var docReader = new PdfDocument(new PdfReader(new MemoryStream(pdf)));
+        float pageHeight = docReader.GetPage(page).GetPageSize().GetHeight();
+
+        int dark = 0, total = 0;
+        for (float uy = y0; uy <= y1; uy += 0.5f)
+        {
+            for (float ux = x0; ux <= x1; ux += 0.5f)
+            {
+                int px = Math.Clamp((int)(ux * scale), 0, bitmap.Width - 1);
+                int py = Math.Clamp((int)((pageHeight - uy) * scale), 0, bitmap.Height - 1);
+                var c = bitmap.GetPixel(px, py);
+                total++;
+                if (c.Red < 128 && c.Green < 128 && c.Blue < 128) dark++;
+            }
+        }
+        return total == 0 ? 0 : (double)dark / total;
+    }
+
     private sealed class ImageCounter : IEventListener
     {
         public int Count { get; private set; }

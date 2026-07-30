@@ -1239,7 +1239,7 @@ function buildContextItems(e) {
 
   if (region) {
     // Text context: act on the selected text / clicked run.
-    items.push(ctxItem('✏ Edit text', () => { state.pendingEditRegion = region; setTool('select'); beginTextEdit(region); }));
+    items.push(ctxItem('✏ Edit text', () => { setTool('select'); beginTextEdit(region); }));
     items.push(ctxItem('⬛ Redact this', () => { state.regions.push(region); setTool('redact'); drawRegions(); toast('Marked for redaction — review and Apply.'); }));
     // Highlighting a selection marks the characters selected, exactly as the sweep tool does.
     // Going through applyHighlight(region) instead would paint selectionRegion()'s single bounding
@@ -1500,6 +1500,10 @@ async function beginTextEdit(region) {
     });
     setStatus('');
     state.textMode = 'edit';
+    // Own the region here rather than leaving each call site to set it, the way beginAddText does.
+    // The context-menu entry set it and then called setTool('select'), whose hidePanels() promptly
+    // nulled it again, so Apply found no region and returned in silence (#85).
+    state.pendingEditRegion = region;
     $('edit-title').textContent = 'Edit text';
     $('edit-hint').textContent = 'Text found in the selected region:';
     $('edit-text').value = found.text;
@@ -1550,7 +1554,13 @@ function beginAddText(region) {
 
 async function applyTextEdit() {
   const region = state.pendingEditRegion;
-  if (!region) return;
+  if (!region) {
+    // Bailing here used to be completely silent, which is how #85 stayed invisible: the panel was
+    // open, Apply looked pressed, and nothing happened or was reported anywhere.
+    activity.add('error', 'edit text', 'no region is selected — nothing to apply');
+    toast('Select the text to edit first.');
+    return;
+  }
   const adding = state.textMode === 'add';
   if (adding && !$('edit-text').value.trim()) { toast('Type some text first.'); return; }
   try {

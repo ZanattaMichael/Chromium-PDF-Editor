@@ -39,6 +39,25 @@ public static class TestPdfs
         return output.ToArray();
     }
 
+    /// <summary>
+    /// A single page holding one line of text set in a named standard-14 font at a known size.
+    /// Used by the font-fidelity tests (#29), which need the type size the text was actually set
+    /// in to be ground truth they can assert against.
+    /// </summary>
+    public static byte[] WithTextInFont(string standardFontName, string text, float size,
+        float x = 72, float y = 700)
+    {
+        using var output = new MemoryStream();
+        using (var doc = new PdfDocument(new PdfWriter(output)))
+        {
+            var page = doc.AddNewPage(new PageSize(PageWidth, PageHeight));
+            new PdfCanvas(page).BeginText()
+                .SetFontAndSize(PdfFontFactory.CreateFont(standardFontName), size)
+                .MoveText(x, y).ShowText(text).EndText();
+        }
+        return output.ToArray();
+    }
+
     /// <summary>A document with the given number of pages, each labelled.</summary>
     public static byte[] MultiPage(int pages, string labelPrefix = "Page")
     {

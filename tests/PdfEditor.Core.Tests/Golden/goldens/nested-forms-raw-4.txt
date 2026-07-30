@@ -9,6 +9,7 @@ info: has-CreationDate=no has-ModDate=no has-ID=no
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: <empty>
+  typeset: <no text>
   ops: Dox1 Qx1 qx1
   xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none
     ops: Dox1 Qx1 qx1
@@ -28,7 +29,29 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: <empty>
+  typeset: <no text>
   ops: Dox1 Qx2 fx1 qx2 rex1 rgx1
+  xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none
+    ops: Dox1 Qx1 qx1
+    xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none
+      ops: Dox1 Qx1 qx1
+      xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none
+        ops: Dox1 Qx1 qx1
+        xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none
+acroform: none
+validation: clean
+== replace-region-text ==
+bytes: ~2048
+pdf-version: PDF-1.7
+pages: 1
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: replaced copy
+  typeset: Helvetica@12.0
+  ops: BTx1 Dox1 ETx1 Qx3 Tdx1 Tfx1 Tjx1 qx3
+  font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none
     ops: Dox1 Qx1 qx1
     xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none
@@ -47,6 +70,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=90 annots=0 group=none
   text: <empty>
+  typeset: <no text>
   ops: Dox1 Qx1 qx1
   xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none
     ops: Dox1 Qx1 qx1
@@ -66,6 +90,7 @@ info: has-CreationDate=yes has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: <empty>
+  typeset: <no text>
   ops: Dox1 Qx1 qx1
   xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none
     ops: Dox1 Qx1 qx1
@@ -76,6 +101,7 @@ page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
         xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none
 page 2: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: <empty>
+  typeset: <no text>
   ops: Dox1 Qx1 qx1
   xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none
     ops: Dox1 Qx1 qx1
@@ -95,6 +121,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: <empty>
+  typeset: <no text>
   ops: Dox1 Qx1 qx1
   xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none
     ops: Dox1 Qx1 qx1
@@ -114,6 +141,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=1 group=none
   text: <empty>
+  typeset: <no text>
   ops: Dox1 Qx1 qx1
   xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none
     ops: Dox1 Qx1 qx1
@@ -134,6 +162,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: <empty>
+  typeset: <no text>
   ops: Dox2 Qx3 cmx1 qx3
   xobject Im1: subtype=Image size=24x12 cs=/DeviceRGB bpc=8 filter=/FlateDecode smask=yes mask=no
   xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none

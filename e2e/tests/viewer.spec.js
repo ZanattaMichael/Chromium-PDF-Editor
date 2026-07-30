@@ -1082,6 +1082,48 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('edit text: the panel pre-fills with the run\'s real type size, and the edit keeps it (#29)', async () => {
+    // 28pt Helvetica. The detector used to report the ascender-to-descender box height instead of
+    // the type size — 25.9pt here — and the replacement was then stamped at that, so every edit
+    // shrank the text a little more.
+    const file = fixture('fontmatch.pdf', [[{ text: 'Match My Size', x: 72, y: 700, size: 28 }]]);
+    const page = await openViewerWith(file);
+    await openConsole(page);
+
+    // Drag an edit box over the line. (The right-click "Edit text" entry reaches the same panel,
+    // but applying from there is a no-op on main — see the note in the PR; not this issue's bug.)
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 690, width: 320, height: 45 });
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-text')).toHaveValue(/Match My Size/);
+
+    // The size control is what the user sees and what gets sent back, so assert on its value.
+    await expect(page.locator('#edit-size')).toHaveValue('28.0');
+    await expect(page.locator('#edit-font')).toHaveValue('helvetica');
+
+    // The console says what it matched against, so a substitution is never silent.
+    const matched = page.locator('#console-log .console-entry', { hasText: 'matched the existing text style' });
+    await expect(matched).toHaveCount(1);
+    await expect(matched.locator('.console-detail')).toContainText('28.0pt');
+
+    // Apply the edit without touching the size, then re-open the replaced run: it still measures
+    // 28pt. Before the fix this came back as 25.9 and fell further on each pass.
+    await page.fill('#edit-text', 'Replaced Words');
+    await page.locator('#edit-apply').click();
+    await expect(page.locator('#status')).toContainText('Text replaced.');
+
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 690, width: 320, height: 45 });
+    await expect(page.locator('#edit-text')).toHaveValue(/Replaced Words/);
+    await expect(page.locator('#edit-size')).toHaveValue('28.0');
+
+    // The console's open/closed state is persisted in extension storage, so leaving it open here
+    // would dock a pane in every later test's viewer and move the page geometry under them.
+    await page.locator('#console-close').click();
+    await expect(page.locator('#console-pane')).toBeHidden();
+    await page.close();
+  });
+
   test('highlight: dragging across text marks it, keeping the text readable', async () => {
     const file = fixture('highlight.pdf', [[{ text: 'HIGHLIGHT THIS LINE', x: 72, y: 700 }]]);
     const page = await openViewerWith(file);

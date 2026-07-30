@@ -18,6 +18,44 @@ public static class TestPdfAssert
         return PdfTextExtractor.GetTextFromPage(doc.GetPage(page), new LocationTextExtractionStrategy());
     }
 
+    /// <summary>
+    /// The (base font name, type size) of every text-showing run on a page, read from the rendered
+    /// graphics state.
+    /// <para>
+    /// This is deliberately independent of <c>TextTools</c>'s own measurement: the font-fidelity
+    /// tests (#29) must not verify the detector against itself, or a detector that is wrong in a
+    /// self-consistent way passes. The size reported here is the <c>Tf</c> operand scaled by the
+    /// text/graphics matrices, i.e. the size the glyphs are actually drawn at.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<(string Font, float Size)> DrawnRuns(byte[] pdf, int page = 1)
+    {
+        using var doc = new PdfDocument(new PdfReader(new MemoryStream(pdf)));
+        var listener = new RunListener();
+        new PdfCanvasProcessor(listener).ProcessPageContent(doc.GetPage(page));
+        return listener.Runs;
+    }
+
+    private sealed class RunListener : IEventListener
+    {
+        public List<(string Font, float Size)> Runs { get; } = new();
+
+        public void EventOccurred(IEventData data, EventType type)
+        {
+            if (data is not TextRenderInfo t || string.IsNullOrWhiteSpace(t.GetText())) return;
+            // GetFontSize() is the Tf operand; the vertical scale of the text matrix carries any
+            // Tm/cm scaling on top of it.
+            var matrix = t.GetTextMatrix();
+            float scale = (float)Math.Sqrt(Math.Abs(
+                matrix.Get(iText.Kernel.Geom.Matrix.I11) * matrix.Get(iText.Kernel.Geom.Matrix.I22)
+                - matrix.Get(iText.Kernel.Geom.Matrix.I12) * matrix.Get(iText.Kernel.Geom.Matrix.I21)));
+            string name = t.GetFont()?.GetFontProgram()?.GetFontNames()?.GetFontName() ?? "";
+            Runs.Add((name, t.GetFontSize() * (scale == 0 ? 1 : scale)));
+        }
+
+        public ICollection<EventType>? GetSupportedEvents() => null;
+    }
+
     /// <summary>Counts image draw events on a page (XObject and inline images).</summary>
     public static int CountImages(byte[] pdf, int page = 1)
     {

@@ -9,6 +9,7 @@ info: has-CreationDate=no has-ModDate=no has-ID=no
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 ETx1 Qx1 Tdx1 Tfx1 Tjx1 fx1 gx1 gsx1 qx1 rex1 rgx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   gs GSm: SMask=Luminosity(G=form Transparency(cs=/DeviceGray I=true K=none) BC=[0] TR=no)
@@ -23,8 +24,25 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 ETx1 Qx2 Tdx1 Tfx1 Tjx1 fx2 gx1 gsx1 qx2 rex2 rgx2
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+  gs GSm: SMask=Luminosity(G=form Transparency(cs=/DeviceGray I=true K=none) BC=[0] TR=no)
+acroform: none
+validation: clean
+== replace-region-text ==
+bytes: ~1792
+pdf-version: PDF-1.7
+pages: 1
+encrypted: no
+info: has-CreationDate=no has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
+  text: golden corpus replaced copy
+  typeset: Helvetica@10.0 Helvetica@12.0
+  ops: BTx2 ETx2 Qx3 Tdx2 Tfx2 Tjx2 fx1 gx1 gsx1 qx3 rex1 rgx1
+  font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
+  font F2: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   gs GSm: SMask=Luminosity(G=form Transparency(cs=/DeviceGray I=true K=none) BC=[0] TR=no)
 acroform: none
 validation: clean
@@ -37,6 +55,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=90 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 ETx1 Qx1 Tdx1 Tfx1 Tjx1 fx1 gx1 gsx1 qx1 rex1 rgx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   gs GSm: SMask=Luminosity(G=form Transparency(cs=/DeviceGray I=true K=none) BC=[0] TR=no)
@@ -51,11 +70,13 @@ info: has-CreationDate=yes has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 ETx1 Qx1 Tdx1 Tfx1 Tjx1 fx1 gx1 gsx1 qx1 rex1 rgx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   gs GSm: SMask=Luminosity(G=form Transparency(cs=/DeviceGray I=true K=none) BC=[0] TR=no)
 page 2: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 ETx1 Qx1 Tdx1 Tfx1 Tjx1 fx1 gx1 gsx1 qx1 rex1 rgx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   gs GSm: SMask=Luminosity(G=form Transparency(cs=/DeviceGray I=true K=none) BC=[0] TR=no)
@@ -70,6 +91,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 ETx1 Qx1 Tdx1 Tfx1 Tjx1 fx1 gx1 gsx1 qx1 rex1 rgx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   gs GSm: SMask=Luminosity(G=form Transparency(cs=/DeviceGray I=true K=none) BC=[0] TR=no)
@@ -84,6 +106,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=1 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 ETx1 Qx1 Tdx1 Tfx1 Tjx1 fx1 gx1 gsx1 qx1 rex1 rgx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   gs GSm: SMask=Luminosity(G=form Transparency(cs=/DeviceGray I=true K=none) BC=[0] TR=no)
@@ -99,6 +122,7 @@ info: has-CreationDate=no has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus
+  typeset: Helvetica@10.0
   ops: BTx1 Dox1 ETx1 Qx3 Tdx1 Tfx1 Tjx1 cmx1 fx1 gx1 gsx1 qx3 rex1 rgx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   gs GSm: SMask=Luminosity(G=form Transparency(cs=/DeviceGray I=true K=none) BC=[0] TR=no)

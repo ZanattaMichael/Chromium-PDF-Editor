@@ -9,6 +9,7 @@ info: has-CreationDate=yes has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 595 842] crop=none rotate=0 annots=0 group=none
   text: Document with nested forms innermost
+  typeset: Helvetica@10.0 Helvetica@12.0
   ops: BTx1 Dox1 ETx1 Qx1 Tdx1 Tfx1 Tjx1 cmx1 qx1
   font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none
@@ -29,8 +30,46 @@ info: has-CreationDate=yes has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 595 842] crop=none rotate=0 annots=0 group=none
   text: Document with nested forms
+  typeset: Helvetica@12.0
   ops: BTx1 Dox1 ETx1 Qx2 Tdx1 Tfx1 Tjx1 cmx1 fx1 qx2 rex1 rgx1
   font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
+  xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none
+    ops: Dox1 Qx1 qx1
+    xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none
+      ops: Dox1 Qx1 qx1
+      xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none
+        ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1
+        font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
+  xobject Fm2: subtype=Form bbox=[0 0 200 120] matrix=none group=none
+    ops: Dox1 Qx1 qx1
+    xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none
+      ops: Dox1 Qx1 qx1
+      xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none
+        ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1
+        font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
+    xobject Fm2: subtype=Form bbox=[0 0 200 120] matrix=none group=none
+      ops: Dox1 Qx1 qx1
+      xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none
+        ops: BTx1 ETx1 Tdx1 Tfx1 Tjx1
+        font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
+      xobject Fm2: subtype=Form bbox=[0 0 200 120] matrix=none group=none
+        ops: BTx1 ETx1 TJx1 Tdx1 Tfx1
+        font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
+acroform: none
+validation: clean
+== replace-region-text ==
+bytes: ~2816
+pdf-version: PDF-1.7
+pages: 1
+encrypted: no
+info: has-CreationDate=yes has-ModDate=yes has-ID=yes
+catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
+page 1: media=[0 0 595 842] crop=none rotate=0 annots=0 group=none
+  text: Document with nested forms replaced copy
+  typeset: Helvetica@10.0 Helvetica@12.0
+  ops: BTx2 Dox1 ETx2 Qx3 Tdx2 Tfx2 Tjx2 cmx1 qx3
+  font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
+  font F2: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none
     ops: Dox1 Qx1 qx1
     xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none
@@ -64,6 +103,7 @@ info: has-CreationDate=yes has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 595 842] crop=none rotate=90 annots=0 group=none
   text: Document with nested forms innermost
+  typeset: Helvetica@10.0 Helvetica@12.0
   ops: BTx1 Dox1 ETx1 Qx1 Tdx1 Tfx1 Tjx1 cmx1 qx1
   font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none
@@ -84,6 +124,7 @@ info: has-CreationDate=yes has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 595 842] crop=none rotate=0 annots=0 group=none
   text: Document with nested forms innermost
+  typeset: Helvetica@10.0 Helvetica@12.0
   ops: BTx1 Dox1 ETx1 Qx1 Tdx1 Tfx1 Tjx1 cmx1 qx1
   font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none
@@ -95,6 +136,7 @@ page 1: media=[0 0 595 842] crop=none rotate=0 annots=0 group=none
         font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
 page 2: media=[0 0 595 842] crop=none rotate=0 annots=0 group=none
   text: Document with nested forms innermost
+  typeset: Helvetica@10.0 Helvetica@12.0
   ops: BTx1 Dox1 ETx1 Qx1 Tdx1 Tfx1 Tjx1 cmx1 qx1
   font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none
@@ -115,6 +157,7 @@ info: has-CreationDate=yes has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 595 842] crop=none rotate=0 annots=0 group=none
   text: Document with nested forms innermost
+  typeset: Helvetica@10.0 Helvetica@12.0
   ops: BTx1 Dox1 ETx1 Qx1 Tdx1 Tfx1 Tjx1 cmx1 qx1
   font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none
@@ -135,6 +178,7 @@ info: has-CreationDate=yes has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 595 842] crop=none rotate=0 annots=1 group=none
   text: Document with nested forms innermost
+  typeset: Helvetica@10.0 Helvetica@12.0
   ops: BTx1 Dox1 ETx1 Qx1 Tdx1 Tfx1 Tjx1 cmx1 qx1
   font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none
@@ -156,6 +200,7 @@ info: has-CreationDate=yes has-ModDate=yes has-ID=yes
 catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-Metadata=no
 page 1: media=[0 0 595 842] crop=none rotate=0 annots=0 group=none
   text: Document with nested forms innermost
+  typeset: Helvetica@10.0 Helvetica@12.0
   ops: BTx1 Dox2 ETx1 Qx3 Tdx1 Tfx1 Tjx1 cmx2 qx3
   font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none

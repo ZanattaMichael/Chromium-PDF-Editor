@@ -115,6 +115,10 @@ internal static class GoldenCorpus
         new List<(string, Func<byte[], byte[]>)>
         {
             ("redact", pdf => Redactor.Redact(pdf, new[] { Region }).Pdf),
+            // In-place text editing: the path #29 was about. Neither a size nor a face is named,
+            // so the result records what the editor infers from the run it is replacing — which is
+            // what the `typeset:` line in the projection exists to pin down.
+            ("replace-region-text", pdf => TextTools.ReplaceTextInRegion(pdf, Region, "replaced copy").Pdf),
             ("rotate-90", pdf => PageTools.Rotate(pdf, new[] { 1 }, 90).Pdf),
             ("merge-with-self", pdf => Merger.Merge(new[] { pdf, pdf })),
             ("sanitize", pdf => Sanitizer.Sanitize(pdf, new SanitizeOptions()).Pdf),

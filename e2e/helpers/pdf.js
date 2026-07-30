@@ -55,13 +55,19 @@ function buildPdf(pages, { mediaBox = [0, 0, 595, 842], cropBox = null, rotate =
  * naively appended to the page inherits the leftover matrix. Regression fixture for redaction/edit
  * landing in the wrong place on such documents. MediaBox is [0 0 400 600]; the word renders around
  * absolute (50, 300).
+ *
+ * `control` is a second word drawn well clear of the first (around absolute (50, 150)). It is not
+ * decoration: without a word that has to survive, a test can only assert where the black box
+ * landed, and a build that redacts nothing at all sails past it.
  */
-function buildLeftoverCtmPdf(word = 'SECRET') {
+function buildLeftoverCtmPdf(word = 'SECRET', control = 'KEEPME') {
+  const esc = (s) => s.replace(/([\\()])/g, '\\$1');
   const content =
     '0.5 0 0 -0.5 0 600 cm\n' +   // unbalanced top-level transform (never restored)
     'q\n' +
     '0 0 800 1200 re W n\n' +     // clip to the page in the scaled space
-    `BT\n/F1 48 Tf\n1 0 0 -1 100 600 Tm\n(${word.replace(/([\\()])/g, '\\$1')}) Tj\nET\n` +
+    `BT\n/F1 48 Tf\n1 0 0 -1 100 600 Tm\n(${esc(word)}) Tj\nET\n` +
+    `BT\n/F1 48 Tf\n1 0 0 -1 100 900 Tm\n(${esc(control)}) Tj\nET\n` +
     'Q\n';
 
   const objects = [
@@ -103,6 +109,40 @@ function assemble(objects) {
   }
   body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
   return Buffer.from(body, 'latin1');
+}
+
+/**
+ * A single page carrying a solid-colour, uncompressed /DeviceRGB image XObject drawn into
+ * `rect` ([llx, lly, urx, ury] in user space), plus optional text lines drawn *over* it.
+ *
+ * Fixture for every operation that has to leave a picture intact. A solid colour is the point:
+ * "the image survived" then reduces to "these pixels are still that exact colour", which no
+ * amount of status-line optimism can fake — the bugs this catches (a black rectangle punched
+ * through the image when text over it was edited; a redaction that scrubbed the whole XObject)
+ * both show up as the colour going away.
+ */
+function buildImagePdf({ rect = [72, 500, 400, 700], rgb = [0, 102, 204], text = [] } = {}) {
+  const [llx, lly, urx, ury] = rect;
+  // 2x2 pixels of one colour: big enough to be a real image, small enough to inline.
+  const px = String.fromCharCode(...rgb);
+  const raw = px + px + px + px;
+  const lines = text
+    .map(({ text: t, x, y, size = 14 }) =>
+      `BT /F1 ${size} Tf ${x} ${y} Td (${t.replace(/([\\()])/g, '\\$1')}) Tj ET`)
+    .join('\n');
+  const content =
+    `q ${urx - llx} 0 0 ${ury - lly} ${llx} ${lly} cm /Im0 Do Q\n${lines}`;
+
+  return assemble([
+    `<< /Type /Catalog /Pages 2 0 R >>`,
+    `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R ` +
+      `/Resources << /Font << /F1 5 0 R >> /XObject << /Im0 6 0 R >> >> >>`,
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`,
+    `<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB ` +
+      `/BitsPerComponent 8 /Length ${raw.length} >>\nstream\n${raw}\nendstream`,
+  ]);
 }
 
 /** A single-page document with one AcroForm text field. */
@@ -240,6 +280,7 @@ function buildJsLinkPdf(script = 'window.close();') {
 }
 
 module.exports = {
-  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildFormWithButtonScriptPdf, buildJavaScriptPdf,
+  buildPdf, buildLeftoverCtmPdf, buildImagePdf, buildFormPdf, buildFormWithButtonScriptPdf,
+  buildJavaScriptPdf,
   buildLinkPdf, buildJsLinkPdf, buildLinkOnPage2Pdf, buildLinkOverTextPdf, buildMultiLinkPdf,
 };

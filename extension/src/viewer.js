@@ -3731,7 +3731,7 @@ function wire() {
   $('btn-links').hidden = !URL_SCANNING_ENABLED; // URL scanning disabled for now
   $('btn-links').addEventListener('click', openLinks);
   $('links-enable').addEventListener('change', toggleLinks);
-  $('links-rescan').addEventListener('click', scanLinks);
+  $('links-rescan').addEventListener('click', () => scanLinks());
   $('links-close').addEventListener('click', () => hidePanels());
 
   $('btn-find').addEventListener('click', findReplace);

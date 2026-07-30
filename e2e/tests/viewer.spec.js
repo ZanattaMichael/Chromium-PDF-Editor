@@ -6,8 +6,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { launchExtension } = require('../helpers/harness');
 const {
-  buildPdf, buildLeftoverCtmPdf, buildFormPdf, buildFormWithButtonScriptPdf, buildJavaScriptPdf,
-  buildLinkPdf, buildJsLinkPdf, buildLinkOnPage2Pdf, buildLinkOverTextPdf, buildMultiLinkPdf,
+  buildPdf, buildLeftoverCtmPdf, buildImagePdf, buildFormPdf, buildFormWithButtonScriptPdf,
+  buildJavaScriptPdf, buildLinkPdf, buildJsLinkPdf, buildLinkOnPage2Pdf, buildLinkOverTextPdf,
+  buildMultiLinkPdf,
 } = require('../helpers/pdf');
 const { installHostGate } = require('../helpers/hostgate');
 
@@ -91,6 +92,210 @@ async function pixelAt(page, pdfX, pdfY, mediaBox = A4) {
   }, [pdfX, pdfY, mediaBox]);
 }
 
+// ------------------------------------------------------- pixel measurement helpers
+//
+// Everything below measures a *band* of pixels, never a single point. A lone coordinate lands
+// between the legs of an "A" and reports white on a page full of text, which is how several
+// "fixed" bugs shipped behind green tests. Bands also make the assertions quantitative — an
+// ink fraction of 0.0 vs 0.35 vs 1.0 tells you which of "nothing happened", "the text is
+// there" and "a solid box covers it" is true, where `toBeVisible()` tells you nothing.
+
+/**
+ * Reduces the PDF-user-space band {x, y, width, height} of a rendered page to statistics.
+ *
+ *   n        pixels sampled
+ *   ink      fraction darker than mid-grey — glyphs, black boxes, dark strokes
+ *   paper    fraction that is (near-)white page background
+ *   match    fraction within `tolerance` of `rgb`, when one is given
+ *   yellow   fraction that reads as highlighter yellow
+ *   mean     [r, g, b] average over the band
+ *   dominant most common colour, quantised to 16 levels per channel
+ *   inkBox   PDF-space bounding box {x, y, width, height} of the dark pixels, or null
+ */
+async function bandStats(page, band, { pageNum = 1, mediaBox = A4, rgb = null, tolerance = 12 } = {}) {
+  // Accept either band schema: {x, y, width, height} or the {x0, x1, y0, y1} corner form the
+  // highlight tests use. Normalising here means neither style has to know about the other.
+  if (band && band.x0 !== undefined) {
+    band = { x: band.x0, y: band.y0, width: band.x1 - band.x0, height: band.y1 - band.y0 };
+  }
+  return page.evaluate(async ([sel, b, box, target, tol]) => {
+    const [llx, lly, urx, ury] = box;
+    const img = document.querySelector(sel);
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    const sx = img.naturalWidth / (urx - llx);
+    const sy = img.naturalHeight / (ury - lly);
+    const px0 = Math.max(0, Math.round((b.x - llx) * sx));
+    const px1 = Math.min(c.width, Math.round((b.x + b.width - llx) * sx));
+    // PDF y grows upwards, image y downwards, so the band's top edge is the smaller image row.
+    const py0 = Math.max(0, Math.round((ury - (b.y + b.height)) * sy));
+    const py1 = Math.min(c.height, Math.round((ury - b.y) * sy));
+    if (px1 <= px0 || py1 <= py0) throw new Error('empty sampling band');
+    const { data } = ctx.getImageData(px0, py0, px1 - px0, py1 - py0);
+    const w = px1 - px0;
+
+    let n = 0, ink = 0, paper = 0, match = 0, yellow = 0, sr = 0, sg = 0, sb = 0;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    const counts = new Map();
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i], g = data[i + 1], bl = data[i + 2];
+      n++; sr += r; sg += g; sb += bl;
+      const lum = 0.299 * r + 0.587 * g + 0.114 * bl;
+      if (lum < 128) {
+        ink++;
+        const ix = px0 + ((i / 4) % w), iy = py0 + Math.floor((i / 4) / w);
+        if (ix < minX) minX = ix;
+        if (ix > maxX) maxX = ix;
+        if (iy < minY) minY = iy;
+        if (iy > maxY) maxY = iy;
+      }
+      if (r > 245 && g > 245 && bl > 245) paper++;
+      if (r > 200 && g > 170 && bl < 150) yellow++;
+      if (target && Math.abs(r - target[0]) <= tol && Math.abs(g - target[1]) <= tol &&
+          Math.abs(bl - target[2]) <= tol) match++;
+      const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (bl >> 4);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    let bestKey = 0, bestN = -1;
+    for (const [k, v] of counts) if (v > bestN) { bestN = v; bestKey = k; }
+
+    return {
+      n,
+      ink: ink / n, paper: paper / n, match: match / n, yellow: yellow / n,
+      mean: [Math.round(sr / n), Math.round(sg / n), Math.round(sb / n)],
+      dominant: [((bestKey >> 8) & 15) * 17, ((bestKey >> 4) & 15) * 17, (bestKey & 15) * 17],
+      inkBox: ink === 0 ? null : {
+        x: llx + minX / sx, y: ury - (maxY + 1) / sy,
+        width: (maxX - minX + 1) / sx, height: (maxY - minY + 1) / sy,
+      },
+    };
+  }, [pageImageSel(pageNum), band, mediaBox, rgb, tolerance]);
+}
+
+/** Fraction of the band that is dark ink. 0 = blank paper, ~0.2-0.4 = a line of text, 1 = solid. */
+async function inkFraction(page, band, opts) { return (await bandStats(page, band, opts)).ink; }
+
+/** Fraction of the band within `tolerance` of `rgb` — for "the image is still that blue". */
+async function colorFraction(page, band, rgb, opts = {}) {
+  return (await bandStats(page, band, { ...opts, rgb })).match;
+}
+
+/** Fraction of the band that reads as highlighter yellow. */
+async function yellowFraction(page, band, opts) { return (await bandStats(page, band, opts)).yellow; }
+
+/** Most common colour in the band, quantised — "what colour is this area, broadly". */
+async function dominantColor(page, band, opts) { return (await bandStats(page, band, opts)).dominant; }
+
+/** PDF-space bounding box of the dark pixels in the band, or null when it is blank. */
+async function inkBounds(page, band, opts) { return (await bandStats(page, band, opts)).inkBox; }
+
+// ------------------------------------------------------- document-content helpers
+
+/**
+ * The text runs the viewer's selectable text layer holds for a page: the real characters the
+ * native host extracted from the *current* document, with their PDF-space boxes. This is the
+ * "did the file actually change?" oracle — unlike a form field or a status string it cannot
+ * round-trip a value the document never received.
+ */
+async function textRuns(page, pageNum = 1) {
+  await page.locator(`.page[data-page="${pageNum}"] .page-image`).waitFor();
+  return page.evaluate((n) => {
+    const layer = document.querySelector(`.page[data-page="${n}"] .text-layer`);
+    if (!layer) return [];
+    return [...layer.querySelectorAll('span')].map((el) => ({
+      text: el.textContent,
+      ...JSON.parse(el.dataset.region),
+    }));
+  }, pageNum);
+}
+
+/**
+ * The whole extracted text of a page, in reading order: runs bucketed into lines by baseline,
+ * each line left to right, joined by single spaces.
+ *
+ * Reading order matters rather than being tidy. Operations that rewrite text — find & replace,
+ * replace-region-text — remove the original operators and append the replacement at the end of
+ * the content stream, so the runs arrive in an order that has nothing to do with the layout.
+ * Sorting by position is what makes "the line now reads X" a meaningful assertion.
+ */
+async function pageText(page, pageNum = 1) {
+  const runs = await textRuns(page, pageNum);
+  const lines = [];
+  for (const run of [...runs].sort((a, b) => b.y - a.y)) {
+    const line = lines.find((l) => Math.abs(l.y - run.y) < Math.max(run.height, 1) * 0.6);
+    if (line) line.runs.push(run);
+    else lines.push({ y: run.y, runs: [run] });
+  }
+  return lines
+    .map((l) => l.runs.sort((a, b) => a.x - b.x).map((r) => r.text).join(' '))
+    .join(' ');
+}
+
+/**
+ * The extracted text of a page as a Playwright poll, so an assertion can wait for the text
+ * layer to be rebuilt after an edit instead of racing the status line that announced it.
+ * Use as `await expectText(page).toContain('WORLD')`.
+ *
+ * ORDER MATTERS. The text layer is torn down and rebuilt asynchronously after every edit, so
+ * for a moment the page reports no text at all — and `.not.toContain(...)` is satisfied by the
+ * empty string on its very first poll. A negative assertion must therefore always come *after*
+ * a positive one on the same page, which is what waits for the rebuilt layer. Getting this
+ * backwards produced a test that passed against a build where redaction removed nothing.
+ */
+function expectText(page, pageNum = 1) {
+  return expect.poll(() => pageText(page, pageNum), { timeout: 20000 });
+}
+
+/**
+ * The same, with all whitespace removed. Needed after any operation that rewrites a content
+ * stream in place (redaction, find & replace): the rewrite emits one text-showing operator per
+ * surviving glyph, so extraction reads the leftovers back as "s u m m a r y" rather than
+ * "summary". That is a real defect in its own right — it is what a reader's copy/paste produces
+ * too — but it is not what these tests are about, so they assert on the letters, not the gaps.
+ */
+function expectCompactText(page, pageNum = 1) {
+  return expect.poll(() => pageText(page, pageNum).then((t) => t.replace(/\s+/g, '')),
+    { timeout: 20000 });
+}
+
+/**
+ * Opens a viewer page that captures whatever the Save button hands to chrome.downloads instead
+ * of writing it out, so a test can inspect the actual exported bytes. The file-picker path is
+ * removed first — it cannot be driven headlessly, and the downloads path is the fallback anyway.
+ */
+async function openCapturingViewerWith(file) {
+  const page = await ext.context.newPage();
+  await page.addInitScript(() => {
+    delete window.showSaveFilePicker;
+    window.__saved = null;
+    chrome.downloads.download = async (opts) => {
+      const buf = await (await fetch(opts.url)).arrayBuffer();
+      window.__saved = { name: opts.filename, bytes: [...new Uint8Array(buf)] };
+      return 1;
+    };
+  });
+  await page.goto(ext.viewerUrl);
+  const chooser = page.waitForEvent('filechooser');
+  await page.click('#btn-open-empty');
+  await (await chooser).setFiles(file);
+  await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+  return page;
+}
+
+/** Waits for a captured export and writes it to `name` in the fixture directory. */
+async function writeCapturedExport(page, name) {
+  await expect.poll(() => page.evaluate(() => window.__saved?.bytes.length ?? 0), { timeout: 20000 })
+    .toBeGreaterThan(0);
+  const saved = await page.evaluate(() => window.__saved);
+  const file = path.join(fixtureDir, name);
+  fs.writeFileSync(file, Buffer.from(saved.bytes));
+  return { file, name: saved.name, bytes: Buffer.from(saved.bytes) };
+}
+
+/** Fills the promptDialog() form (inputs in creation order) and confirms. */
 /**
  * Presses at one PDF-space point, sweeps to another and releases — the way a reader
  * selects text with the mouse (as opposed to dragPdfRect's box drag).
@@ -106,34 +311,6 @@ async function sweepPdf(page, from, to, { pageNum = 1, mediaBox = A4 } = {}) {
   await page.mouse.up();
 }
 
-/**
- * Fraction of pixels in a PDF-space band of a rendered page that are highlight-yellow paper.
- * Used to assert *where* a highlight landed: ~0 means the band was left alone.
- */
-async function yellowFraction(page, { x0, x1, y0, y1 }, { pageNum = 1, mediaBox = A4 } = {}) {
-  return page.evaluate(async ([band, n, [llx, lly, urx, ury]]) => {
-    const img = document.querySelector(`.page[data-page="${n}"] .page-image`);
-    await img.decode();
-    const canvas = document.createElement('canvas');
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    const scale = img.naturalWidth / (urx - llx);
-    let yellow = 0, total = 0;
-    for (let py = band.y0; py <= band.y1; py += 0.5) {
-      for (let px = band.x0; px <= band.x1; px += 0.5) {
-        const d = ctx.getImageData(
-          Math.round((px - llx) * scale), Math.round((ury - py) * scale), 1, 1).data;
-        total++;
-        if (d[0] > 200 && d[1] > 180 && d[2] < 140) yellow++;
-      }
-    }
-    return yellow / total;
-  }, [{ x0, x1, y0, y1 }, pageNum, mediaBox]);
-}
-
-/** Fills the promptDialog() form (inputs in creation order) and confirms. */
 async function fillDialog(page, values, confirmText) {
   const dialog = page.locator('dialog#modal');
   await expect(dialog).toBeVisible();
@@ -159,6 +336,15 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#page-total')).toHaveText('1');
     // The rendered page is white paper, not a blank/black failure.
     expect(await pixelAt(page, 300, 400)).toEqual([255, 255, 255, 255]);
+
+    // "It rendered" has to mean the words are on the page, not that an image element exists.
+    // A blank render, a render of the wrong page, and a render at the wrong scale all leave
+    // an <img> with a data: URL; only ink in the line's own band distinguishes them.
+    expect(await inkFraction(page, { x: 70, y: 696, width: 160, height: 16 })).toBeGreaterThan(0.05);
+    // ...and only in that band: an all-over grey/black render would light this up too.
+    expect(await inkFraction(page, { x: 70, y: 300, width: 160, height: 16 })).toBe(0);
+    // The characters really are the ones in the file.
+    await expectText(page).toBe('Hello Playwright');
     await page.close();
   });
 
@@ -168,6 +354,13 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
       { text: 'public information', x: 72, y: 600 },
     ]]);
     const page = await openViewerWith(file);
+
+    // Both lines start out in the extracted text, and the surviving line's ink is measured now
+    // so the assertions afterwards can prove it did not move, shrink or get scrubbed too.
+    await expectText(page).toContain('TOP SECRET DATA');
+    await expectText(page).toContain('public information');
+    const survivorBefore = await inkBounds(page, { x: 60, y: 590, width: 300, height: 30 });
+    expect(survivorBefore).not.toBeNull();
 
     await ui(page, '#tool-redact');
     await dragPdfRect(page, { x: 60, y: 690, width: 260, height: 34 });
@@ -188,6 +381,23 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // The region renders as opaque black; untouched text area stays white.
     expect(await pixelAt(page, 180, 707)).toEqual([0, 0, 0, 255]);
     expect(await pixelAt(page, 400, 400)).toEqual([255, 255, 255, 255]);
+
+    // Redaction has to satisfy three separate things, and painting a box only satisfies one.
+    // 1. The characters are gone from the file — a black rectangle over live text is the
+    //    classic redaction failure, and it is invisible to a pixel test. The surviving line is
+    //    asserted first so the negative cannot be met by a text layer that has not rebuilt yet.
+    await expectText(page).toContain('public information');
+    await expectText(page).not.toContain('TOP SECRET');
+    // 2. The box is solid, over the whole marked band, not a thin outline or a partial cover.
+    const covered = await bandStats(page, { x: 62, y: 692, width: 256, height: 30 });
+    expect(covered.ink).toBe(1);
+    expect(covered.dominant).toEqual([0, 0, 0]);
+    // 3. Nothing else was disturbed: the other line's ink occupies the same box, to the pixel.
+    const survivorAfter = await inkBounds(page, { x: 60, y: 590, width: 300, height: 30 });
+    expect(survivorAfter.x).toBeCloseTo(survivorBefore.x, 0);
+    expect(survivorAfter.y).toBeCloseTo(survivorBefore.y, 0);
+    expect(survivorAfter.width).toBeCloseTo(survivorBefore.width, 0);
+    expect(survivorAfter.height).toBeCloseTo(survivorBefore.height, 0);
     await page.close();
   });
 
@@ -200,6 +410,8 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
       { text: 'ordinary public line', x: 72, y: 500 },
     ]]);
     const page = await openViewerWith(file);
+    const bystanderBefore = await inkBounds(page, { x: 60, y: 490, width: 320, height: 30 });
+    expect(bystanderBefore).not.toBeNull();
 
     // The Redact panel is shown by the redact tool; the search box lives inside it.
     await ui(page, '#tool-redact');
@@ -219,6 +431,21 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     expect(await pixelAt(page, 120, 604)).toEqual([0, 0, 0, 255]);
     expect(await pixelAt(page, 90, 504)).not.toEqual([0, 0, 0, 255]);
     expect(await pixelAt(page, 400, 504)).toEqual([255, 255, 255, 255]);
+
+    // Both copies of the word are gone from the file, not merely covered up — and the search
+    // did not overreach: the substring lives nowhere in the page's text any more, while the
+    // words that surrounded it on those same lines survive.
+    // Positive first: it is what waits for the rebuilt text layer, so the negative below cannot
+    // be satisfied by an empty page (see expectText).
+    await expectCompactText(page).toContain('summary');
+    await expectCompactText(page).toContain('here');
+    await expectCompactText(page).not.toContain('CONFIDENTIAL');
+    // The unrelated third line is untouched, character for character and pixel for pixel.
+    await expectText(page).toContain('ordinary public line');
+    const bystanderAfter = await inkBounds(page, { x: 60, y: 490, width: 320, height: 30 });
+    expect(bystanderAfter.x).toBeCloseTo(bystanderBefore.x, 0);
+    expect(bystanderAfter.y).toBeCloseTo(bystanderBefore.y, 0);
+    expect(bystanderAfter.width).toBeCloseTo(bystanderBefore.width, 0);
     await page.close();
   });
 
@@ -232,7 +459,10 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     fs.writeFileSync(file, buildLeftoverCtmPdf('SECRET'));
     const page = await openViewerWith(file);
 
-    // Find the centroid of the word's dark pixels on the rendered page (natural-image pixels).
+    // Find the centroid of the redacted word's dark pixels (natural-image pixels). The scan is
+    // limited to the top 62% of the sheet: under the leftover matrix SECRET renders around
+    // absolute y=300 (image row ~50%) and the KEEPME control around y=150 (image row ~75%), and
+    // a centroid averaged over both words would land between them, on blank paper.
     const darkCentroid = async () => page.evaluate(async () => {
       const img = document.querySelector('.page[data-page="1"] .page-image');
       await img.decode();
@@ -242,7 +472,8 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
       ctx.drawImage(img, 0, 0);
       const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
       let sx = 0, sy = 0, n = 0;
-      for (let y = 0; y < height; y++) {
+      const lastRow = Math.round(height * 0.62);
+      for (let y = 0; y < lastRow; y++) {
         for (let x = 0; x < width; x++) {
           const i = (y * width + x) * 4;
           if (data[i] < 100 && data[i + 1] < 100 && data[i + 2] < 100) { sx += x; sy += y; n++; }
@@ -254,6 +485,8 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const before = await darkCentroid();
     expect(before).not.toBeNull();       // the word actually renders
     expect(before.n).toBeGreaterThan(50);
+    await expectText(page).toContain('SECRET');
+    await expectText(page).toContain('KEEPME');
 
     // Search + mark + apply through the real UI / native host.
     await ui(page, '#tool-redact');
@@ -277,6 +510,12 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
       return [...ctx.getImageData(x, y, 1, 1).data];
     }, before);
     expect(pixel).toEqual([0, 0, 0, 255]);
+
+    // Where the box landed is only half of it. A build that removes no text at all and merely
+    // paints a rectangle passes every geometry check above, so the word has to be gone from the
+    // document too — with the control word asserted first, so an empty read cannot satisfy it.
+    await expectText(page).toContain('KEEPME');
+    await expectText(page).not.toContain('SECRET');
     await page.close();
   });
 
@@ -374,6 +613,11 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const portrait = await page.locator('.page[data-page="1"]').boundingBox();
     expect(portrait.height).toBeGreaterThan(portrait.width); // A4 starts portrait
 
+    // How much of the page is ink before the turn. A rotation that drops or blanks the page
+    // content is the failure that matters, and a landscape bounding box says nothing about it.
+    const inkBefore = await inkFraction(page, { x: 0, y: 0, width: 595, height: 842 });
+    expect(inkBefore).toBeGreaterThan(0);
+
     await ui(page, '#btn-rotate-right');
     await expect(page.locator('#status')).toContainText('Rotated page 1');
 
@@ -382,6 +626,22 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
       const b = await page.locator('.page[data-page="1"]').boundingBox();
       return b.width > b.height;
     }).toBe(true);
+
+    // The rendered bitmap itself is landscape, not a portrait image in a landscape frame.
+    const [w, h] = await page.evaluate(async (sel) => {
+      const img = document.querySelector(sel);
+      await img.decode();
+      return [img.naturalWidth, img.naturalHeight];
+    }, pageImageSel(1));
+    expect(w).toBeGreaterThan(h);
+
+    // And the content survived the turn: the same words are still extractable, and the same
+    // amount of ink is on the page (rotating into a clipped or blank raster would lose it).
+    await expectText(page).toBe('Portrait');
+    const inkAfter = await inkFraction(page, { x: 0, y: 0, width: 842, height: 595 },
+      { mediaBox: [0, 0, 842, 595] });
+    expect(inkAfter).toBeGreaterThan(inkBefore * 0.8);
+    expect(inkAfter).toBeLessThan(inkBefore * 1.2);
     await page.close();
   });
 
@@ -430,21 +690,21 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.click('#draw-apply');
     await expect(page.locator('#status')).toContainText('stroke');
 
-    // A green pixel is now baked into the rendered page along the stroke.
-    const green = await page.evaluate(async () => {
-      const img = document.querySelector('.page[data-page="1"] .page-image');
-      await img.decode();
-      const c = document.createElement('canvas');
-      c.width = img.naturalWidth; c.height = img.naturalHeight;
-      const ctx = c.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      const { data } = ctx.getImageData(0, 0, c.width, c.height);
-      for (let i = 0; i < data.length; i += 4) {
-        if (data[i] < 120 && data[i + 1] > 150 && data[i + 2] < 120) return true;
-      }
-      return false;
-    });
-    expect(green).toBe(true);
+    // "A green pixel exists somewhere on the page" was the old assertion, and it holds however
+    // wrongly the stroke is placed — wrong page origin, wrong scale, a single stray dot. What
+    // has to be true is that the ink is *along the line that was drawn*: the band the pointer
+    // swept is substantially green, and the paper a stroke-width above it is untouched.
+    const GREEN = [0, 255, 0];
+    // The pointer swept the vertical middle of the page at 20%..70% of its width.
+    const swept = { x: 595 * 0.25, y: 842 * 0.5 - 5, width: 595 * 0.4, height: 10 };
+    expect(await colorFraction(page, swept, GREEN, { tolerance: 40 })).toBeGreaterThan(0.5);
+    // Clear of the 8pt nib, above the line: still blank paper.
+    const above = { x: 595 * 0.25, y: 842 * 0.5 + 20, width: 595 * 0.4, height: 10 };
+    expect(await colorFraction(page, above, GREEN, { tolerance: 40 })).toBe(0);
+    expect(await bandStats(page, above).then((s) => s.paper)).toBe(1);
+    // And before 20% of the width, where the pen was not yet down.
+    const beforeStart = { x: 20, y: 842 * 0.5 - 5, width: 60, height: 10 };
+    expect(await colorFraction(page, beforeStart, GREEN, { tolerance: 40 })).toBe(0);
     await page.close();
   });
 
@@ -457,6 +717,9 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#panel-forms')).toBeVisible();
     const field = page.locator('#forms-list [data-field="fullName"]');
     await expect(field).toHaveCount(1);
+    // The field's rectangle ([100 700 300 724]) is empty paper before the fill.
+    const fieldRect = { x: 102, y: 702, width: 196, height: 20 };
+    expect(await inkFraction(page, fieldRect)).toBe(0);
 
     await field.fill('Alan Turing');
     await page.click('#forms-apply');
@@ -465,6 +728,19 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // Re-opening the forms panel shows the value persisted into the document.
     await ui(page, '#btn-forms');
     await expect(page.locator('#forms-list [data-field="fullName"]')).toHaveValue('Alan Turing');
+
+    // But a value round-tripping through the panel is exactly the assertion that proves nothing:
+    // the panel is fed from the viewer's own state. What matters is that the name is *drawn on
+    // the page*, in the field's own rectangle — a filled field with no regenerated appearance
+    // stream reads back fine in the panel and prints blank.
+    await expect.poll(() => inkFraction(page, fieldRect), { timeout: 20000 }).toBeGreaterThan(0.01);
+    // ...and it is drawn *inside* the widget. Sampling the whole line rather than just the
+    // widget makes this a real containment check: value text that escapes its own rectangle
+    // (wrong appearance box, wrong font size) shows up here and cannot hide inside the crop.
+    const wholeLine = { x: 40, y: 696, width: 500, height: 32 };
+    const drawn = await inkBounds(page, wholeLine);
+    expect(drawn.x).toBeGreaterThanOrEqual(100);
+    expect(drawn.x + drawn.width).toBeLessThanOrEqual(300);
     await page.close();
   });
 
@@ -910,19 +1186,31 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#btn-undo')).toBeDisabled();
     await expect(page.locator('#btn-redo')).toBeDisabled();
 
-    // Make a change (find & replace), then undo and redo it.
+    // Make a change (find & replace), then undo and redo it. Each step is checked in the
+    // document itself, not just on the status line and the button states: the old test asserted
+    // only "Undid last change" / "Redid change" and the enabled/disabled buttons, so it passed
+    // whether or not undo and redo actually moved any content — it survived a no-op of the very
+    // edit it claims to reverse. In particular redo's effect on the document is covered nowhere
+    // else. (Positive assertions lead each step so the async text-layer rebuild can't satisfy a
+    // negative against an empty page — see expectText.)
     await ui(page, '#btn-find');
     await fillDialog(page, ['Keep me', 'Changed'], 'Replace all');
     await expect(page.locator('#status')).toContainText('Replaced 1 occurrence');
     await expect(page.locator('#btn-undo')).toBeEnabled();
+    await expectText(page).toContain('Changed');
+    await expectText(page).not.toContain('Keep me');
 
     await page.click('#btn-undo');
     await expect(page.locator('#status')).toContainText('Undid last change');
     await expect(page.locator('#btn-redo')).toBeEnabled();
+    await expectText(page).toContain('Keep me');
+    await expectText(page).not.toContain('Changed');
 
     await page.click('#btn-redo');
     await expect(page.locator('#status')).toContainText('Redid change');
     await expect(page.locator('#btn-redo')).toBeDisabled();
+    await expectText(page).toContain('Changed');
+    await expectText(page).not.toContain('Keep me');
     await page.close();
   });
 
@@ -930,7 +1218,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // Text near the top of page 2 so it stays on-screen once page 2 is scrolled to the top.
     const file = fixture('multi-redact.pdf', [
       [{ text: 'first page', x: 72, y: 700 }],
-      [{ text: 'SECOND SECRET', x: 72, y: 800 }],
+      [{ text: 'SECOND SECRET', x: 72, y: 800 }, { text: 'page two control', x: 72, y: 700 }],
     ]);
     const page = await openViewerWith(file);
 
@@ -970,6 +1258,12 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
       return [...ctx.getImageData(Math.round(180 * s), Math.round((842 - 807) * s), 1, 1).data];
     });
     expect(pixel).toEqual([0, 0, 0, 255]);
+
+    // ...and page 2's words are actually gone, while page 2's other line and the whole of
+    // page 1 are untouched. Placement alone would pass on a build that removes nothing.
+    await expectText(page, 2).toContain('page two control');
+    await expectText(page, 2).not.toContain('SECOND SECRET');
+    await expectText(page, 1).toContain('first page');
     await page.close();
   });
 
@@ -980,7 +1274,8 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // (not the shifted one) is what gets blacked out.
     const box = [100, 200, 695, 1042];
     const file = fixture('offset-redact.pdf',
-      [[{ text: 'OFFSET SECRET', x: 150, y: 900 }]], { mediaBox: box });
+      [[{ text: 'OFFSET SECRET', x: 150, y: 900 }, { text: 'offset control line', x: 150, y: 700 }]],
+      { mediaBox: box });
     const page = await openViewerWith(file);
 
     await ui(page, '#tool-redact');
@@ -997,6 +1292,11 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // outside it stays white.
     expect(await pixelAt(page, 200, 905, box)).toEqual([0, 0, 0, 255]);
     expect(await pixelAt(page, 600, 400, box)).toEqual([255, 255, 255, 255]);
+
+    // ...and the content behind it is gone, on a page whose origin is not (0,0) — the offset
+    // has to be honoured by the *removal* as well as by the box, and only this half says so.
+    await expectText(page).toContain('offset control line');
+    await expectText(page).not.toContain('OFFSET SECRET');
     await page.close();
   });
 
@@ -1006,7 +1306,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // was scaled and the redaction landed above where it was drawn. The page here is a normal
     // A4 media box with a crop box 160pt taller; text sits inside the real (media) area.
     const file = fixture('oversized-crop.pdf',
-      [[{ text: 'CLAMP ME', x: 72, y: 500 }]],
+      [[{ text: 'CLAMP ME', x: 72, y: 500 }, { text: 'crop control line', x: 72, y: 300 }]],
       { mediaBox: [0, 0, 595, 842], cropBox: [0, 0, 595, 1002] });
     const page = await openViewerWith(file);
 
@@ -1019,45 +1319,62 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // The drawn spot (not a shifted one) is what turns black.
     expect(await pixelAt(page, 150, 507)).toEqual([0, 0, 0, 255]);
     expect(await pixelAt(page, 450, 300)).toEqual([255, 255, 255, 255]);
+
+    // ...and the words behind the box left the file. The crop-box bug moved *both* the box and
+    // the removal, so a geometry-only test would go green on a build that removed nothing.
+    await expectText(page).toContain('crop control line');
+    await expectText(page).not.toContain('CLAMP ME');
     await page.close();
   });
 
-  test('redaction on a rotated (/Rotate 90) page lands where it is drawn', async () => {
-    // On a rotated page PDFium renders a width/height-swapped image; if the viewer ignores
-    // the rotation the box is drawn in one place and redacted in another. Draw a box at a
-    // known spot on the *displayed* image and prove that exact spot goes black — a full
-    // display -> PDF -> redact -> render round-trip that only closes if rotation is handled.
-    const file = fixture('rotated.pdf', [[{ text: 'rotated secret', x: 120, y: 400 }]], { rotate: 90 });
+  /**
+   * A rotated-page redaction fixture and the drag that puts a box over its first line.
+   *
+   * On the landscape (/Rotate 90) image the first line renders as a vertical strip at display
+   * fractions x 0.475..0.486, y 0.203..0.344, and the control line at x 0.119..0.13. The drag
+   * is x 0.44..0.52, y 0.18..0.37 — over the first line, clear of the control.
+   *
+   * The old test dragged across the middle of the sheet at y 0.40..0.62, which the text does
+   * not reach: it asserted a black box had appeared on an empty part of the page, and said
+   * nothing whatever about redaction.
+   */
+  async function rotatedRedaction() {
+    const file = fixture('rotated.pdf',
+      [[{ text: 'rotated secret', x: 120, y: 400 }, { text: 'rotated control', x: 120, y: 100 }]],
+      { rotate: 90 });
     const page = await openViewerWith(file);
-
     await ui(page, '#tool-redact');
     const box = await page.locator(pageImageSel(1)).boundingBox();
-    // Landscape image (rotated): draw a rectangle across the middle in display coordinates.
-    await page.mouse.move(box.x + box.width * 0.30, box.y + box.height * 0.40);
+    await page.mouse.move(box.x + box.width * 0.44, box.y + box.height * 0.18);
     await page.mouse.down();
-    await page.mouse.move(box.x + box.width * 0.62, box.y + box.height * 0.62, { steps: 5 });
+    await page.mouse.move(box.x + box.width * 0.52, box.y + box.height * 0.37, { steps: 5 });
     await page.mouse.up();
-
     await expect(page.locator('#redact-list li')).toHaveCount(1);
     await page.click('#redact-apply');
     await expect(page.locator('#status')).toContainText('content removed');
+    return page;
+  }
 
-    // The centre of the drawn rectangle (display fractions ~0.46, 0.51) is now opaque black.
-    const pixel = await page.evaluate(async (sel) => {
+  /** Dark-pixel fraction over a rectangle given in display-image fractions. */
+  async function displayDarkFraction(page, fx0, fy0, fx1, fy1) {
+    return page.evaluate(async ([sel, a, b, c, d]) => {
       const img = document.querySelector(sel);
       await img.decode();
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext('2d');
+      const cv = document.createElement('canvas');
+      cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+      const ctx = cv.getContext('2d');
       ctx.drawImage(img, 0, 0);
-      const px = Math.round(0.46 * img.naturalWidth);
-      const py = Math.round(0.51 * img.naturalHeight);
-      return [...ctx.getImageData(px, py, 1, 1).data];
-    }, pageImageSel(1));
-    expect(pixel).toEqual([0, 0, 0, 255]);
-    await page.close();
-  });
+      const x0 = Math.round(a * cv.width), x1 = Math.round(c * cv.width);
+      const y0 = Math.round(b * cv.height), y1 = Math.round(d * cv.height);
+      const { data } = ctx.getImageData(x0, y0, x1 - x0, y1 - y0);
+      let dark = 0, n = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        n++;
+        if (data[i] < 60 && data[i + 1] < 60 && data[i + 2] < 60) dark++;
+      }
+      return dark / n;
+    }, [pageImageSel(1), fx0, fy0, fx1, fy1]);
+  }
 
   test('text layer: real text can be selected/copied and right-clicked to edit', async () => {
     const file = fixture('selecttext.pdf', [[{ text: 'Selectable Sentence Here', x: 72, y: 700 }]]);
@@ -1066,6 +1383,8 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // The invisible selectable text layer builds over the rendered page.
     const span = page.locator('.page[data-page="1"] .text-layer span', { hasText: 'Selectable' });
     await expect(span).toHaveCount(1);
+    // Where the sentence's ink sits now, so the replacement can be held to the same baseline.
+    const before = await inkBounds(page, { x: 60, y: 680, width: 340, height: 45 });
 
     // Selecting it yields the real text (so Ctrl/Cmd+C copies actual characters, not an image).
     await span.click({ clickCount: 3 });
@@ -1079,6 +1398,29 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#panel-edit')).toBeVisible();
     await expect(page.locator('#edit-title')).toHaveText('Edit text');
     await expect(page.locator('#edit-text')).toHaveValue(/Selectable Sentence Here/);
+
+    // ...and pressing Apply actually edits the document. The old test stopped at "the panel
+    // opens pre-filled", which is exactly where this feature was broken: the menu item set
+    // state.pendingEditRegion and then called setTool('select'), whose hidePanels() nulled it
+    // again, so applyTextEdit() returned on its first line. The panel looked right and Apply
+    // did nothing, for months. Fixed in this branch; this is the assertion that holds it.
+    await page.fill('#edit-text', 'Replaced Via Menu');
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text replaced');
+    await expectText(page).toContain('Replaced Via Menu');
+    await expectText(page).not.toContain('Selectable');
+    // The original words are off the paper as well as out of the text, and the replacement is
+    // drawn where they were — on the same baseline and starting at the same left edge, not a
+    // line lower or a line higher.
+    const after = await inkBounds(page, { x: 60, y: 680, width: 340, height: 45 });
+    expect(after).not.toBeNull();
+    // Within a few points of the original baseline and left edge — the guard is "not a line off"
+    // (a line is 10-28pt here), so 3pt absorbs the sub-pixel metrics shift from the em-size fix
+    // (#84) without letting a real vertical jump through.
+    expect(Math.abs(after.y - before.y)).toBeLessThan(3);
+    expect(Math.abs(after.x - before.x)).toBeLessThan(3);
+    // The replacement is shorter than the original, so the paper past its right edge is clear.
+    expect(await inkFraction(page, { x: 320, y: 694, width: 120, height: 24 })).toBe(0);
     await page.close();
   });
 
@@ -1392,10 +1734,16 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
   });
 
   test('move text: grab a run of text and drag it to a new position', async () => {
-    const file = fixture('movetext.pdf', [[{ text: 'MOVE ME', x: 72, y: 700 }]]);
+    const file = fixture('movetext.pdf', [[{ text: 'MOVE ME', x: 72, y: 700, size: 20 }]]);
     const page = await openViewerWith(file);
     // Let the selectable text layer (span cache) build so the grab snaps to the run.
     await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
+
+    // The word's ink where it starts, so "it left" is a measured change and not an assumption.
+    const origin = { x: 68, y: 694, width: 120, height: 24 };
+    const destination = { x: 85, y: 544, width: 130, height: 26 };
+    expect(await inkFraction(page, origin)).toBeGreaterThan(0.05);
+    expect(await inkFraction(page, destination)).toBe(0);
 
     await ui(page, '#tool-move');
     const box = await page.locator(pageImageSel(1)).boundingBox();
@@ -1409,56 +1757,37 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.mouse.up();
     await expect(page.locator('#status')).toContainText('Text moved');
 
-    // The text now reads at the lower position...
-    await ui(page, '#tool-edit');
-    await dragPdfRect(page, { x: 60, y: 540, width: 220, height: 42 });
-    await expect(page.locator('#edit-text')).toHaveValue(/MOVE ME/);
-    await page.click('#edit-cancel');
-
-    // ...and is gone from where it started.
-    await ui(page, '#tool-edit');
-    await dragPdfRect(page, { x: 60, y: 690, width: 220, height: 36 });
-    await expect(page.locator('#edit-text')).not.toHaveValue(/MOVE ME/);
-    await page.close();
-  });
-
-  test('move image: grab an image and drag it to a new position', async () => {
-    const base = fixture('moveimg.pdf', [[{ text: 'Base', x: 72, y: 700 }]]);
-    // Merge a small PNG so page 2 is an image we can grab and move.
-    const png = Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-      'base64');
-    const imgFile = path.join(fixtureDir, 'movepic.png');
-    fs.writeFileSync(imgFile, png);
-    const page = await openViewerWith(base);
-
-    const chooser = page.waitForEvent('filechooser');
-    await ui(page, '#btn-merge');
-    await (await chooser).setFiles(imgFile);
-    await page.locator('dialog#modal').getByRole('button', { name: 'Merge' }).click();
-    await expect(page.locator('#page-total')).toHaveText('2');
-
-    // Bring page 2 (the image) into view and grab its centre with the Move tool.
-    await page.evaluate(() =>
-      document.querySelector('.page[data-page="2"]').scrollIntoView({ block: 'start', behavior: 'instant' }));
-    await expect(page.locator('.page[data-page="2"] .page-image')).toHaveAttribute('src', /data:image\/png/);
-    await ui(page, '#tool-move');
-    const box = await page.locator('.page[data-page="2"] .page-image').boundingBox();
-    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
-    await page.mouse.down();
-    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3, { steps: 8 });
-    await page.mouse.up();
-    await expect(page.locator('#status')).toContainText('Image moved');
+    // Both halves, every time. The old location is back to the page background colour...
+    await expect.poll(() => inkFraction(page, origin), { timeout: 20000 }).toBe(0);
+    expect(await bandStats(page, origin).then((s) => s.paper)).toBe(1);
+    expect(await dominantColor(page, origin)).toEqual([255, 255, 255]);
+    // ...and the new location contains the text. Ink alone would be satisfied by a smear, so
+    // the run is also read back out of the document, at its new coordinates.
+    expect(await inkFraction(page, destination)).toBeGreaterThan(0.05);
+    const runs = await textRuns(page);
+    expect(runs).toHaveLength(1);            // moved, not copied
+    expect(runs[0].text).toBe('MOVE ME');    // and not mangled on the way
+    expect(runs[0].y).toBeGreaterThan(535);
+    expect(runs[0].y).toBeLessThan(565);
     await page.close();
   });
 
   test('context menu: right-clicking selected text offers Edit and Redact', async () => {
-    const file = fixture('ctxsel.pdf', [[{ text: 'Right Click Me', x: 72, y: 700 }]]);
+    // The second line is a control: it must survive, and asserting it first is what proves the
+    // text layer has rebuilt before the "the run is gone" negative is checked.
+    const file = fixture('ctxsel.pdf', [[
+      { text: 'Right Click Me', x: 72, y: 700 },
+      { text: 'leave this alone', x: 72, y: 640 },
+    ]]);
     const page = await openViewerWith(file);
     const span = page.locator('.page[data-page="1"] .text-layer span', { hasText: 'Right' });
     await span.waitFor({ timeout: 15000 });
     await span.click({ clickCount: 3 }); // select the run
-    await span.click({ button: 'right' });
+    // Right-click *inside* the selection. Chrome discards a selection when you right-click
+    // outside it, and the menu then quietly offers the document-level actions instead — a test
+    // that clicks anywhere else can pass while exercising a completely different code path.
+    const b = await span.boundingBox();
+    await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2, { button: 'right' });
 
     const menu = page.locator('#context-menu');
     await expect(menu).toBeVisible();
@@ -1466,9 +1795,19 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(menu).toContainText('Redact this');
     await expect(menu).toContainText('Highlight');
 
-    // "Redact this" marks the selection as a redaction region.
+    // "Redact this" marks the selection as a redaction region — and the region it marks is the
+    // selected run, not the whole page or a default box. Applying it has to remove those words
+    // and nothing else, which is the only reason the menu item exists.
     await menu.getByRole('button', { name: /Redact this/ }).click();
     await expect(page.locator('#redact-list li')).toHaveCount(1);
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+    await expectText(page).toContain('leave this alone');
+    await expectText(page).not.toContain('Right Click Me');
+    expect(await inkFraction(page, { x: 74, y: 698, width: 90, height: 12 })).toBe(1);
+    // The rest of the page is untouched paper — the region was the run, not the page.
+    expect(await bandStats(page, { x: 60, y: 400, width: 400, height: 100 }).then((s) => s.paper))
+      .toBe(1);
     await page.close();
   });
 
@@ -1511,7 +1850,25 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.click('#edit-apply');
     await expect(page.locator('#status')).toContainText('Text replaced');
 
-    // Re-selecting the region shows the new text, and the detected font/style round-trips.
+    // The new text really is in the document.
+    await expectText(page).toContain('Styled Heading');
+
+    // Re-selecting the region has to show the *detected* font and style — but nothing clears
+    // the edit controls after an apply, so they still hold "times", "bold" and the typed string
+    // from a moment ago. Re-reading them straight away compares the controls with themselves
+    // and passes even when replace-region-text does nothing at all.
+    //
+    // So: open the panel over a blank part of the page first. That is a real host round trip
+    // (get-region-text on an empty region), and it resets the controls to the defaults —
+    // asserted here, because that reset is what makes the next three assertions mean anything.
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 380, width: 260, height: 34 });
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-text')).toHaveValue('');
+    await expect(page.locator('#edit-font')).toHaveValue('helvetica');
+    await expect(page.locator('#edit-bold')).not.toHaveClass(/active/);
+
+    // Now the styled line, with the controls known to be showing something else beforehand.
     await ui(page, '#tool-edit');
     await dragPdfRect(page, { x: 55, y: 685, width: 300, height: 45 });
     await expect(page.locator('#edit-text')).toHaveValue(/Styled Heading/);
@@ -1530,6 +1887,23 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await ui(page, '#btn-find');
     await fillDialog(page, ['OldCorp', 'NewCorp'], 'Replace all');
     await expect(page.locator('#status')).toContainText('Replaced 2 occurrences');
+
+    // "Replaced 2 occurrences" is a count the viewer computed, not evidence about the document.
+    // Both occurrences have to actually be gone, both replacements actually present, and the
+    // words around them left alone.
+    await expectCompactText(page).toContain('ContractwithNewCorp');
+    await expectCompactText(page).toContain('NewCorpshalldeliver');
+    await expectCompactText(page).not.toContain('OldCorp');
+    await expect
+      .poll(() => pageText(page).then((t) => t.replace(/\s+/g, '').match(/NewCorp/g)?.length ?? 0),
+        { timeout: 20000 })
+      .toBe(2);
+    // Each replacement sits on the line it replaced. Find & replace removes the original text
+    // operators and appends the new ones at the end of the content stream, so "the word is in
+    // the document somewhere" is genuinely a weaker claim than "the line still reads correctly".
+    const replaced = (await textRuns(page)).filter((r) => r.text.includes('NewCorp'));
+    expect(replaced).toHaveLength(2);
+    expect(replaced.map((r) => Math.round(r.y)).sort((a, b) => a - b)).toEqual([647, 697]);
     await page.close();
   });
 
@@ -1634,6 +2008,15 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
 
     await expect(page.locator('#status')).toContainText('reorganized');
     await expect(page.locator('#page-total')).toHaveText('2');
+
+    // A page count of 2 is equally true of removing the wrong page. Which page went is the
+    // whole point, so read the surviving pages' text back out of the document.
+    await expectText(page, 1).toContain('Keep one');
+    await page.evaluate(() => document.querySelector('.page[data-page="2"]')
+      .scrollIntoView({ block: 'start', behavior: 'instant' }));
+    await expect(page.locator(pageImageSel(2))).toHaveAttribute('src', /data:image\/png/);
+    await expectText(page, 2).toContain('Keep three');
+    await expectText(page, 2).not.toContain('Delete two');
     await page.close();
   });
 
@@ -1826,6 +2209,8 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(file);
 
     const before = await page.locator('.page').first().boundingBox();
+    const inkBefore = await inkFraction(page, { x: 60, y: 690, width: 300, height: 30 });
+    expect(inkBefore).toBeGreaterThan(0);
 
     await ui(page, '#btn-ocr');
     // Deterministic across environments: OCR either succeeds (status confirms "searchable") or,
@@ -1849,6 +2234,17 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
         async () => page.locator('.page').first().locator('img.page-image').evaluate((i) => i.naturalWidth),
         { timeout: 30000 },
       ).toBeGreaterThan(0);
+
+      // "naturalWidth > 0" is also true of an all-white raster, which is exactly what an OCR
+      // layer laid over a lost page looks like. The page's own ink has to still be there, in
+      // the same quantity, in the same place...
+      const inkAfter = await inkFraction(page, { x: 60, y: 690, width: 300, height: 30 });
+      expect(inkAfter).toBeGreaterThan(inkBefore * 0.7);
+      expect(inkAfter).toBeLessThan(inkBefore * 1.3);
+      // ...and the point of the operation is that the words are now selectable text, so they
+      // have to come back out of the document.
+      await expectText(page).toContain('Scanned');
+      await expectText(page).toContain('document');
     }
     await page.close();
   });
@@ -2152,4 +2548,765 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#status')).toContainText('Refusing to open');
     await page.close();
   });
+  test('redaction over a picture removes the words without scrubbing the image (#87)', async () => {
+    // A black box that also eats the photograph under it is a data-loss bug, and one that no
+    // status line or "is the region black?" check can see. The fixture is a flat green picture
+    // with a line of text on top: after redacting just the words, the pixels *inside* the box
+    // must be black, the pixels *around* it must still be exactly that green, and the words
+    // must be gone from the extracted text.
+    const file = path.join(fixtureDir, 'redact-image.pdf');
+    const GREEN = [0, 153, 68];
+    // The second line is a control that must survive: without a word left on the page, the
+    // "the secret is gone" assertion would be satisfied by a text layer that simply had not
+    // rebuilt yet, and would pass against a build that removed nothing.
+    fs.writeFileSync(file, buildImagePdf({
+      rect: [72, 500, 500, 750], rgb: GREEN,
+      text: [
+        { text: 'SECRET OVER PICTURE', x: 90, y: 700, size: 18 },
+        { text: 'caption stays put', x: 90, y: 460, size: 14 },
+      ],
+    }));
+    const page = await openViewerWith(file);
+    await expectText(page).toContain('SECRET OVER PICTURE');
+    // The picture really is one flat colour to begin with, so "still green" means something.
+    expect(await colorFraction(page, { x: 100, y: 540, width: 300, height: 100 }, GREEN)).toBe(1);
+
+    await ui(page, '#tool-redact');
+    await dragPdfRect(page, { x: 85, y: 694, width: 210, height: 26 });
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+
+    // Words gone from the file, while the control line below the picture is still there...
+    await expectText(page).toContain('caption stays put');
+    await expectText(page).not.toContain('SECRET');
+    // ...box solid black where it was drawn...
+    // Note this is a colour test, not an ink test: the picture's green is dark enough to count
+    // as "ink" on its own, so an ink fraction of 1.0 here would be true with no box at all.
+    const box = { x: 95, y: 698, width: 180, height: 16 };
+    expect(await colorFraction(page, box, [0, 0, 0], { tolerance: 4 })).toBe(1);
+    expect(await dominantColor(page, box)).toEqual([0, 0, 0]);
+    // ...and the picture intact everywhere else, including the strip to the right of the box
+    // on the very same scanline (where a "scrub the whole image" bug shows up first).
+    expect(await colorFraction(page, { x: 100, y: 540, width: 300, height: 100 }, GREEN)).toBe(1);
+    expect(await colorFraction(page, { x: 320, y: 694, width: 160, height: 26 }, GREEN)).toBe(1);
+    await page.close();
+  });
+
+  test('add text: drag a box, type, and stamp it onto the page', async () => {
+    const file = fixture('addtext.pdf', [[{ text: 'background', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    // Nothing is here yet — measured, so "the text appeared" is a change and not a coincidence.
+    expect(await inkFraction(page, { x: 105, y: 675, width: 310, height: 26 })).toBe(0);
+
+    await ui(page, '#tool-text');
+    await dragPdfRect(page, { x: 110, y: 680, width: 300, height: 16 });
+
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-title')).toHaveText('Add text');
+    await page.fill('#edit-text', 'STAMPED CAPTION');
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text added');
+
+    // The characters are in the document — read back out of it, not out of the form control
+    // that still holds what was typed. (The old assertion re-read the region with the edit tool
+    // and matched `#edit-text` before the host had answered, so it was matching the typed value
+    // against itself; it passed even when the stamped text was truncated.)
+    await expectText(page).toContain('STAMPED CAPTION');
+    // ...and it lands in the box that was dragged. "Some ink appeared in a generous band" is
+    // satisfied by text stamped a whole line out of place, so the assertion is on where the ink
+    // actually is: the drag was x=110..410, y=680..696, and the glyphs must sit inside it.
+    const stamped = await inkBounds(page, { x: 100, y: 620, width: 340, height: 100 });
+    expect(stamped).not.toBeNull();
+    expect(stamped.x).toBeGreaterThan(105);
+    expect(stamped.x).toBeLessThan(120);
+    expect(stamped.y).toBeGreaterThan(674);
+    expect(stamped.y).toBeLessThan(686);
+    expect(stamped.y + stamped.height).toBeLessThan(700);
+    // ...and nowhere else: text stamped at the wrong scale or origin still satisfies "it exists".
+    expect(await inkFraction(page, { x: 105, y: 600, width: 310, height: 26 })).toBe(0);
+    // The page's existing content is still there and still where it was.
+    await expectText(page).toContain('background');
+    expect(await inkFraction(page, { x: 70, y: 96, width: 80, height: 16 })).toBeGreaterThan(0);
+    await page.close();
+  });
+
+  // eslint-disable-next-line playwright/no-skipped-test
+  test.fixme('add text: a caption longer than its box is stamped in full, not clipped', async () => {
+    // LIVE BUG. Placing text with a plain click gives a 240x26pt box and defaults the type size
+    // to the box height (26pt). "STAMPED CAPTION" does not fit 240pt at 26pt, and TextTools.
+    // StampText lays the string into a fixed-size iText Canvas, so the overflow is *clipped and
+    // discarded*: the document ends up holding "STAMPED CAPTIO". The same clipping is what turns
+    // a replacement of "HELLO" with "WORLDWIDE GREETINGS" into "WORLDWIDE" (see the text-edit
+    // fixme below) — one defect, two doors.
+    //
+    // This test asserts the whole caption survives, from the file's own extracted text:
+    //   await expectText(page).toContain('STAMPED CAPTION');
+    // Observed on this branch: the extracted run is "STAMPED CAPTIO" and the assertion reads
+    //   Expected string: "STAMPED CAPTION" / Received string: "background STAMPED CAPTIO"
+    // Fixing it means deciding what "too long" should do — shrink to fit, grow the box, or
+    // wrap and grow downwards — which is a product decision, not a test fix.
+    const file = fixture('addtext-long.pdf', [[{ text: 'background', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+    await ui(page, '#tool-text');
+    const box = await page.locator(pageImageSel(1)).boundingBox();
+    const scale = box.width / 595;
+    await page.mouse.click(box.x + 120 * scale, box.y + (842 - 700) * scale);
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await page.fill('#edit-text', 'STAMPED CAPTION');
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text added');
+    await expectText(page).toContain('STAMPED CAPTION');
+    await page.close();
+  });
+
+  test('redaction on a rotated (/Rotate 90) page: the box lands where it is drawn', async () => {
+    // Placement only — deliberately. The content half of this behaviour is broken and lives in
+    // the fixme below; this test's title now claims exactly what it proves and no more.
+    const page = await rotatedRedaction();
+
+    // Sample inside the drawn rectangle but clear of the glyph strip (x 0.44..0.465). The text
+    // is dark, so sampling over it reads black whether a box was painted or not — that band is
+    // 0.03 dark before the redaction and would not discriminate.
+    expect(await displayDarkFraction(page, 0.44, 0.18, 0.465, 0.37)).toBe(1);
+    // ...and the box is a box: the rest of the sheet is untouched paper.
+    expect(await displayDarkFraction(page, 0.60, 0.45, 0.90, 0.75)).toBe(0);
+    await page.close();
+  });
+
+  // eslint-disable-next-line playwright/no-skipped-test
+  test.fixme('redaction on a rotated (/Rotate 90) page removes the text under the box', async () => {
+    // LIVE BUG — and the most serious one in this branch. On a /Rotate 90 page, dragging a
+    // redaction box paints the black rectangle exactly where it was drawn and removes *no text
+    // at all*. The words stay in the file: selectable, copyable and searchable underneath an
+    // opaque black box. That is the failure mode redaction exists to prevent.
+    //
+    // Measured on this branch, dragging over the first line of a rotated page:
+    //   dark fraction inside the box, clear of glyphs   0.00 -> 1.00   (the box is painted)
+    //   extracted text                "rotated secret rotated control" -> unchanged
+    //
+    // It is the viewer's drag mapping, not the host: search-and-mark redaction on the *same*
+    // rotated fixture, which uses absolute PDF coordinates and no screen mapping at all,
+    // removes the word correctly ("ROTSECRET","ROTCONTROL" -> "ROTCONTROL"). So the region a
+    // drag produces on a rotated page paints correctly but does not match the glyphs for
+    // removal — the two disagree about which space the rectangle is in.
+    //
+    // Not fixed here: I was asked not to touch extension/src/viewer.js further, and the fix is
+    // a coordinate-space change in cssToPdf/displayToPage that wants its own tests.
+    const page = await rotatedRedaction();
+    await expectText(page).toContain('rotated control');
+    await expectText(page).not.toContain('rotated secret');
+    await page.close();
+  });
+
+  test('text edit: reads existing text, replaces it in place, leaves its neighbour alone', async () => {
+    const file = fixture('edit.pdf', [
+      [{ text: 'Amount Due: $500', x: 72, y: 700 }, { text: 'Do not touch this', x: 72, y: 640 }],
+    ]);
+    const page = await openViewerWith(file);
+    const editedBefore = await inkBounds(page, { x: 60, y: 690, width: 300, height: 30 });
+    const neighbourBefore = await inkBounds(page, { x: 60, y: 630, width: 300, height: 30 });
+    expect(neighbourBefore).not.toBeNull();
+
+    await ui(page, '#tool-edit');
+    // Drag a box that hugs the line. The replacement is laid out from the top-left of whatever
+    // box you draw, so a box noticeably bigger than the text legitimately moves it — that is the
+    // behaviour ("lay the new text inside the same rectangle"), not a bug, and it would make the
+    // position assertions below meaningless.
+    await dragPdfRect(page, { x: 71, y: 694, width: 240, height: 20 });
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-text')).toHaveValue('Amount Due: $500');
+
+    await page.fill('#edit-text', 'Amount Due: $750');
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text replaced');
+
+    // Read the result out of the *document*. The old test re-selected the region and asserted on
+    // `#edit-text`, but nothing clears that control after an apply, so it still held the string
+    // that had just been typed into it — the assertion matched the typed value against itself
+    // and would have passed even if replace-region-text had done nothing at all.
+    await expectText(page).toContain('$750');
+    await expectText(page).not.toContain('$500');
+    // The old amount is gone from the paper too, not merely overprinted.
+    const line = await bandStats(page, { x: 60, y: 690, width: 260, height: 30 });
+    expect(line.ink).toBeGreaterThan(0.02);   // the new text is drawn there
+    expect(line.ink).toBeLessThan(0.5);       // ...and it is text, not a filled patch
+    // ...on the line it replaced, not shunted up or down it. The tolerance is 4pt on 14pt text:
+    // tight enough that a displacement of a whole line fails, loose enough to absorb the ~2.5pt
+    // baseline creep the type-size bug in the fixme below currently causes.
+    expect(Math.abs(line.inkBox.y - editedBefore.y)).toBeLessThan(4);
+    expect(Math.abs(line.inkBox.x - editedBefore.x)).toBeLessThan(4);
+    // And the line below it did not shift, resize, or vanish while we were editing above it.
+    await expectText(page).toContain('Do not touch this');
+    const neighbourAfter = await inkBounds(page, { x: 60, y: 630, width: 300, height: 30 });
+    expect(neighbourAfter.x).toBeCloseTo(neighbourBefore.x, 0);
+    expect(neighbourAfter.y).toBeCloseTo(neighbourBefore.y, 0);
+    expect(neighbourAfter.width).toBeCloseTo(neighbourBefore.width, 0);
+    expect(neighbourAfter.height).toBeCloseTo(neighbourBefore.height, 0);
+    await page.close();
+  });
+
+  // eslint-disable-next-line playwright/no-skipped-test
+  test.fixme('text edit: the type size survives repeated edits (#29/#84)', async () => {
+    // LIVE BUG. TextTools.GetTextInRegion reports the type size as the *glyph* box height —
+    // chunks.Max(c => c.FontHeight), the ascent-to-descent span of the rendered characters —
+    // rather than the em size the text was set in. For Helvetica that is 0.925 em, so every
+    // edit that keeps "the size that was already there" sets it 7.5% smaller than it was, and
+    // the loss compounds. Measured on this branch, editing 24pt text three times over:
+    //
+    //   detected size   24 -> 22.2 -> 20.5 -> 19.0
+    //   ink box height  18 -> 17   -> 15.5 -> 14.5
+    //
+    // The same detection feeds move-text, so dragging a run also shrinks it (18.5 -> 17.1).
+    //
+    // The assertion below is the maintainer's rule — after an edit the type size must still
+    // match what was there before — measured off the rendered glyphs rather than off the
+    // control that is itself wrong. It currently reads, on the first round:
+    //   Expected: close to 18 (2 digits precision) / Received: 17
+    // and drifts further every round. The fix belongs in the native host's text metrics
+    // (derive the em from the font's ascender/descender, or carry the Tf size through), which
+    // is core-library work with the golden corpus attached to it, not an e2e change.
+    const file = fixture('edit-size.pdf', [[{ text: 'SIZE TEST', x: 72, y: 700, size: 24 }]]);
+    const page = await openViewerWith(file);
+    const band = { x: 55, y: 680, width: 320, height: 50 };
+    const original = await inkBounds(page, band);
+
+    for (let round = 1; round <= 3; round++) {
+      await ui(page, '#tool-edit');
+      await dragPdfRect(page, { x: 60, y: 685, width: 300, height: 40 });
+      await expect(page.locator('#panel-edit')).toBeVisible();
+      // Change nothing at all — same text, same font, same size. This must be a no-op.
+      await expect(page.locator('#edit-font')).toHaveValue('helvetica');
+      await page.click('#edit-apply');
+      await expect(page.locator('#status')).toContainText('Text replaced');
+      await expect.poll(() => inkBounds(page, band).then((b) => b?.height), { timeout: 20000 })
+        .toBeCloseTo(original.height, 0);
+    }
+    await page.close();
+  });
+
+  // eslint-disable-next-line playwright/no-skipped-test
+  test.fixme('text edit: a replacement longer than the original is not truncated', async () => {
+    // LIVE BUG, and the one the maintainer reported as "HELLO" becoming "WORL". TextTools.
+    // StampText lays the replacement into an iText Canvas sized to the *original* region, so
+    // anything that does not fit is clipped away and lost. Replacing "HELLO" (24pt, in a
+    // 200x40pt region) with "WORLDWIDE GREETINGS" wraps to two lines, the second of which does
+    // not fit, and the document is left holding just "WORLDWIDE".
+    //
+    // Observed on this branch:
+    //   Expected string: "WORLDWIDE GREETINGS" / Received string: "WORLDWIDE"
+    //
+    // Same root cause as the add-text fixme above. Not fixed here because the right behaviour
+    // (shrink to fit / grow the box / wrap downwards) is a product decision.
+    const file = fixture('edit-longer.pdf', [[{ text: 'HELLO', x: 72, y: 700, size: 24 }]]);
+    const page = await openViewerWith(file);
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 690, width: 200, height: 40 });
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-text')).toHaveValue('HELLO');
+    await page.fill('#edit-text', 'WORLDWIDE GREETINGS');
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text replaced');
+    await expectText(page).toContain('WORLDWIDE GREETINGS');
+    await page.close();
+  });
+
+  test('text edit: replacing a caption over a picture does not punch through the picture', async () => {
+    // Regression (#89): editing text drawn on top of an image used to paint the "background"
+    // the editor assumed was under it, knocking a black rectangle through the picture. Nothing
+    // in the old suite looked at a single pixel of an image, so it shipped.
+    const file = path.join(fixtureDir, 'edit-over-image.pdf');
+    const GREEN = [0, 153, 68];
+    fs.writeFileSync(file, buildImagePdf({
+      rect: [72, 500, 500, 750], rgb: GREEN,
+      text: [{ text: 'CAPTION', x: 100, y: 700, size: 18 }],
+    }));
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 95, y: 694, width: 150, height: 28 });
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-text')).toHaveValue('CAPTION');
+    await page.fill('#edit-text', 'REVISED');
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text replaced');
+
+    // The edit took...
+    await expectText(page).toContain('REVISED');
+    await expectText(page).not.toContain('CAPTION');
+    // ...and the picture is still the picture where the old caption used to be. A punched-out
+    // rectangle drops this to roughly zero; a fully intact patch would be 1.0, and the ~0.9
+    // floor leaves room for the new glyphs themselves.
+    const edited = { x: 95, y: 694, width: 150, height: 28 };
+    expect(await colorFraction(page, edited, GREEN)).toBeGreaterThan(0.85);
+    // Nothing black was introduced anywhere in the patch.
+    expect(await dominantColor(page, edited)).toEqual(GREEN);
+    await page.close();
+  });
+
+  test('move image: grab a picture and drag it to a new position', async () => {
+    // The old test merged a 1x1 PNG and asserted the status line said "Image moved" — which it
+    // says whether the picture went where it was dropped, went somewhere else, or vanished. A
+    // flat-colour picture at a known rectangle turns that into two measurements: the colour has
+    // to leave the old rectangle entirely and arrive, whole, at the new one.
+    const file = path.join(fixtureDir, 'move-image.pdf');
+    const RED = [220, 20, 20];
+    fs.writeFileSync(file, buildImagePdf({ rect: [200, 500, 300, 600], rgb: RED }));
+    const page = await openViewerWith(file);
+
+    const origin = { x: 210, y: 510, width: 80, height: 80 };
+    const destination = { x: 110, y: 360, width: 80, height: 80 };
+    expect(await colorFraction(page, origin, RED)).toBe(1);
+    expect(await colorFraction(page, destination, RED)).toBe(0);
+
+    await ui(page, '#tool-move');
+    const box = await page.locator(pageImageSel(1)).boundingBox();
+    const scale = box.width / 595;
+    const cx = (px) => box.x + px * scale;
+    const cy = (py) => box.y + (842 - py) * scale;
+    // Grab the middle of the picture and drop it 100pt left and 150pt down.
+    await page.mouse.move(cx(250), cy(550));
+    await page.mouse.down();
+    await page.mouse.move(cx(150), cy(400), { steps: 8 });
+    await page.mouse.up();
+    await expect(page.locator('#status')).toContainText('Image moved');
+
+    // Gone from where it was — back to blank paper, not a red smear or a torn edge.
+    await expect.poll(() => colorFraction(page, origin, RED), { timeout: 20000 }).toBe(0);
+    expect(await bandStats(page, origin).then((s) => s.paper)).toBe(1);
+    // ...and arrived intact at the drop point: every pixel of the sampled interior is the
+    // picture's colour, so it was translated rather than clipped, scaled or recoloured.
+    expect(await colorFraction(page, destination, RED)).toBe(1);
+    await page.close();
+  });
+
+  test('organize pages: reorder moves the page, and its content moves with it', async () => {
+    const file = fixture('reorder.pdf', [
+      [{ text: 'AAAONE', x: 72, y: 700 }],
+      [{ text: 'BBBTWO', x: 72, y: 700 }],
+    ]);
+    const page = await openViewerWith(file);
+    await expectText(page, 1).toContain('AAAONE');
+
+    await ui(page, '#btn-organize');
+    await expect(page.locator('#organize-list .organize-item')).toHaveCount(2);
+    await page.locator('#organize-list .organize-item').nth(1)
+      .getByRole('button', { name: 'Move up' }).click();
+    await page.click('#organize-apply');
+    await expect(page.locator('#status')).toContainText('reorganized');
+
+    // Reordering is the operation where "the UI list changed" and "the file changed" come apart
+    // most easily, so both pages are read back: the second page's content is now first, and the
+    // first page's content is now second — not duplicated, not dropped, not left in place.
+    await expect(page.locator('#page-total')).toHaveText('2');
+    await expectText(page, 1).toContain('BBBTWO');
+    await expectText(page, 1).not.toContain('AAAONE');
+    await page.evaluate(() => document.querySelector('.page[data-page="2"]')
+      .scrollIntoView({ block: 'start', behavior: 'instant' }));
+    await expect(page.locator(pageImageSel(2))).toHaveAttribute('src', /data:image\/png/);
+    await expectText(page, 2).toContain('AAAONE');
+    await page.close();
+  });
+
+  test('save: the exported file is a real PDF that carries the edit', async () => {
+    // "Saving via downloads…" is a status line the viewer prints before it knows anything about
+    // what came out. The bytes handed to chrome.downloads are intercepted here, written to disk,
+    // and *reopened through the whole extension + native host pipeline* — which is the only way
+    // to prove the export is a valid document and that the user's edit is in it.
+    const file = fixture('save.pdf', [[{ text: 'ORIGINALWORD', x: 72, y: 700 }]]);
+    const page = await openCapturingViewerWith(file);
+
+    await ui(page, '#btn-find');
+    await fillDialog(page, ['ORIGINALWORD', 'REPLACEDWORD'], 'Replace all');
+    await expect(page.locator('#status')).toContainText('Replaced 1 occurrence');
+
+    await page.click('#btn-save');
+    await expect(page.locator('#status')).toContainText('Saving via downloads');
+    const exported = await writeCapturedExport(page, 'save-exported.pdf');
+    await page.close();
+
+    // It is named after the source, and it is a PDF, not an empty or truncated blob.
+    expect(exported.name).toBe('save-edited.pdf');
+    expect(exported.bytes.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+    expect(exported.bytes.length).toBeGreaterThan(500);
+
+    // Reopened, it renders and holds the edited text — not the original.
+    const reopened = await openViewerWith(exported.file);
+    await expectText(reopened).toContain('REPLACEDWORD');
+    await expectText(reopened).not.toContain('ORIGINALWORD');
+    expect(await inkFraction(reopened, { x: 70, y: 696, width: 120, height: 16 }))
+      .toBeGreaterThan(0.05);
+    await reopened.close();
+  });
+
+  test('undo restores the previous state, in the document and on the page', async () => {
+    const file = fixture('undo-content.pdf', [[{ text: 'Original', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    const before = await inkBounds(page, { x: 60, y: 690, width: 300, height: 30 });
+
+    await ui(page, '#btn-find');
+    await fillDialog(page, ['Original', 'Changed'], 'Replace all');
+    await expect(page.locator('#status')).toContainText('Replaced 1 occurrence');
+    await expectText(page).toContain('Changed');
+
+    await expect(page.locator('#btn-undo')).toBeEnabled();
+    await page.click('#btn-undo');
+    await expect(page.locator('#status')).toContainText('Undid last change');
+
+    // Undo has to put the document back, not just re-enable a button and print a message.
+    await expectText(page).toContain('Original');
+    await expectText(page).not.toContain('Changed');
+    const after = await inkBounds(page, { x: 60, y: 690, width: 300, height: 30 });
+    expect(after.x).toBeCloseTo(before.x, 0);
+    expect(after.y).toBeCloseTo(before.y, 0);
+    expect(after.width).toBeCloseTo(before.width, 0);
+    await page.close();
+  });
+
+  // ------------------------------------------------------- activity console (#72)
+
+  /** Opens a viewer with the host gate installed, loads `file`, and returns the page. */
+  async function openGatedViewerWith(file, gateOptions) {
+    const page = await ext.context.newPage();
+    await installHostGate(page, gateOptions);
+    await page.goto(ext.viewerUrl);
+    const chooser = page.waitForEvent('filechooser');
+    await page.click('#btn-open-empty');
+    await (await chooser).setFiles(file);
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+    return page;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Control coverage: every action button, when clicked, actually runs its function — not just
+  // that the control is present. Each of these was uncovered before; the assertion is the effect
+  // in the document or the panel, and each was watched failing with its handler stubbed.
+  // ---------------------------------------------------------------------------------------------
+
+  test('control: rotate-left turns the page the other way and keeps its content', async () => {
+    const file = fixture('rotleft.pdf', [[{ text: 'Portrait', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    const before = await page.locator('.page[data-page="1"]').boundingBox();
+    expect(before.height).toBeGreaterThan(before.width);
+    const inkBefore = await inkFraction(page, { x: 0, y: 0, width: 595, height: 842 });
+
+    await ui(page, '#btn-rotate-left');
+    await expect(page.locator('#status')).toContainText('Rotated page 1');
+
+    await expect.poll(async () => {
+      const b = await page.locator('.page[data-page="1"]').boundingBox();
+      return b.width > b.height;
+    }).toBe(true);
+    // Content survived the turn — a rotate that blanks or clips the page is the failure that counts.
+    await expectText(page).toBe('Portrait');
+    const inkAfter = await inkFraction(page, { x: 0, y: 0, width: 842, height: 595 },
+      { mediaBox: [0, 0, 842, 595] });
+    expect(inkAfter).toBeGreaterThan(inkBefore * 0.8);
+    await page.close();
+  });
+
+  test('control: redact-clear drops the pending boxes so Apply removes nothing', async () => {
+    const file = fixture('redactclear.pdf', [[{ text: 'KEEP THIS LINE', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-redact');
+    await dragPdfRect(page, { x: 66, y: 694, width: 250, height: 22 });
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+    expect(await page.locator('#redact-clear').isDisabled()).toBe(false);
+
+    await page.click('#redact-clear');
+    // The queue is emptied and the action buttons go back to disabled.
+    await expect(page.locator('#redact-list li')).toHaveCount(0);
+    expect(await page.locator('#redact-clear').isDisabled()).toBe(true);
+    expect(await page.locator('#redact-preview').isDisabled()).toBe(true);
+
+    // And with nothing queued the text is untouched — the boxes really were dropped, not hidden.
+    await expectText(page).toContain('KEEP THIS LINE');
+    await page.close();
+  });
+
+  test('control: draw-clear discards the stroke so Apply stamps nothing', async () => {
+    const file = fixture('drawclear.pdf', [[{ text: 'canvas', x: 72, y: 100 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-draw');
+    await expect(page.locator('#panel-draw')).toBeVisible();
+    await page.fill('#draw-color', '#00ff00');
+    await page.fill('#draw-width', '8');
+    const box = await page.locator(pageImageSel(1)).boundingBox();
+    const midY = box.y + box.height * 0.5;
+    await page.mouse.move(box.x + box.width * 0.2, midY);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.4, midY, { steps: 6 });
+    await page.mouse.move(box.x + box.width * 0.7, midY, { steps: 6 });
+    await page.mouse.up();
+
+    await page.click('#draw-clear');
+    await page.click('#draw-apply');
+
+    // applyDrawing() bails with this toast only when no strokes remain to apply, so it is the
+    // proof draw-clear emptied them: with the handler stubbed the stroke survives and the status
+    // reads "Added 1 stroke" instead. (Sampling pixels here races the apply render — this status
+    // is the deterministic signal.)
+    await expect(page.locator('#status')).toHaveText('Draw something first.');
+    await page.close();
+  });
+
+  test('control: the italic toggle sets the run in italic, and it round-trips', async () => {
+    const file = fixture('italic.pdf', [[{ text: 'Plain Words', x: 72, y: 700, size: 20 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 690, width: 320, height: 34 });
+    await expect(page.locator('#edit-italic')).not.toHaveClass(/active/);
+    await page.click('#edit-italic');
+    await expect(page.locator('#edit-italic')).toHaveClass(/active/);
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text replaced');
+
+    // Re-open a blank region to reset the controls, then re-read the edited run: the detector
+    // reports italic because the replacement really was stamped in an italic face.
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 380, width: 260, height: 34 });
+    await expect(page.locator('#edit-italic')).not.toHaveClass(/active/);
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 690, width: 320, height: 34 });
+    await expect(page.locator('#edit-italic')).toHaveClass(/active/);
+    await page.close();
+  });
+
+  test('control: js-clear empties the script editor', async () => {
+    const file = fixture('jsclear.pdf', [[{ text: 'doc', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-js');
+    await expect(page.locator('#js-dialog')).toBeVisible();
+    await page.fill('#js-name', 'greet');
+    await page.fill('#js-source', "app.alert('hi');");
+
+    await page.click('#js-clear');
+    await expect(page.locator('#js-name')).toHaveValue('');
+    await expect(page.locator('#js-source')).toHaveValue('');
+    await page.close();
+  });
+
+  test('control: organize-reset restores pages removed in the panel', async () => {
+    const file = fixture('orgreset.pdf', [
+      [{ text: 'Page one', x: 72, y: 700 }],
+      [{ text: 'Page two', x: 72, y: 700 }],
+      [{ text: 'Page three', x: 72, y: 700 }],
+    ]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#btn-organize');
+    await expect(page.locator('#organize-list .organize-item')).toHaveCount(3);
+    await page.locator('#organize-list .organize-item').nth(1)
+      .getByRole('button', { name: 'Remove page' }).click();
+    await expect(page.locator('#organize-list .organize-item')).toHaveCount(2);
+
+    // Reset rebuilds the original arrangement without touching the document.
+    await page.click('#organize-reset');
+    await expect(page.locator('#organize-list .organize-item')).toHaveCount(3);
+    // Applying the reset arrangement leaves all three pages in place.
+    await page.click('#organize-apply');
+    await expect(page.locator('#page-total')).toHaveText('3');
+    await page.close();
+  });
+
+
+  // Dismiss buttons: clicking cancel/done closes the panel. Parameterised over the panels that
+  // open with a single click; each was watched staying open with its handler stubbed.
+  for (const c of [
+    { name: 'forms-cancel', open: (p) => ui(p, '#btn-forms'), panel: '#panel-forms', btn: '#forms-cancel' },
+    { name: 'organize-cancel', open: (p) => ui(p, '#btn-organize'), panel: '#panel-organize', btn: '#organize-cancel' },
+    { name: 'sanitize-cancel', open: (p) => ui(p, '#btn-sanitize'), panel: '#panel-sanitize', btn: '#sanitize-cancel' },
+    { name: 'draw-cancel', open: (p) => ui(p, '#tool-draw'), panel: '#panel-draw', btn: '#draw-cancel' },
+    { name: 'highlight-done', open: (p) => ui(p, '#tool-highlight'), panel: '#panel-highlight', btn: '#highlight-done' },
+  ]) {
+    test(`control: ${c.name} closes its panel`, async () => {
+      const page = await openViewerWith(fixture(`${c.name}.pdf`, [[{ text: 'doc', x: 72, y: 700 }]]));
+      await c.open(page);
+      await expect(page.locator(c.panel)).toBeVisible();
+      await page.click(c.btn);
+      await expect(page.locator(c.panel)).toBeHidden();
+      await page.close();
+    });
+  }
+
+  test('control: edit-cancel closes the panel and discards the staged edit', async () => {
+    const file = fixture('editcancel.pdf', [[{ text: 'Original Text', x: 72, y: 700, size: 18 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 690, width: 320, height: 34 });
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await page.fill('#edit-text', 'Changed Text');
+    await page.click('#edit-cancel');
+    await expect(page.locator('#panel-edit')).toBeHidden();
+
+    // Nothing was applied: the document still holds the original words.
+    await expectText(page).toContain('Original Text');
+    await expectText(page).not.toContain('Changed Text');
+    await page.close();
+  });
+
+  test('control: sign-cancel closes the signature panel', async () => {
+    const file = fixture('signcancel.pdf', [[{ text: 'Sign here:', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    await ui(page, '#tool-sign');
+    await dragPdfRect(page, { x: 200, y: 640, width: 160, height: 50 });
+    await expect(page.locator('#panel-sign')).toBeVisible();
+    await page.click('#sign-cancel');
+    await expect(page.locator('#panel-sign')).toBeHidden();
+    await page.close();
+  });
+
+  test('control: the signature tabs switch between the pad and the upload field', async () => {
+    const file = fixture('signtabs.pdf', [[{ text: 'Sign here:', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    await ui(page, '#tool-sign');
+    await dragPdfRect(page, { x: 200, y: 640, width: 160, height: 50 });
+    // Opens on the draw pad.
+    await expect(page.locator('#sign-draw')).toBeVisible();
+    await expect(page.locator('#sign-upload')).toBeHidden();
+    // Upload tab reveals the file field and hides the pad...
+    await page.click('#sign-tab-upload');
+    await expect(page.locator('#sign-upload')).toBeVisible();
+    await expect(page.locator('#sign-draw')).toBeHidden();
+    // ...and the draw tab switches back.
+    await page.click('#sign-tab-draw');
+    await expect(page.locator('#sign-draw')).toBeVisible();
+    await expect(page.locator('#sign-upload')).toBeHidden();
+    await page.close();
+  });
+
+  test('control: sign-pad-clear wipes the pad so Apply has nothing to place', async () => {
+    const file = fixture('signpadclear.pdf', [[{ text: 'Sign here:', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    await ui(page, '#tool-sign');
+    await dragPdfRect(page, { x: 200, y: 640, width: 160, height: 50 });
+
+    const pad = await page.locator('#sign-pad').boundingBox();
+    await page.mouse.move(pad.x + 12, pad.y + pad.height - 20);
+    await page.mouse.down();
+    await page.mouse.move(pad.x + pad.width / 2, pad.y + 14, { steps: 8 });
+    await page.mouse.up();
+
+    await page.click('#sign-pad-clear');
+    await page.click('#sign-apply');
+    // Apply refuses because the pad is empty again — the proof clear wiped it. A stubbed clear
+    // leaves the scribble and Apply proceeds to "Placing signature…" / "Signature placed."
+    await expect(page.locator('#status')).toHaveText('Draw a signature first.');
+    await page.close();
+  });
+
+  test('control: links-close closes the links panel', async () => {
+    const file = path.join(fixtureDir, 'linksclose.pdf');
+    fs.writeFileSync(file, buildLinkPdf('https://example.com/x'));
+    const page = await openViewerWith(file);
+    await ui(page, '#btn-links');
+    await expect(page.locator('#panel-links')).toBeVisible();
+    await page.click('#links-close');
+    await expect(page.locator('#panel-links')).toBeHidden();
+    await page.close();
+  });
+
+  test('control: links-rescan re-runs the risk scan', async () => {
+    const file = path.join(fixtureDir, 'linksrescan.pdf');
+    fs.writeFileSync(file, buildLinkPdf('https://example.com/y'));
+
+    // Hold the URL risk scan so its running state is observable — a single-link scan otherwise
+    // lands faster than the progress indicator can be seen (the #19 test uses the same gate).
+    const page = await ext.context.newPage();
+    await installHostGate(page, { hold: ['scan-urls'] });
+    await page.goto(ext.viewerUrl);
+    const chooser = page.waitForEvent('filechooser');
+    await page.click('#btn-open-empty');
+    await (await chooser).setFiles(file);
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+    // Let the document's own initial scan through and settle.
+    await page.evaluate(() => window.__hostGate.release());
+    await expect(page.locator('#link-status')).toBeHidden({ timeout: 15000 });
+
+    await ui(page, '#btn-links');
+    await page.locator('#links-enable').check();           // rescan appears once links are kept
+    await expect(page.locator('#links-rescan')).toBeVisible();
+
+    // The handler was wired as addEventListener('click', scanLinks), so the click Event was passed
+    // as scanLinks's `link` argument and `link.stale()` threw "link.stale is not a function" — the
+    // rescan never ran, the button did nothing. Now wired as () => scanLinks(). Catch any recurrence.
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+
+    await page.evaluate(() => window.__hostGate.hold(['scan-urls'])); // park the next scan
+    await page.click('#links-rescan');
+    // Rescan genuinely issued a scan: a scan-urls round trip reached the host and is now parked.
+    // (heldCount is the deterministic signal; the #link-status indicator flickers too fast to
+    // catch on a one-link document.) With the button broken, no scan is issued and this stays 0.
+    await expect.poll(() => page.evaluate(() => window.__hostGate.heldCount()),
+      { timeout: 15000 }).toBeGreaterThan(0);
+    expect(errors).toEqual([]);
+    await page.evaluate(() => window.__hostGate.release());
+    await expect(page.locator('#link-status')).toBeHidden({ timeout: 15000 });
+    await page.close();
+  });
+
+  test('control: compare-close closes the compare panel', async () => {
+    const current = fixture('cmpclose-a.pdf', [[{ text: 'Alpha', x: 72, y: 700 }]]);
+    const older = fixture('cmpclose-b.pdf', [[{ text: 'Beta', x: 72, y: 700 }]]);
+    const page = await openViewerWith(current);
+    const chooser = page.waitForEvent('filechooser');
+    await ui(page, '#btn-compare');
+    await (await chooser).setFiles(older);
+    await expect(page.locator('#panel-compare')).toBeVisible();
+    await page.click('#compare-close');
+    await expect(page.locator('#panel-compare')).toBeHidden();
+    await page.close();
+  });
+
+  test('control: compare-pick compares against a freshly chosen file', async () => {
+    const current = fixture('cmppick-cur.pdf', [[{ text: 'Amount 100', x: 72, y: 700 }]]);
+    const first = fixture('cmppick-1.pdf', [[{ text: 'Amount 200', x: 72, y: 700 }]]);
+    const second = fixture('cmppick-2.pdf', [[{ text: 'Amount 999', x: 72, y: 700 }]]);
+    const page = await openViewerWith(current);
+
+    const chooserA = page.waitForEvent('filechooser');
+    await ui(page, '#btn-compare');
+    await (await chooserA).setFiles(first);
+    await expect(page.locator('#compare-list .w-del', { hasText: '200' })).toHaveCount(1);
+
+    // Pick a different file from inside the panel: the comparison is redone against it.
+    const chooserB = page.waitForEvent('filechooser');
+    await page.click('#compare-pick');
+    await (await chooserB).setFiles(second);
+    await expect(page.locator('#compare-list .w-del', { hasText: '999' })).toHaveCount(1);
+    await expect(page.locator('#compare-list .w-del', { hasText: '200' })).toHaveCount(0);
+    await page.close();
+  });
+
+  test('control: console-copy copies the activity log to the clipboard', async () => {
+    const page = await openViewerWith(fixture('consolecopy.pdf', [[{ text: 'doc', x: 72, y: 700 }]]));
+    await openConsole(page);
+    await page.click('#console-copy');
+    // copyConsole() shows this only after clipboard.writeText resolves — the proof it ran.
+    await expect(page.locator('#status')).toHaveText('Activity log copied to the clipboard.');
+    await page.close();
+  });
+
+  test('control: tool-select leaves the active tool and re-arms text selection', async () => {
+    const page = await openViewerWith(fixture('toolselect.pdf', [[{ text: 'pick me', x: 72, y: 700 }]]));
+    await ui(page, '#tool-redact');
+    await expect(page.locator('#tool-redact')).toHaveClass(/active/);
+    await expect(page.locator('#pages')).not.toHaveClass(/select-mode/);
+
+    await page.click('#tool-select');
+    // The redact tool is no longer active, select is, and the page is back in select mode so the
+    // text layer takes the pointer again.
+    await expect(page.locator('#tool-redact')).not.toHaveClass(/active/);
+    await expect(page.locator('#tool-select')).toHaveClass(/active/);
+    await expect(page.locator('#pages')).toHaveClass(/select-mode/);
+    await page.close();
+  });
+
 });

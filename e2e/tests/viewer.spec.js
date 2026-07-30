@@ -2978,17 +2978,6 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     return page;
   }
 
-  /**
-   * Opens the activity console from the Help menu. The pane's open/closed state is remembered in
-   * chrome.storage.local, which is shared by every page in this suite's one persistent profile —
-   * so a plain toggle would close it for whichever test ran after one that left it open.
-   */
-  async function openConsole(page) {
-    if (await page.locator('#console-pane').isHidden()) await ui(page, '#btn-console');
-    await expect(page.locator('#console-pane')).toBeVisible();
-  }
-
-
   // ---------------------------------------------------------------------------------------------
   // Control coverage: every action button, when clicked, actually runs its function — not just
   // that the control is present. Each of these was uncovered before; the assertion is the effect
@@ -3122,6 +3111,201 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // Applying the reset arrangement leaves all three pages in place.
     await page.click('#organize-apply');
     await expect(page.locator('#page-total')).toHaveText('3');
+    await page.close();
+  });
+
+
+  // Dismiss buttons: clicking cancel/done closes the panel. Parameterised over the panels that
+  // open with a single click; each was watched staying open with its handler stubbed.
+  for (const c of [
+    { name: 'forms-cancel', open: (p) => ui(p, '#btn-forms'), panel: '#panel-forms', btn: '#forms-cancel' },
+    { name: 'organize-cancel', open: (p) => ui(p, '#btn-organize'), panel: '#panel-organize', btn: '#organize-cancel' },
+    { name: 'sanitize-cancel', open: (p) => ui(p, '#btn-sanitize'), panel: '#panel-sanitize', btn: '#sanitize-cancel' },
+    { name: 'draw-cancel', open: (p) => ui(p, '#tool-draw'), panel: '#panel-draw', btn: '#draw-cancel' },
+    { name: 'highlight-done', open: (p) => ui(p, '#tool-highlight'), panel: '#panel-highlight', btn: '#highlight-done' },
+  ]) {
+    test(`control: ${c.name} closes its panel`, async () => {
+      const page = await openViewerWith(fixture(`${c.name}.pdf`, [[{ text: 'doc', x: 72, y: 700 }]]));
+      await c.open(page);
+      await expect(page.locator(c.panel)).toBeVisible();
+      await page.click(c.btn);
+      await expect(page.locator(c.panel)).toBeHidden();
+      await page.close();
+    });
+  }
+
+  test('control: edit-cancel closes the panel and discards the staged edit', async () => {
+    const file = fixture('editcancel.pdf', [[{ text: 'Original Text', x: 72, y: 700, size: 18 }]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-edit');
+    await dragPdfRect(page, { x: 60, y: 690, width: 320, height: 34 });
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await page.fill('#edit-text', 'Changed Text');
+    await page.click('#edit-cancel');
+    await expect(page.locator('#panel-edit')).toBeHidden();
+
+    // Nothing was applied: the document still holds the original words.
+    await expectText(page).toContain('Original Text');
+    await expectText(page).not.toContain('Changed Text');
+    await page.close();
+  });
+
+  test('control: sign-cancel closes the signature panel', async () => {
+    const file = fixture('signcancel.pdf', [[{ text: 'Sign here:', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    await ui(page, '#tool-sign');
+    await dragPdfRect(page, { x: 200, y: 640, width: 160, height: 50 });
+    await expect(page.locator('#panel-sign')).toBeVisible();
+    await page.click('#sign-cancel');
+    await expect(page.locator('#panel-sign')).toBeHidden();
+    await page.close();
+  });
+
+  test('control: the signature tabs switch between the pad and the upload field', async () => {
+    const file = fixture('signtabs.pdf', [[{ text: 'Sign here:', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    await ui(page, '#tool-sign');
+    await dragPdfRect(page, { x: 200, y: 640, width: 160, height: 50 });
+    // Opens on the draw pad.
+    await expect(page.locator('#sign-draw')).toBeVisible();
+    await expect(page.locator('#sign-upload')).toBeHidden();
+    // Upload tab reveals the file field and hides the pad...
+    await page.click('#sign-tab-upload');
+    await expect(page.locator('#sign-upload')).toBeVisible();
+    await expect(page.locator('#sign-draw')).toBeHidden();
+    // ...and the draw tab switches back.
+    await page.click('#sign-tab-draw');
+    await expect(page.locator('#sign-draw')).toBeVisible();
+    await expect(page.locator('#sign-upload')).toBeHidden();
+    await page.close();
+  });
+
+  test('control: sign-pad-clear wipes the pad so Apply has nothing to place', async () => {
+    const file = fixture('signpadclear.pdf', [[{ text: 'Sign here:', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+    await ui(page, '#tool-sign');
+    await dragPdfRect(page, { x: 200, y: 640, width: 160, height: 50 });
+
+    const pad = await page.locator('#sign-pad').boundingBox();
+    await page.mouse.move(pad.x + 12, pad.y + pad.height - 20);
+    await page.mouse.down();
+    await page.mouse.move(pad.x + pad.width / 2, pad.y + 14, { steps: 8 });
+    await page.mouse.up();
+
+    await page.click('#sign-pad-clear');
+    await page.click('#sign-apply');
+    // Apply refuses because the pad is empty again — the proof clear wiped it. A stubbed clear
+    // leaves the scribble and Apply proceeds to "Placing signature…" / "Signature placed."
+    await expect(page.locator('#status')).toHaveText('Draw a signature first.');
+    await page.close();
+  });
+
+  test('control: links-close closes the links panel', async () => {
+    const file = path.join(fixtureDir, 'linksclose.pdf');
+    fs.writeFileSync(file, buildLinkPdf('https://example.com/x'));
+    const page = await openViewerWith(file);
+    await ui(page, '#btn-links');
+    await expect(page.locator('#panel-links')).toBeVisible();
+    await page.click('#links-close');
+    await expect(page.locator('#panel-links')).toBeHidden();
+    await page.close();
+  });
+
+  test('control: links-rescan re-runs the risk scan', async () => {
+    const file = path.join(fixtureDir, 'linksrescan.pdf');
+    fs.writeFileSync(file, buildLinkPdf('https://example.com/y'));
+
+    // Hold the URL risk scan so its running state is observable — a single-link scan otherwise
+    // lands faster than the progress indicator can be seen (the #19 test uses the same gate).
+    const page = await ext.context.newPage();
+    await installHostGate(page, { hold: ['scan-urls'] });
+    await page.goto(ext.viewerUrl);
+    const chooser = page.waitForEvent('filechooser');
+    await page.click('#btn-open-empty');
+    await (await chooser).setFiles(file);
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+    // Let the document's own initial scan through and settle.
+    await page.evaluate(() => window.__hostGate.release());
+    await expect(page.locator('#link-status')).toBeHidden({ timeout: 15000 });
+
+    await ui(page, '#btn-links');
+    await page.locator('#links-enable').check();           // rescan appears once links are kept
+    await expect(page.locator('#links-rescan')).toBeVisible();
+
+    // The handler was wired as addEventListener('click', scanLinks), so the click Event was passed
+    // as scanLinks's `link` argument and `link.stale()` threw "link.stale is not a function" — the
+    // rescan never ran, the button did nothing. Now wired as () => scanLinks(). Catch any recurrence.
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+
+    await page.evaluate(() => window.__hostGate.hold(['scan-urls'])); // park the next scan
+    await page.click('#links-rescan');
+    // Rescan genuinely issued a scan: a scan-urls round trip reached the host and is now parked.
+    // (heldCount is the deterministic signal; the #link-status indicator flickers too fast to
+    // catch on a one-link document.) With the button broken, no scan is issued and this stays 0.
+    await expect.poll(() => page.evaluate(() => window.__hostGate.heldCount()),
+      { timeout: 15000 }).toBeGreaterThan(0);
+    expect(errors).toEqual([]);
+    await page.evaluate(() => window.__hostGate.release());
+    await expect(page.locator('#link-status')).toBeHidden({ timeout: 15000 });
+    await page.close();
+  });
+
+  test('control: compare-close closes the compare panel', async () => {
+    const current = fixture('cmpclose-a.pdf', [[{ text: 'Alpha', x: 72, y: 700 }]]);
+    const older = fixture('cmpclose-b.pdf', [[{ text: 'Beta', x: 72, y: 700 }]]);
+    const page = await openViewerWith(current);
+    const chooser = page.waitForEvent('filechooser');
+    await ui(page, '#btn-compare');
+    await (await chooser).setFiles(older);
+    await expect(page.locator('#panel-compare')).toBeVisible();
+    await page.click('#compare-close');
+    await expect(page.locator('#panel-compare')).toBeHidden();
+    await page.close();
+  });
+
+  test('control: compare-pick compares against a freshly chosen file', async () => {
+    const current = fixture('cmppick-cur.pdf', [[{ text: 'Amount 100', x: 72, y: 700 }]]);
+    const first = fixture('cmppick-1.pdf', [[{ text: 'Amount 200', x: 72, y: 700 }]]);
+    const second = fixture('cmppick-2.pdf', [[{ text: 'Amount 999', x: 72, y: 700 }]]);
+    const page = await openViewerWith(current);
+
+    const chooserA = page.waitForEvent('filechooser');
+    await ui(page, '#btn-compare');
+    await (await chooserA).setFiles(first);
+    await expect(page.locator('#compare-list .w-del', { hasText: '200' })).toHaveCount(1);
+
+    // Pick a different file from inside the panel: the comparison is redone against it.
+    const chooserB = page.waitForEvent('filechooser');
+    await page.click('#compare-pick');
+    await (await chooserB).setFiles(second);
+    await expect(page.locator('#compare-list .w-del', { hasText: '999' })).toHaveCount(1);
+    await expect(page.locator('#compare-list .w-del', { hasText: '200' })).toHaveCount(0);
+    await page.close();
+  });
+
+  test('control: console-copy copies the activity log to the clipboard', async () => {
+    const page = await openViewerWith(fixture('consolecopy.pdf', [[{ text: 'doc', x: 72, y: 700 }]]));
+    await openConsole(page);
+    await page.click('#console-copy');
+    // copyConsole() shows this only after clipboard.writeText resolves — the proof it ran.
+    await expect(page.locator('#status')).toHaveText('Activity log copied to the clipboard.');
+    await page.close();
+  });
+
+  test('control: tool-select leaves the active tool and re-arms text selection', async () => {
+    const page = await openViewerWith(fixture('toolselect.pdf', [[{ text: 'pick me', x: 72, y: 700 }]]));
+    await ui(page, '#tool-redact');
+    await expect(page.locator('#tool-redact')).toHaveClass(/active/);
+    await expect(page.locator('#pages')).not.toHaveClass(/select-mode/);
+
+    await page.click('#tool-select');
+    // The redact tool is no longer active, select is, and the page is back in select mode so the
+    // text layer takes the pointer again.
+    await expect(page.locator('#tool-redact')).not.toHaveClass(/active/);
+    await expect(page.locator('#tool-select')).toHaveClass(/active/);
+    await expect(page.locator('#pages')).toHaveClass(/select-mode/);
     await page.close();
   });
 

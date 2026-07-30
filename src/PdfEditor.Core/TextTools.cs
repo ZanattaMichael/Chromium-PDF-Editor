@@ -145,8 +145,15 @@ public static class TextTools
         string? fontFamily = null, bool bold = false, bool italic = false,
         string? colorHex = null, string? password = null)
     {
+        // Lay the text out from the region's top-left to the page edge rather than confining it to
+        // the box. A click places a fixed 240x26 default box and defaults the size to its height, so
+        // any caption that does not fit used to be clipped and *lost* — "STAMPED CAPTION" became
+        // "STAMPED CAPTIO" (#86 family; the same clipping ReplaceTextInRegion fixed in #29). Adding
+        // text must never silently drop characters; the trade is that a caption longer than the box
+        // extends past its right edge instead of wrapping inside it.
         var stamped = StampText(pdf, region, text, fontSize, password,
-            fontName: ResolveFont(fontFamily, bold, italic), color: ParseColor(colorHex));
+            fontName: ResolveFont(fontFamily, bold, italic), color: ParseColor(colorHex),
+            confineToRegion: false);
         return EditResult.Of(stamped);
     }
 
@@ -233,6 +240,15 @@ public static class TextTools
 
         var warnings = new List<string>();
         byte[] current = pdf;
+
+        // Measure each match's real type size and face on the original document, before anything is
+        // removed. m.Height is the ascender-to-descender box, not the em (it is 0.79–0.93 of it), so
+        // stamping at m.Height re-set every replacement 7–21% too small; and passing no font stamped
+        // it all in Helvetica whatever the original was (#86). GetTextInRegion recovers both via the
+        // same #84 machinery ReplaceTextInRegion uses.
+        var styles = matches.Select(m =>
+            GetTextInRegion(pdf, new RectRegion(m.Page, m.X, m.Y, m.Width, m.Height), password)).ToList();
+
         // Inset each match rect slightly so glyphs of adjacent words that merely touch
         // the boundary are not removed with it.
         var regions = matches.Select(m => new RectRegion(m.Page,
@@ -241,11 +257,19 @@ public static class TextTools
         warnings.AddRange(removed.Warnings);
         current = removed.Pdf;
 
-        foreach (var m in matches)
+        var substitutions = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < matches.Count; i++)
         {
+            var m = matches[i];
+            var style = styles[i];
             var region = new RectRegion(m.Page, m.X, m.Y, m.Width, m.Height);
-            current = StampText(current, region, replacement, m.Height, password, wrap: false);
+            string stampFont = ResolveFont(style.FontFamily, style.Bold, style.Italic);
+            current = StampText(current, region, replacement, style.FontSize, password,
+                wrap: false, fontName: stampFont);
+            // Report a face that could not be reproduced once, not once per occurrence.
+            if (DescribeSubstitution(style.SourceFont, stampFont) is { } note) substitutions.Add(note);
         }
+        warnings.AddRange(substitutions);
         return (new EditResult(current, warnings), matches.Count);
     }
 

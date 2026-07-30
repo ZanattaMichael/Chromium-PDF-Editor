@@ -287,6 +287,21 @@ public class TextToolsTests
     }
 
     [Fact]
+    public void ReplaceAll_StampsTheReplacementAtTheOriginalTypeSize()
+    {
+        // #86: ReplaceAll passed the match's ascender-to-descender box height (m.Height) as the font
+        // size. That box is only ~0.93 of the em for Helvetica, so every replacement came out ~7%
+        // too small. Re-measuring the replaced run must give the original 24pt, not the ~22.2pt box.
+        byte[] pdf = TestPdfs.WithText(("SECRET", 72, 700, 24));
+
+        var (result, count) = TextTools.ReplaceAll(pdf, "SECRET", "PUBLIC");
+        Assert.Equal(1, count);
+
+        float measured = TextTools.GetTextInRegion(result.Pdf, new RectRegion(1, 60, 688, 220, 44)).FontSize;
+        Assert.InRange(measured, 23f, 25f);
+    }
+
+    [Fact]
     public void ReplaceAll_KeepsSurroundingWordsIntact()
     {
         byte[] pdf = TestPdfs.WithText(("Payable to ACME within 30 days", 72, 700, 12));

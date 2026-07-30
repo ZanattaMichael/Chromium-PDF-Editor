@@ -2633,7 +2633,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
   });
 
   // eslint-disable-next-line playwright/no-skipped-test
-  test.fixme('add text: a caption longer than its box is stamped in full, not clipped', async () => {
+  test('add text: a caption longer than its box is stamped in full, not clipped', async () => {
     // LIVE BUG. Placing text with a plain click gives a 240x26pt box and defaults the type size
     // to the box height (26pt). "STAMPED CAPTION" does not fit 240pt at 26pt, and TextTools.
     // StampText lays the string into a fixed-size iText Canvas, so the overflow is *clipped and
@@ -2748,7 +2748,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
   });
 
   // eslint-disable-next-line playwright/no-skipped-test
-  test.fixme('text edit: the type size survives repeated edits (#29/#84)', async () => {
+  test('text edit: the type size survives repeated edits (#29/#84)', async () => {
     // LIVE BUG. TextTools.GetTextInRegion reports the type size as the *glyph* box height —
     // chunks.Max(c => c.FontHeight), the ascent-to-descent span of the rendered characters —
     // rather than the em size the text was set in. For Helvetica that is 0.925 em, so every
@@ -2787,7 +2787,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
   });
 
   // eslint-disable-next-line playwright/no-skipped-test
-  test.fixme('text edit: a replacement longer than the original is not truncated', async () => {
+  test('text edit: a replacement longer than the original is not truncated', async () => {
     // LIVE BUG, and the one the maintainer reported as "HELLO" becoming "WORL". TextTools.
     // StampText lays the replacement into an iText Canvas sized to the *original* region, so
     // anything that does not fit is clipped away and lost. Replacing "HELLO" (24pt, in a
@@ -3308,5 +3308,35 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#pages')).toHaveClass(/select-mode/);
     await page.close();
   });
+
+
+  test('text edit: editing highlighted (selected) text applies (#90)', async () => {
+    // #90 reported that right-clicking highlighted text, choosing Edit and pressing Apply did
+    // nothing. That is the selection path (selectionRegion), distinct from the run-under-cursor
+    // path #85/#89 fixed. This holds the whole selection route end to end so it cannot regress.
+    const file = fixture('sel-edit.pdf', [[{ text: 'Original Sentence Here', x: 72, y: 700, size: 18 }]]);
+    const page = await openViewerWith(file);
+    await page.locator('.page[data-page="1"] .text-layer span').first().waitFor({ timeout: 15000 });
+
+    // Highlight the run, then right-click the selection and choose Edit text.
+    await page.evaluate(() => {
+      const span = document.querySelector('.page[data-page="1"] .text-layer span');
+      window.getSelection().selectAllChildren(span);
+    });
+    await page.locator('.page[data-page="1"] .text-layer span').first().click({ button: 'right' });
+    await page.locator('#context-menu').getByRole('button', { name: /Edit text/ }).click();
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-text')).toHaveValue(/Original Sentence Here/);
+
+    await page.fill('#edit-text', 'Replaced Sentence');
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text replaced');
+
+    // The document really changed — Apply ran, it was not a no-op.
+    await expectText(page).toContain('Replaced Sentence');
+    await expectText(page).not.toContain('Original Sentence');
+    await page.close();
+  });
+
 
 });

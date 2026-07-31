@@ -87,11 +87,23 @@ internal static class GoldenFile
             shown++;
         }
 
-        return report
+        report
             .AppendLine()
             .Append("If this change is intended, re-run with ").Append(UpdateVariable)
-            .AppendLine("=1 to re-record, then review the diff before committing.")
-            .ToString();
+            .AppendLine("=1 to re-record, then review the diff before committing.");
+
+        // The whole actual projection, verbatim. The line diff above is enough for an intended,
+        // reproducible change; it is not enough for the intermittent, unreproducible sighting (#88),
+        // where the run that failed is the only evidence there will ever be. Dumping the full
+        // projection means that run's output survives in the CI log, so the next investigator can
+        // diff it offline against the recording — or re-record from it — instead of trying to force
+        // the flake to happen again.
+        report
+            .AppendLine()
+            .AppendLine("Full actual projection (for offline diff / re-recording):")
+            .AppendLine(Indent(actual));
+
+        return report.ToString();
     }
 
     private static string Indent(string text) =>

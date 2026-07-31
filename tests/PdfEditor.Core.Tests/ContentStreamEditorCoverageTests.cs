@@ -228,6 +228,14 @@ public class ContentStreamEditorCoverageTests
         var result = Redactor.Redact(pdf, new[] { new RectRegion(1, 100, 500, 100, 100) });
 
         Assert.Equal(0, TestPdfAssert.CountImages(result.Pdf));
-        Assert.Contains(result.Warnings, w => w.Contains("could not be pixel-scrubbed"));
+        // The drop must be a *named* failure, not a bare one: a scrub failure can be transient
+        // (memory pressure on decode/read-back), which reads very differently from an unsupported
+        // format, and #88 is about being able to tell them apart from the log. The warning must
+        // carry a concrete reason clause, not merely say the image was removed.
+        Assert.Contains(result.Warnings, w =>
+            w.Contains("could not be pixel-scrubbed (")
+            && (w.Contains("could not be decoded")
+                || w.Contains("could not be read")
+                || w.Contains("scrubbing threw")));
     }
 }

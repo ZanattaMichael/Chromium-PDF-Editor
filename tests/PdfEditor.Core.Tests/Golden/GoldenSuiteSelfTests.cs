@@ -90,6 +90,29 @@ public class GoldenSuiteSelfTests
     }
 
     /// <summary>
+    /// On a mismatch the failure message must carry the <em>whole</em> actual projection, not just
+    /// the differing lines. The line diff is enough for a reproducible change a developer can re-run;
+    /// it is not enough for the intermittent sighting (#88), where the failing CI run is the only
+    /// evidence that will ever exist. If the full projection is in the log, the next investigator can
+    /// diff it offline instead of trying to force the flake again.
+    /// </summary>
+    [Fact]
+    public void Mismatch_DumpsTheWholeActualProjection_ForOfflineDiff()
+    {
+        var doc = GoldenCorpus.Documents.Single(d => d.Name == "plain-multipage");
+        // A multi-line actual with a sentinel line that is NOT in the recording, so finding it in
+        // the message proves the full body was dumped rather than only the diffed lines.
+        const string sentinel = "sentinel-line-only-in-actual-not-in-recording";
+        string actual = "== source ==\nfirst\n" + sentinel + "\nlast\n";
+
+        string? failure = GoldenFile.Compare(doc.Name, actual, allowUpdate: false);
+
+        Assert.NotNull(failure);
+        Assert.Contains("Full actual projection", failure, StringComparison.Ordinal);
+        Assert.Contains(sentinel, failure, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A transparency-specific negative case. Dropping the <c>/ExtGState</c> resource leaves a
     /// document that still opens, still validates, still has the same text and the same page
     /// geometry — and renders completely differently. Structural assertions miss it; the

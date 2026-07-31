@@ -27,6 +27,19 @@ so your documents never leave your machine.
 | 🔒 **Password protection** | AES-256 encryption with user/owner passwords; open, edit, and decrypt protected files. |
 | 🖋 **Electronic signatures** | Draw a signature on a pad (or upload an image) and place it anywhere; or apply a cryptographic **digital signature** from a PKCS#12 certificate — the editor can also generate a self-signed certificate for you. Signature validity is verified and shown in the status bar. |
 
+## Screenshots
+
+Below, the editor working on a generated [sample document](docs/sample/PDF-Editor-Sample.pdf).
+The full gallery — and the scripts that regenerate both the sample and every screenshot — is in
+[`docs/`](docs/README.md).
+
+| | |
+| --- | --- |
+| ![Open a document](docs/screenshots/01-overview.png) | ![Preview a redaction before committing](docs/screenshots/03-redact-preview.png) |
+| *Text, charts and images render together.* | *Redaction shows exactly what will be permanently removed.* |
+| ![Edit existing text in place](docs/screenshots/06-edit-text.png) | ![Remove hidden information](docs/screenshots/10-remove-hidden-info.png) |
+| *Edit existing text in place — font and size are recovered.* | *Strip metadata and other hidden data before sharing.* |
+
 ## Optional external tools
 
 Most features work out of the box. Two optional capabilities shell out to a tool you install

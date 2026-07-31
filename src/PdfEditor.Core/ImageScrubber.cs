@@ -29,18 +29,26 @@ internal static class ImageScrubber
     /// <summary>
     /// Attempts to scrub the region overlap out of the image's pixel data.
     /// <paramref name="drawnBBox"/> is the user-space rectangle the image is drawn into.
-    /// Returns false when the image format could not be decoded, in which case the
-    /// caller must fall back to dropping the image.
+    /// Returns false when the image could not be scrubbed, in which case the caller must fall back
+    /// to dropping the image; <paramref name="failureReason"/> then says why, so the drop is a named
+    /// failure rather than a silent one (#88) — a decode failure in particular can be transient
+    /// (memory pressure), which reads very differently from an unsupported format.
     /// </summary>
     public static bool TryScrubPixels(PdfStream imageStream, Rectangle drawnBBox,
-        IList<Rectangle> regions, ScrubFill fill = ScrubFill.Black)
+        IList<Rectangle> regions, out string? failureReason, ScrubFill fill = ScrubFill.Black)
     {
+        failureReason = null;
         try
         {
             var xobject = new PdfImageXObject(imageStream);
             byte[] bytes = xobject.GetImageBytes(true);
             using var bitmap = SKBitmap.Decode(bytes);
-            if (bitmap == null) return false;
+            if (bitmap == null)
+            {
+                failureReason = "the image could not be decoded — an unsupported/corrupt format, "
+                    + "or possibly transient memory pressure";
+                return false;
+            }
 
             float sx = bitmap.Width / drawnBBox.GetWidth();
             float sy = bitmap.Height / drawnBBox.GetHeight();
@@ -74,12 +82,18 @@ internal static class ImageScrubber
             // No readable pixels means we cannot prove the scrubbed image is what gets written, so
             // report failure and let the caller drop the image outright. Failing closed is the only
             // safe direction here: this is redaction.
-            if (rgb == null) return false;
+            if (rgb == null)
+            {
+                failureReason = "the scrubbed pixels could not be read back "
+                    + "(possibly transient memory pressure)";
+                return false;
+            }
             ReplaceWithRgb(imageStream, bitmap.Width, bitmap.Height, rgb);
             return true;
         }
-        catch
+        catch (Exception e)
         {
+            failureReason = $"scrubbing threw {e.GetType().Name}: {e.Message}";
             return false;
         }
     }

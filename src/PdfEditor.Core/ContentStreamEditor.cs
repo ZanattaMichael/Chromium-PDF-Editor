@@ -262,13 +262,14 @@ internal sealed class ContentStreamEditor : PdfCanvasProcessor
                     return; // fully covered: drop the draw call entirely
                 var fill = _kinds == ContentKinds.TextAndPixelsBeneath
                     ? ScrubFill.SurroundingPaper : ScrubFill.Black;
-                if (ImageScrubber.TryScrubPixels(stream, bbox, _regions, fill))
+                if (ImageScrubber.TryScrubPixels(stream, bbox, _regions, out var scrubFailure, fill))
                 {
                     WriteOperands(operands);
                     return;
                 }
-                _warnings.Add($"Image '{name.GetValue()}' partially overlaps a redaction " +
-                              "region and could not be pixel-scrubbed; it was removed entirely.");
+                _warnings.Add($"Image '{name.GetValue()}' partially overlaps a redaction region " +
+                              $"and could not be pixel-scrubbed ({scrubFailure}); it was removed " +
+                              "entirely.");
                 return;
             }
             WriteOperands(operands);

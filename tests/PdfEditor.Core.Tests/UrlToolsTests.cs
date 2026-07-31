@@ -1,3 +1,5 @@
+using System.Linq;
+using System.Net.Http;
 using PdfEditor.Core;
 
 namespace PdfEditor.Tests;
@@ -238,4 +240,73 @@ public class CloudflareMergeTests
         Assert.Equal(2, verdicts.Count);
         Assert.Equal(1, handler.Submits); // the identical URL is only submitted once
     }
+
+    // A thread-safe scripted endpoint that records how many requests are in flight at once, so a
+    // test can prove the scans actually run concurrently rather than one after another.
+    private sealed class ConcurrentCloudflare : System.Net.Http.HttpMessageHandler
+    {
+        private int _inFlight;
+        private int _submits;
+        public int MaxConcurrent;
+        public int Submits => _submits;
+
+        protected override async Task<System.Net.Http.HttpResponseMessage> SendAsync(
+            System.Net.Http.HttpRequestMessage request, System.Threading.CancellationToken ct)
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                int now = System.Threading.Interlocked.Increment(ref _inFlight);
+                int seen;
+                do { seen = MaxConcurrent; } while (now > seen &&
+                    System.Threading.Interlocked.CompareExchange(ref MaxConcurrent, now, seen) != seen);
+                System.Threading.Interlocked.Increment(ref _submits);
+                try { await Task.Delay(30, ct); }
+                finally { System.Threading.Interlocked.Decrement(ref _inFlight); }
+                return Json(System.Net.HttpStatusCode.OK, """{"uuid":"abc-123"}""");
+            }
+            return Json(System.Net.HttpStatusCode.OK,
+                "{\"verdicts\":{\"overall\":{\"malicious\":false}}}");
+        }
+
+        private static System.Net.Http.HttpResponseMessage Json(System.Net.HttpStatusCode code, string body) =>
+            new(code) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
+    }
+
+    [Fact]
+    public async Task ScanAsync_ScansDistinctUrlsConcurrently_NotOneAtATime()
+    {
+        // Six distinct URLs. Serial scanning (the #82 bug) would only ever have one request in
+        // flight; with bounded concurrency more than one runs at once.
+        var links = Enumerable.Range(0, 6).Select(i => new PdfLink(1, $"https://example.com/{i}")).ToArray();
+        var handler = new ConcurrentCloudflare();
+        using var http = new HttpClient(handler);
+
+        var verdicts = await CloudflareUrlScanner.ScanAsync(links, Creds, http, TimeSpan.Zero,
+            maxConcurrency: 4);
+
+        Assert.Equal(6, verdicts.Count);
+        Assert.True(handler.MaxConcurrent > 1,
+            $"expected concurrent scans, but only {handler.MaxConcurrent} was ever in flight");
+        Assert.True(handler.MaxConcurrent <= 4, "concurrency exceeded the requested bound");
+    }
+
+    [Fact]
+    public async Task ScanAsync_CapsHowManyUrlsAreSubmitted()
+    {
+        // Five distinct URLs but a cap of two: only two reach Cloudflare, the rest keep the
+        // local heuristic so a link-bomb document cannot enqueue unbounded scans.
+        var links = Enumerable.Range(0, 5).Select(i => new PdfLink(1, $"https://google.com/{i}")).ToArray();
+        var handler = new ConcurrentCloudflare();
+        using var http = new HttpClient(handler);
+
+        var verdicts = await CloudflareUrlScanner.ScanAsync(links, Creds, http, TimeSpan.Zero,
+            maxConcurrency: 4, maxUrls: 2);
+
+        Assert.Equal(5, verdicts.Count);
+        Assert.Equal(2, handler.Submits);
+        // Exactly the two scanned links carry a Cloudflare source; the other three stay heuristic.
+        Assert.Equal(2, verdicts.Count(v => v.Source == "cloudflare"));
+        Assert.Equal(3, verdicts.Count(v => v.Source == "heuristic"));
+    }
+
 }

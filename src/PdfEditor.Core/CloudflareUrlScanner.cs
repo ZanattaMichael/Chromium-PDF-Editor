@@ -22,33 +22,64 @@ public static class CloudflareUrlScanner
 {
     private const string ApiBase = "https://api.cloudflare.com/client/v4";
 
+    /// <summary>How many Cloudflare scans may be in flight at once.</summary>
+    public const int DefaultMaxConcurrency = 6;
+
+    /// <summary>
+    /// The most distinct URLs a single document will submit to Cloudflare. Beyond this, the
+    /// remaining URLs keep their local heuristic verdict. Each scan is a submit plus up to a dozen
+    /// polls, so without a ceiling a link-bomb document could enqueue thousands of round trips.
+    /// </summary>
+    public const int DefaultMaxUrls = 100;
+
     /// <summary>Rates every link, using Cloudflare when <paramref name="creds"/> is usable.</summary>
     public static async Task<IReadOnlyList<UrlVerdict>> ScanAsync(
         IReadOnlyList<PdfLink> links, CloudflareCredentials? creds,
-        HttpClient? http = null, TimeSpan? pollDelay = null, CancellationToken ct = default)
+        HttpClient? http = null, TimeSpan? pollDelay = null, CancellationToken ct = default,
+        int maxConcurrency = DefaultMaxConcurrency, int maxUrls = DefaultMaxUrls)
     {
         var delay = pollDelay ?? TimeSpan.FromSeconds(2);
-        var results = new List<UrlVerdict>();
         bool useCloudflare = creds is { IsUsable: true };
-        HttpClient? client = useCloudflare ? (http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(30) }) : null;
 
-        // De-duplicate identical URLs so we don't scan the same link many times.
-        var scanned = new Dictionary<string, bool?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var link in links)
+        // No Cloudflare: every link gets the local heuristic and we make no network calls at all.
+        if (!useCloudflare)
+            return links.Select(l => Merge(UrlClassifier.Classify(l), null)).ToList();
+
+        HttpClient? owned = http is null ? new HttpClient { Timeout = TimeSpan.FromSeconds(30) } : null;
+        HttpClient client = http ?? owned!;
+        try
         {
-            var heuristic = UrlClassifier.Classify(link);
-            bool? malicious = null;
-            if (useCloudflare)
+            // Distinct URLs in first-seen order, capped: a document with thousands of links must not
+            // turn into thousands of serialized scans. (Enumerable.Distinct preserves order.)
+            var uniqueUrls = links.Select(l => l.Url)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(Math.Max(0, maxUrls))
+                .ToList();
+
+            // Scan those URLs concurrently rather than one-after-another. Each scan is a submit plus
+            // up to ~24s of polling, so serial scanning made a link-heavy document take minutes and
+            // hold the host busy the whole time (#82). A semaphore bounds how many run at once so we
+            // neither starve the host nor hammer the Cloudflare API.
+            var verdicts = new System.Collections.Concurrent.ConcurrentDictionary<string, bool?>(
+                StringComparer.OrdinalIgnoreCase);
+            using var gate = new SemaphoreSlim(Math.Max(1, maxConcurrency));
+            var scans = uniqueUrls.Select(async url =>
             {
-                if (!scanned.TryGetValue(link.Url, out malicious))
-                {
-                    malicious = await TryVerdictAsync(client!, creds!, link.Url, delay, ct);
-                    scanned[link.Url] = malicious;
-                }
-            }
-            results.Add(Merge(heuristic, malicious));
+                await gate.WaitAsync(ct);
+                try { verdicts[url] = await TryVerdictAsync(client, creds!, url, delay, ct); }
+                finally { gate.Release(); }
+            });
+            await Task.WhenAll(scans);
+
+            // Map every link back to its URL's verdict; URLs past the cap have none and keep the
+            // heuristic. Merge is applied per link so repeated URLs all reflect the one scan.
+            return links.Select(l => Merge(UrlClassifier.Classify(l),
+                verdicts.TryGetValue(l.Url, out var malicious) ? malicious : null)).ToList();
         }
-        return results;
+        finally
+        {
+            owned?.Dispose();
+        }
     }
 
     /// <summary>

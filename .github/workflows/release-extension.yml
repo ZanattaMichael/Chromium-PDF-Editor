@@ -124,8 +124,19 @@ jobs:
             ./scripts/package-bundle.sh "$rid" dist
           done
 
-      - name: Attach to the GitHub Release
+      # Best-effort. This workflow reacts to a release a human has already *published*, and this
+      # repository has immutable releases enabled, so its assets are frozen the moment it exists —
+      # softprops can neither overwrite nor add to them ("Cannot delete asset from an immutable
+      # release"). That failure previously failed the whole `package` job and so blocked the Chrome
+      # Web Store deploy below, which is the actual point of a promotion — v1.0.1 and v1.0.2 never
+      # reached the store because of it. The deploy consumes the build artifact uploaded above, not
+      # these release assets, so it does not need the attach to succeed. The standalone zips for a
+      # promoted version live on its release-candidate prerelease, which is built as a draft and so
+      # keeps its assets (see release-candidate.yml). Making the final release carry them too would
+      # need this workflow to own the release as draft→publish rather than react to a published one.
+      - name: Attach to the GitHub Release (best-effort; see note)
         if: github.event_name == 'release'
+        continue-on-error: true
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ github.event.release.tag_name }}

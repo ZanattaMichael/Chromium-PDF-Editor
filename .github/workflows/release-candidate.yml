@@ -106,10 +106,17 @@ jobs:
           git tag "${{ steps.version.outputs.tag }}"
           git push origin "${{ steps.version.outputs.tag }}"
 
-      - name: Create the release candidate (prerelease) and attach the packages
+      # Create the release as a DRAFT with the packages attached, then publish it in the next step.
+      # This repository has immutable releases enabled: once a release is published its assets are
+      # frozen, and softprops publishes a prerelease immediately, so uploading the zips afterwards
+      # failed with "Cannot upload asset ... to an immutable release" and every RC since had no
+      # build files attached. A draft is still mutable, so the assets attach here; publishing a
+      # draft that already carries its assets is allowed.
+      - name: Create the release candidate (draft) and attach the packages
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
+          draft: true
           prerelease: true
           generate_release_notes: true
           files: |
@@ -129,3 +136,11 @@ jobs:
             This is **not** published to the Chrome Web Store. To promote it, create a new
             Release targeting this commit with the clean tag
             `${{ steps.version.outputs.final_tag }}` and leave "Set as a pre-release" unchecked.
+
+      # Flip the draft to a published prerelease. It already carries its assets, so this succeeds
+      # under immutable releases. A GITHUB_TOKEN-published release does not fire "release: published"
+      # for other workflows (GitHub's anti-recursion rule), so this does not trip release-extension.yml.
+      - name: Publish the release candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ steps.version.outputs.tag }}" --draft=false --prerelease

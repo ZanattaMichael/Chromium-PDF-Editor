@@ -50,7 +50,7 @@ catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: replaced copy
   typeset: Helvetica@12.0
-  ops: BTx1 Dox1 ETx1 Qx3 Tdx1 Tfx1 Tjx1 qx3
+  ops: BTx1 Dox1 ETx1 Qx2 Tdx1 Tfx1 Tjx1 qx2
   font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   xobject Nested: subtype=Form bbox=[0 0 100 100] matrix=none group=none
     ops: Dox1 Qx1 qx1

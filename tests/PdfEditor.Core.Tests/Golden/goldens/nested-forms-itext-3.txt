@@ -67,7 +67,7 @@ catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-
 page 1: media=[0 0 595 842] crop=none rotate=0 annots=0 group=none
   text: Document with nested forms replaced copy
   typeset: Helvetica@10.0 Helvetica@12.0
-  ops: BTx2 Dox1 ETx2 Qx3 Tdx2 Tfx2 Tjx2 cmx1 qx3
+  ops: BTx2 Dox1 ETx2 Qx2 Tdx2 Tfx2 Tjx2 cmx1 qx2
   font F1: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   font F2: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   xobject Fm1: subtype=Form bbox=[0 0 200 120] matrix=none group=none

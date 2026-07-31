@@ -58,7 +58,7 @@ catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: replaced copy
   typeset: Helvetica@18.0
-  ops: BTx2 ETx2 Qx2 TJx1 Tdx2 Tfx2 Tjx1 fx1 qx2 rex1 rgx1
+  ops: BTx2 ETx2 Qx1 TJx1 Tdx2 Tfx2 Tjx1 fx1 qx1 rex1 rgx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   font F2: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
 page 2: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none

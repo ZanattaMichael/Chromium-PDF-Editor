@@ -75,7 +75,7 @@ catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus replaced copy
   typeset: Helvetica@10.0 Helvetica@9.0
-  ops: BTx2 Dox1 ETx2 Qx3 Tdx2 Tfx2 Tjx2 cmx1 gx1 gsx1 qx3
+  ops: BTx2 Dox1 ETx2 Qx2 Tdx2 Tfx2 Tjx2 cmx1 gx1 gsx1 qx2
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   font F2: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   gs GS1: BM=/Normal ca=0.8

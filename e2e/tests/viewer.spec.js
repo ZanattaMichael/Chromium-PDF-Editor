@@ -1383,8 +1383,11 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // The invisible selectable text layer builds over the rendered page.
     const span = page.locator('.page[data-page="1"] .text-layer span', { hasText: 'Selectable' });
     await expect(span).toHaveCount(1);
-    // Where the sentence's ink sits now, so the replacement can be held to the same baseline.
-    const before = await inkBounds(page, { x: 60, y: 680, width: 340, height: 45 });
+    // The original run's baseline (its extracted PDF-space box), so the replacement can be held to
+    // it. Comparing extracted run boxes rather than ink bounds keeps the baseline check independent
+    // of which glyphs happen to have descenders.
+    const original = (await textRuns(page)).find((r) => /Selectable/.test(r.text));
+    expect(original).toBeTruthy();
 
     // Selecting it yields the real text (so Ctrl/Cmd+C copies actual characters, not an image).
     await span.click({ clickCount: 3 });
@@ -1409,16 +1412,14 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#status')).toContainText('Text replaced');
     await expectText(page).toContain('Replaced Via Menu');
     await expectText(page).not.toContain('Selectable');
-    // The original words are off the paper as well as out of the text, and the replacement is
-    // drawn where they were — on the same baseline and starting at the same left edge, not a
-    // line lower or a line higher.
-    const after = await inkBounds(page, { x: 60, y: 680, width: 340, height: 45 });
-    expect(after).not.toBeNull();
-    // Within a few points of the original baseline and left edge — the guard is "not a line off"
-    // (a line is 10-28pt here), so 3pt absorbs the sub-pixel metrics shift from the em-size fix
-    // (#84) without letting a real vertical jump through.
-    expect(Math.abs(after.y - before.y)).toBeLessThan(3);
-    expect(Math.abs(after.x - before.x)).toBeLessThan(3);
+    // The replacement is drawn where the original was — same baseline, same left edge, not a line
+    // lower or higher. Before #96 the edit laid the text out top-down in a box, so the layout
+    // engine's leading pushed the baseline off the original line; 2pt is well inside a line
+    // (10-28pt here) but tight enough to catch that drift.
+    const replaced = (await textRuns(page)).find((r) => /Replaced/.test(r.text));
+    expect(replaced).toBeTruthy();
+    expect(Math.abs(replaced.y - original.y)).toBeLessThan(2);
+    expect(Math.abs(replaced.x - original.x)).toBeLessThan(3);
     // The replacement is shorter than the original, so the paper past its right edge is clear.
     expect(await inkFraction(page, { x: 320, y: 694, width: 120, height: 24 })).toBe(0);
     await page.close();
@@ -1808,6 +1809,37 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // The rest of the page is untouched paper — the region was the run, not the page.
     expect(await bandStats(page, { x: 60, y: 400, width: 400, height: 100 }).then((s) => s.paper))
       .toBe(1);
+    await page.close();
+  });
+
+  test('text edit (#90): right-clicking a selection, Edit, then Apply changes the document', async () => {
+    // #90 as reported: the user *highlights* text, right-clicks, chooses Edit, edits, presses Apply
+    // — and nothing happens. The sibling "the right-click route applies" test drives the
+    // no-selection span route; this one drives the selection route the issue actually describes, all
+    // the way through Apply to a changed document.
+    const file = fixture('ctxseledit.pdf', [[
+      { text: 'Amount Due 500', x: 72, y: 700 },
+      { text: 'keep me', x: 72, y: 640 },
+    ]]);
+    const page = await openViewerWith(file);
+    const span = page.locator('.page[data-page="1"] .text-layer span', { hasText: 'Amount' });
+    await span.waitFor({ timeout: 15000 });
+    await span.click({ clickCount: 3 }); // highlight the run
+    const b = await span.boundingBox();
+    await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2, { button: 'right' });
+
+    await page.locator('#context-menu').getByRole('button', { name: /Edit text/ }).click();
+    await expect(page.locator('#panel-edit')).toBeVisible();
+    await expect(page.locator('#edit-text')).toHaveValue(/Amount Due 500/);
+
+    await page.fill('#edit-text', 'Amount Due 750');
+    await page.click('#edit-apply');
+    await expect(page.locator('#status')).toContainText('Text replaced');
+
+    // The file changed, not just the panel — and the control line is untouched.
+    await expectText(page).toContain('Amount Due 750');
+    await expectText(page).not.toContain('500');
+    await expectText(page).toContain('keep me');
     await page.close();
   });
 

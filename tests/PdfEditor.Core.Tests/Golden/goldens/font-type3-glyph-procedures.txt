@@ -40,7 +40,7 @@ catalog: has-OpenAction=no has-Names=no has-Outlines=no has-OCProperties=no has-
 page 1: media=[0 0 400 600] crop=none rotate=0 annots=0 group=none
   text: golden corpus replaced copy
   typeset: Helvetica@10.0 Helvetica@36.0
-  ops: BTx3 ETx3 Qx2 TJx1 Tdx3 Tfx3 Tjx2 gx1 qx2
+  ops: BTx3 ETx3 Qx1 TJx1 Tdx3 Tfx3 Tjx2 gx1 qx1
   font F1: subtype=Type1 base=Helvetica toUnicode=no widths=0
   font F2: subtype=Type1 base=Helvetica encoding=WinAnsiEncoding toUnicode=no widths=0
   font T3: subtype=Type3 base=none encoding=none+Differences[4] toUnicode=no widths=2 charProcs=square/triangle fontMatrix=[0.001 0 0 0.001 0 0]

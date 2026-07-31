@@ -2676,7 +2676,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
   });
 
   // eslint-disable-next-line playwright/no-skipped-test
-  test.fixme('redaction on a rotated (/Rotate 90) page removes the text under the box', async () => {
+  test('redaction on a rotated (/Rotate 90) page removes the text under the box', async () => {
     // LIVE BUG — and the most serious one in this branch. On a /Rotate 90 page, dragging a
     // redaction box paints the black rectangle exactly where it was drawn and removes *no text
     // at all*. The words stay in the file: selectable, copyable and searchable underneath an

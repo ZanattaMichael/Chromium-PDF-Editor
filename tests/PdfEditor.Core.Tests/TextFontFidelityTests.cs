@@ -94,6 +94,33 @@ public class TextFontFidelityTests
         }
     }
 
+    /// <summary>
+    /// #96: an edited run must land on the <em>same baseline</em> as the text it replaced, in-line
+    /// with the words around it. The edit path used to lay the replacement out top-down in a box, so
+    /// the layout engine's leading pushed the first line below the original line. The region here is
+    /// the tight ascent-to-descent box the viewer actually selects, not a loose band.
+    /// </summary>
+    [Fact]
+    public void ReplaceTextInRegion_KeepsTheReplacementOnTheOriginalBaseline()
+    {
+        const float size = 24f;
+        // WithTextInFont draws its baseline at y=700.
+        byte[] pdf = TestPdfs.WithTextInFont(iText.IO.Font.Constants.StandardFonts.HELVETICA, "ORIGINAL", size);
+        var span = Assert.Single(TextTools.GetTextSpans(pdf, 1));
+        var region = new RectRegion(1, span.X, span.Y, span.Width, span.Height);
+
+        var result = TextTools.ReplaceTextInRegion(pdf, region, "REPLACED");
+
+        var after = Assert.Single(TextTools.GetTextSpans(result.Pdf, 1));
+        Assert.Equal("REPLACED", after.Text);
+        // Same font and size, so TextSpan.Y (the descent line) is the baseline shifted by a fixed
+        // descent; equal descent lines therefore mean equal baselines. Before the fix the run landed
+        // roughly 0.3*em (~7pt at 24pt) below the line.
+        Assert.True(Math.Abs(after.Y - span.Y) <= 1.5f, string.Create(CultureInfo.InvariantCulture,
+            $"Edited text landed at descent-line {after.Y:F2}, {Math.Abs(after.Y - span.Y):F2}pt off "
+            + $"the original {span.Y:F2}; it should sit in-line with the surrounding text."));
+    }
+
     /// <summary>Moving a run must not resize it either — it re-stamps at the detected size.</summary>
     [Fact]
     public void MoveText_PreservesTheTypeSize()

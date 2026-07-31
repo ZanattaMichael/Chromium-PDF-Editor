@@ -59,8 +59,11 @@ public static class TextTools
 
         var removed = Redactor.RemoveContent(pdf, new[] { region }, password,
             RemovalKindFor(pdf, region, password));
+        // Baseline-anchored (wrap: false) so the replacement lands on the original text's baseline,
+        // in-line with the words around it, rather than being laid out top-down in a box and drifting
+        // below the line (#96). Move and find & replace already stamp this way.
         var stamped = StampText(removed.Pdf, region, newText, size, password,
-            fontName: stampFont, color: ParseColor(colorHex), confineToRegion: false);
+            wrap: false, fontName: stampFont, color: ParseColor(colorHex));
 
         var warnings = new List<string>(removed.Warnings);
         if (DescribeSubstitution(found.SourceFont, stampFont) is { } note) warnings.Add(note);
@@ -322,11 +325,27 @@ public static class TextTools
             }
             else
             {
-                // Single-line stamp on the original baseline (used by find & replace).
+                // Baseline-anchored stamp (find & replace, edit, move). The region's bottom is the
+                // descent line of the text that was there, so the baseline sits one descender-depth
+                // above it; drawing there keeps the new text in-line with the surrounding words
+                // instead of letting the layout engine's leading push it below the line (#96).
+                // Wrapping is deliberately not applied — a replaced run extends along its own line
+                // rather than reflowing onto the next one, which would collide with the line below.
                 float baseline = region.Y + fontSize * 0.21f; // approximate descender share
                 pdfCanvas.BeginText().SetFontAndSize(font, fontSize);
                 if (color != null) pdfCanvas.SetFillColor(color);
-                pdfCanvas.MoveText(region.X, baseline).ShowText(text).EndText();
+                pdfCanvas.MoveText(region.X, baseline);
+                // Honour explicit line breaks the caller typed, one baseline-spaced line each. The
+                // leading is only emitted when there is a second line to place, so the common
+                // single-line edit stays a plain Td/Tj with nothing extra in the stream.
+                var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+                pdfCanvas.ShowText(lines[0]);
+                if (lines.Length > 1)
+                {
+                    pdfCanvas.SetLeading(fontSize * 1.15f);
+                    for (int i = 1; i < lines.Length; i++) pdfCanvas.NewlineShowText(lines[i]);
+                }
+                pdfCanvas.EndText();
             }
         }
         return output.ToArray();

@@ -3,6 +3,7 @@ obj/
 *.user
 .vs/
 extension/icons/*.png
+extension/build-info.json
 e2e/node_modules/
 e2e/test-results/
 e2e/playwright-report/

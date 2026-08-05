@@ -13,6 +13,9 @@ OUTPUT_DIR="${1:-$REPO_ROOT/dist}"
 echo "Generating icons..."
 python3 "$REPO_ROOT/scripts/generate-icons.py"
 
+echo "Recording build info..."
+python3 "$REPO_ROOT/scripts/generate-build-info.py"
+
 echo "Validating manifest.json..."
 python3 - "$EXTENSION_DIR/manifest.json" <<'EOF'
 import json, sys

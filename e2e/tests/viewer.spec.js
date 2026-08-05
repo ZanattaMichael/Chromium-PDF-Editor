@@ -2499,6 +2499,26 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('help: About shows the version, build and browser (#103)', async () => {
+    // Help is reachable with no document open, so About works from the empty state.
+    const page = await ext.context.newPage();
+    await page.goto(ext.viewerUrl);
+    const version = await page.evaluate(() => chrome.runtime.getManifest().version);
+
+    await ui(page, '#btn-about');
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('About');
+    // The manifest version, and rows for the build stamp and the browser.
+    await expect(dialog.locator('.about-list')).toContainText(version);
+    await expect(dialog.locator('.about-list')).toContainText('Build');
+    await expect(dialog.locator('.about-list')).toContainText('Browser');
+
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await expect(dialog).toBeHidden();
+    await page.close();
+  });
+
   test('activity console: a forced host failure is logged instead of swallowed (#72)', async () => {
     // `form-fields` is the case #72 names by hand: its bare `catch { state.formFields = []; }`
     // turned any failure into the claim "this document has no fillable form fields".

@@ -5,6 +5,7 @@ import { HostClient, bytesToBase64, base64ToBytes } from './host-client.js';
 import { runFormScript } from './formScript.js';
 import { ActivityLog, formatTime } from './activity-log.js';
 import { displayToPage, pageToDisplay } from './geometry.js';
+import { formatBuildInfo, loadBuildMeta } from './build-info.js';
 
 const host = new HostClient();
 
@@ -289,6 +290,7 @@ function initConsole() {
     scheduleConsoleFlush();
   });
   $('btn-console').addEventListener('click', () => setConsoleOpen(!consoleOpen()));
+  $('btn-about').addEventListener('click', showAbout);
   $('console-close').addEventListener('click', () => setConsoleOpen(false));
   $('console-clear').addEventListener('click', () => activity.clear());
   $('console-copy').addEventListener('click', copyConsole);
@@ -3789,6 +3791,66 @@ function closeAllMenus() {
     menu.classList.remove('open');
     menu.querySelector('.menu-trigger')?.setAttribute('aria-expanded', 'false');
   }
+}
+
+/** Condenses the (long) user-agent string to the browser + version, for bug reports. */
+function browserSummary() {
+  const ua = navigator.userAgent || '';
+  const m = ua.match(/(Edg|Chrome|Chromium)\/([\d.]+)/);
+  return m ? `${m[1] === 'Edg' ? 'Edge' : m[1]} ${m[2]}` : (ua || 'unknown');
+}
+
+/** #103: shows version, build commit and build time, plus the browser, in a modal. */
+async function showAbout() {
+  const manifest = chrome.runtime.getManifest();
+  const meta = await loadBuildMeta((p) => chrome.runtime.getURL(p));
+  const info = formatBuildInfo({
+    version: manifest.version,
+    commit: meta.commit,
+    builtAt: meta.builtAt,
+  });
+
+  // Static markup via innerHTML, every dynamic value via textContent — see #73/#74.
+  modal.innerHTML = '<h2>About</h2>';
+
+  const name = document.createElement('p');
+  name.className = 'about-name';
+  name.textContent = manifest.name || 'Chromium PDF Editor';
+  modal.appendChild(name);
+
+  if (manifest.description) {
+    const desc = document.createElement('p');
+    desc.className = 'muted';
+    desc.textContent = manifest.description;
+    modal.appendChild(desc);
+  }
+
+  const dl = document.createElement('dl');
+  dl.className = 'about-list';
+  const row = (label, value, mono = false) => {
+    const dt = document.createElement('dt');
+    dt.textContent = label;
+    const dd = document.createElement('dd');
+    dd.textContent = value;
+    if (mono) dd.classList.add('about-mono');
+    dl.append(dt, dd);
+  };
+  row('Version', info.version);
+  row('Build', info.commit, info.isRelease);
+  row('Built', info.builtAt);
+  row('Browser', browserSummary());
+  modal.appendChild(dl);
+
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const close = document.createElement('button');
+  close.textContent = 'Close';
+  actions.appendChild(close);
+  modal.appendChild(actions);
+
+  modal.showModal();
+  close.addEventListener('click', () => modal.close());
+  close.focus();
 }
 
 async function start() {

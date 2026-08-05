@@ -615,6 +615,13 @@ textarea.code-editor:focus { outline: 1px solid var(--accent-2); }
 
 .actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 
+/* About dialog (#103). */
+.about-name { font-weight: 600; font-size: 15px; margin: 2px 0 4px; }
+.about-list { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 10px 0 0; }
+.about-list dt { color: var(--muted); }
+.about-list dd { margin: 0; }
+.about-mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+
 .tabs { display: flex; gap: 4px; margin-bottom: 8px; }
 .tab.active { background: var(--accent-2); color: #fff; }
 

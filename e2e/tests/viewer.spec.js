@@ -401,6 +401,34 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('redaction report: shows per-page counts after applying (#48)', async () => {
+    const file = fixture('redact-report.pdf', [[
+      { text: 'TOP SECRET DATA', x: 72, y: 700 },
+      { text: 'public information', x: 72, y: 600 },
+    ]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-redact');
+    await dragPdfRect(page, { x: 60, y: 690, width: 260, height: 34 });
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+
+    await page.click('#redact-apply');
+
+    // The audit modal appears with a per-page table and a totals row.
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Redaction report');
+    await expect(dialog.locator('.report-table')).toContainText('Text runs');
+    const totals = dialog.locator('.report-total');
+    await expect(totals).toContainText('Total');
+    // One region was applied; at least one text run sat under it.
+    await expect(totals).toContainText('1');
+
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await expect(dialog).toBeHidden();
+    await page.close();
+  });
+
   test('search & mark: finds every occurrence of a phrase, marks boxes, redacts them', async () => {
     // Two copies of the secret word plus an unrelated line. Searching marks both copies as
     // redaction boxes; applying blacks out both spots and leaves the other line untouched.

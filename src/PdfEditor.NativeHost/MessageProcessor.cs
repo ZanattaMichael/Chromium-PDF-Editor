@@ -120,8 +120,14 @@ public static class MessageProcessor
 
     private static object Redact(JsonObject p)
     {
-        var result = Redactor.Redact(Pdf(p), Regions(p["regions"]!.AsArray()), Password(p));
-        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+        var pdf = Pdf(p);
+        var regions = Regions(p["regions"]!.AsArray());
+        var password = Password(p);
+        // Audit the original document before the content is removed: what was under the boxes is
+        // exactly what the redaction takes out (#48).
+        var report = RedactionReporter.Analyze(pdf, regions, password);
+        var result = Redactor.Redact(pdf, regions, password);
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings, report };
     }
 
     private static object RotateAction(JsonObject p)

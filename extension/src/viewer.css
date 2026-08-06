@@ -622,6 +622,14 @@ textarea.code-editor:focus { outline: 1px solid var(--accent-2); }
 .about-list dd { margin: 0; }
 .about-mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
 
+/* Redaction report (#48). */
+.report-table { border-collapse: collapse; margin: 10px 0 4px; width: 100%; }
+.report-table th, .report-table td { padding: 4px 10px; text-align: right; border-bottom: 1px solid var(--border, #ccc); }
+.report-table tr th:first-child, .report-table tr td:first-child { text-align: left; }
+.report-table tr:first-child th { color: var(--muted); font-weight: 600; }
+.report-table .report-total th { border-top: 2px solid var(--border, #ccc); border-bottom: none; }
+.report-note { color: var(--warn, #b26a00); margin: 6px 0 0; }
+
 .tabs { display: flex; gap: 4px; margin-bottom: 8px; }
 .tab.active { background: var(--accent-2); color: #fff; }
 

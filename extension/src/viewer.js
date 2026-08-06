@@ -1486,9 +1486,76 @@ async function applyRedaction(precomputed) {
     await applyResult(result.pdf,
       `Redacted ${count} region${count === 1 ? '' : 's'} — content removed.` +
       (result.warnings?.length ? ` ⚠ ${result.warnings.join(' ')}` : ''));
+    // #48: an auditable summary of what was removed, and what redaction leaves behind.
+    if (result.report) showRedactionReport(result.report);
   } catch (e) {
     fail(e);
   }
+}
+
+/** #48: renders the redaction audit — per-page counts by category, plus what survives redaction. */
+function showRedactionReport(report) {
+  modal.innerHTML = '<h2>Redaction report</h2>';
+
+  const summary = document.createElement('p');
+  summary.className = 'muted';
+  summary.textContent = `Removed content from ${report.regions} `
+    + `region${report.regions === 1 ? '' : 's'} across ${report.pagesAffected} `
+    + `page${report.pagesAffected === 1 ? '' : 's'}.`;
+  modal.appendChild(summary);
+
+  if (report.pages.length) {
+    const table = document.createElement('table');
+    table.className = 'report-table';
+    const head = document.createElement('tr');
+    for (const h of ['Page', 'Regions', 'Text runs', 'Images', 'Annotations']) {
+      const th = document.createElement('th');
+      th.textContent = h;
+      head.appendChild(th);
+    }
+    table.appendChild(head);
+
+    const row = (cells, isTotal = false) => {
+      const tr = document.createElement('tr');
+      if (isTotal) tr.className = 'report-total';
+      cells.forEach((c, i) => {
+        const cell = document.createElement(isTotal || i === 0 ? 'th' : 'td');
+        cell.textContent = String(c);
+        tr.appendChild(cell);
+      });
+      table.appendChild(tr);
+    };
+    for (const p of report.pages) row([p.page, p.regions, p.textRuns, p.images, p.annotations]);
+    row(['Total', report.regions, report.textRuns, report.images, report.annotations], true);
+    modal.appendChild(table);
+  }
+
+  // Redaction removes page content, but not document-level JavaScript or metadata — call those out
+  // explicitly so an auditor knows to run "Remove hidden info" as well.
+  const notes = [];
+  if (report.remainingJavaScript > 0) {
+    notes.push(`⚠ ${report.remainingJavaScript} embedded script${report.remainingJavaScript === 1 ? '' : 's'} `
+      + 'still present — redaction does not remove JavaScript. Use “Remove hidden info…”.');
+  }
+  if (report.remainingMetadata) {
+    notes.push('⚠ Document metadata is still present — use “Remove hidden info…” to strip it.');
+  }
+  for (const note of notes) {
+    const p = document.createElement('p');
+    p.className = 'report-note';
+    p.textContent = note;
+    modal.appendChild(p);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const close = document.createElement('button');
+  close.textContent = 'Close';
+  actions.appendChild(close);
+  modal.appendChild(actions);
+  modal.showModal();
+  close.addEventListener('click', () => modal.close());
+  close.focus();
 }
 
 // ------------------------------------------------------------- text edit

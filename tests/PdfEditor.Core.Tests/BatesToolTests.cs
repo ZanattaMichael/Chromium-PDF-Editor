@@ -60,6 +60,21 @@ public class BatesToolTests
         Assert.Equal(0d, TestPdfAssert.InkFraction(result.Pdf, 1, 20, 20, 120, 40, 200), 3);
     }
 
+    [Theory]
+    [InlineData(BatesTool.Corner.TopLeft)]
+    [InlineData(BatesTool.Corner.TopCenter)]
+    [InlineData(BatesTool.Corner.BottomLeft)]
+    [InlineData(BatesTool.Corner.BottomCenter)]
+    public void AddBatesNumbers_PlacesTheLabelInEveryCorner(BatesTool.Corner corner)
+    {
+        byte[] pdf = TestPdfs.WithText(("body", 72, 400, 12));
+
+        var result = BatesTool.AddBatesNumbers(pdf, new BatesOptions(Prefix: "N", Position: corner));
+
+        // Whatever the corner, the label is stamped and extractable.
+        Assert.Contains("N000001", TestPdfAssert.ExtractText(result.Pdf, 1));
+    }
+
     [Fact]
     public void AddBatesNumbers_NegativeStart_Throws()
     {

@@ -70,6 +70,18 @@ public class RedactionReporterTests
     }
 
     [Fact]
+    public void Analyze_FlagsRemainingMetadata_ThatRedactionDoesNotRemove()
+    {
+        // WithHiddenData carries an author/title in the Info dictionary and document JavaScript.
+        byte[] pdf = TestPdfs.WithHiddenData();
+
+        var report = RedactionReporter.Analyze(pdf, new[] { new RectRegion(1, 60, 740, 200, 20) });
+
+        Assert.True(report.RemainingMetadata, "identifying metadata should be flagged");
+        Assert.True(report.RemainingJavaScript > 0, "document JavaScript should be flagged");
+    }
+
+    [Fact]
     public void Analyze_OutOfRangePages_AreIgnored()
     {
         byte[] pdf = TestPdfs.WithText(("x", 72, 700, 12));

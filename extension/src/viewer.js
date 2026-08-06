@@ -875,6 +875,8 @@ function updateChrome() {
     $(id).disabled = !loaded;
   }
   $('page-input').disabled = !loaded;
+  // "Remove encryption" only makes sense on an open, encrypted document.
+  $('btn-decrypt').disabled = !loaded || !(state.info?.encrypted || state.password);
   $('btn-undo').disabled = state.history.length === 0;
   $('btn-redo').disabled = state.future.length === 0;
   if (loaded) {
@@ -2313,6 +2315,44 @@ async function protect() {
   }
 }
 
+/**
+ * #25: strips password protection, producing an unencrypted copy. The password was captured when
+ * the document was opened (state.password), so no re-prompt is needed in the normal case; we only
+ * ask if it is somehow missing. state.password is cleared *after* applyResult so the undo snapshot
+ * loadDocument pushes still pairs the original encrypted bytes with their password.
+ */
+async function removeEncryption() {
+  if (!state.pdf) return;
+  if (!(state.info?.encrypted || state.password)) {
+    toast('This document is not encrypted.');
+    return;
+  }
+  let password = state.password;
+  if (!password) {
+    const entered = await promptDialog('Enter the current password to remove encryption', [
+      { id: 'pw', label: 'Password', type: 'password' },
+    ], 'Remove');
+    if (!entered) return;
+    password = entered.pw;
+  }
+  if (state.signatures.length > 0) {
+    const confirmed = await promptDialog(
+      'This document is digitally signed. Removing encryption rewrites the file and breaks ' +
+      'existing signatures — sign again afterwards. Type YES to continue.',
+      [{ id: 'confirm', label: 'Confirmation' }], 'Continue');
+    if (!confirmed || confirmed.confirm !== 'YES') return;
+  }
+  try {
+    setStatus('Removing encryption…', true);
+    const result = await host.call('decrypt', { pdf: state.pdfB64, password });
+    await applyResult(result.pdf, 'Encryption removed.');
+    state.password = null;
+    updateChrome(); // clear the 🔒 badge and disable "Remove encryption" now the doc is open
+  } catch (e) {
+    fail(e);
+  }
+}
+
 // ------------------------------------------------------- find and replace
 
 async function findReplace() {
@@ -3727,6 +3767,7 @@ function wire() {
   $('btn-find').addEventListener('click', findReplace);
   $('btn-merge').addEventListener('click', mergeFiles);
   $('btn-protect').addEventListener('click', protect);
+  $('btn-decrypt').addEventListener('click', removeEncryption);
   $('btn-digital').addEventListener('click', digitallySign);
 
   $('btn-prev').addEventListener('click', () => goToPage(state.page - 1));

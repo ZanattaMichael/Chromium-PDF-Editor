@@ -2364,6 +2364,31 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('remove encryption: strips the password from a protected document (#25)', async () => {
+    const file = fixture('decrypt.pdf', [[{ text: 'classified', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    // "Remove encryption" is disabled until the document is actually encrypted.
+    await page.click('#menu-edit-trigger');
+    await expect(page.locator('#btn-decrypt')).toBeDisabled();
+    await page.click('#menu-edit-trigger'); // close the menu again
+
+    // Encrypt it, then strip the encryption back off.
+    await ui(page, '#btn-protect');
+    await fillDialog(page, ['s3cret', null], 'Encrypt');
+    await expect(page.locator('#badges .badge.locked')).toBeVisible();
+
+    await ui(page, '#btn-decrypt');
+    await expect(page.locator('#status')).toContainText('Encryption removed');
+    await expect(page.locator('#badges .badge.locked')).toHaveCount(0);
+
+    // Still a working document, and the control is disabled again now that it is not encrypted.
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+    await page.click('#menu-edit-trigger');
+    await expect(page.locator('#btn-decrypt')).toBeDisabled();
+    await page.close();
+  });
+
   test('drawn signature is placed on the page', async () => {
     // Keep the signature area in the upper part of the page: the drag helper works in
     // viewport coordinates, and A4 at 100% zoom extends below the fold.

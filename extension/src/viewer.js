@@ -869,7 +869,7 @@ function updateChrome() {
   for (const id of ['btn-save', 'btn-print', 'btn-sidebar', 'tool-text', 'tool-draw',
     'tool-highlight', 'tool-edit', 'tool-move', 'tool-redact', 'tool-sign',
     'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-organize', 'btn-js', 'btn-sanitize', 'btn-ocr',
-    'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
+    'btn-find', 'btn-merge', 'btn-watermark', 'btn-protect', 'btn-digital',
     'menu-read-trigger', 'menu-edit-trigger', 'btn-compare',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
     $(id).disabled = !loaded;
@@ -2353,6 +2353,41 @@ async function removeEncryption() {
   }
 }
 
+/**
+ * #30: stamps a diagonal text watermark across every page. The mark is baked into each page's
+ * content stream by the host (not added as a removable annotation or layer), so it survives being
+ * reopened in another viewer and can't be toggled off from a layers/annotations panel.
+ */
+async function addWatermark() {
+  if (!state.pdf) return;
+  const value = await promptDialog('Add watermark', [
+    { id: 'text', label: 'Text', placeholder: 'CONFIDENTIAL' },
+    { id: 'color', label: 'Colour', type: 'color', value: '#808080' },
+    { id: 'opacity', label: 'Opacity (%)', type: 'number', value: '30' },
+    { id: 'rotation', label: 'Rotation (°)', type: 'number', value: '45' },
+  ], 'Apply');
+  if (!value) return;
+  if (!value.text.trim()) { toast('Watermark text is required.'); return; }
+
+  // The dialog collects opacity as a 0–100 percentage; the host wants a 0–1 fraction.
+  const opacity = Math.min(1, Math.max(0.05, (Number(value.opacity) || 30) / 100));
+  const rotation = Number(value.rotation);
+  try {
+    setStatus('Adding watermark…', true);
+    const result = await host.call('watermark', {
+      pdf: state.pdfB64,
+      text: value.text,
+      color: value.color,
+      opacity,
+      rotation: Number.isFinite(rotation) ? rotation : 45,
+      pdfPassword: state.password,
+    });
+    await applyResult(result.pdf, 'Watermark added.');
+  } catch (e) {
+    fail(e);
+  }
+}
+
 // ------------------------------------------------------- find and replace
 
 async function findReplace() {
@@ -3768,6 +3803,7 @@ function wire() {
   $('btn-merge').addEventListener('click', mergeFiles);
   $('btn-protect').addEventListener('click', protect);
   $('btn-decrypt').addEventListener('click', removeEncryption);
+  $('btn-watermark').addEventListener('click', addWatermark);
   $('btn-digital').addEventListener('click', digitallySign);
 
   $('btn-prev').addEventListener('click', () => goToPage(state.page - 1));

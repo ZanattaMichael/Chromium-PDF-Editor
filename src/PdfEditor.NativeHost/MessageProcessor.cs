@@ -84,6 +84,7 @@ public static class MessageProcessor
         "merge-files" => MergeFilesAction(p),
         "encrypt" => EncryptAction(p),
         "decrypt" => DecryptAction(p),
+        "watermark" => WatermarkAction(p),
         "sign-image" => SignImage(p),
         "sign-digital" => SignDigital(p),
         "signatures" => Signatures(p),
@@ -502,6 +503,22 @@ public static class MessageProcessor
     {
         pdf = Convert.ToBase64String(Encryptor.Decrypt(Pdf(p), p["password"]!.GetValue<string>()))
     };
+
+    private static object WatermarkAction(JsonObject p)
+    {
+        var pages = p["pages"]?.AsArray().Select(n => n!.GetValue<int>()).ToList();
+        var result = WatermarkTool.AddTextWatermark(Pdf(p),
+            p["text"]!.GetValue<string>(),
+            p["fontFamily"]?.GetValue<string>(),
+            p["bold"]?.GetValue<bool>() ?? false,
+            p["italic"]?.GetValue<bool>() ?? false,
+            p[ColorKey]?.GetValue<string>(),
+            p["opacity"]?.GetValue<float>() ?? 0.3f,
+            p["rotation"]?.GetValue<float>() ?? 45f,
+            p["fontSize"]?.GetValue<float>(),
+            pages, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
 
     private static object SignImage(JsonObject p) => new
     {

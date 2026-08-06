@@ -2389,6 +2389,29 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('watermark: stamps text across the page and bakes it in (#30)', async () => {
+    // Body text sits low on the page; the centred watermark paints the middle, previously-blank band.
+    const file = fixture('watermark.pdf', [[{ text: 'body copy', x: 72, y: 80 }]]);
+    const page = await openViewerWith(file);
+
+    const band = { x: 150, y: 360, width: 300, height: 120 };
+    expect(await inkFraction(page, band)).toBe(0);
+
+    // Opaque black so the stamped glyphs clear the ink/darkness threshold. The colour input is a
+    // native picker (fill() doesn't apply to type=color), so set its value directly.
+    await ui(page, '#btn-watermark');
+    const dialog = page.locator('dialog#modal');
+    await dialog.locator('input').nth(0).fill('CONFIDENTIAL');
+    await dialog.locator('input[type=color]').evaluate((el) => { el.value = '#000000'; });
+    await dialog.locator('input').nth(2).fill('100'); // opacity %
+    await dialog.locator('input').nth(3).fill('45');  // rotation °
+    await dialog.getByRole('button', { name: 'Apply' }).click();
+    await expect(page.locator('#status')).toContainText('Watermark added');
+
+    expect(await inkFraction(page, band)).toBeGreaterThan(0);
+    await page.close();
+  });
+
   test('drawn signature is placed on the page', async () => {
     // Keep the signature area in the upper part of the page: the drag helper works in
     // viewport coordinates, and A4 at 100% zoom extends below the fold.

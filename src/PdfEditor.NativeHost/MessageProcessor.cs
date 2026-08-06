@@ -82,6 +82,7 @@ public static class MessageProcessor
         "replace-all" => ReplaceAllAction(p),
         "merge" => MergeAction(p),
         "merge-files" => MergeFilesAction(p),
+        "import" => ImportAction(p),
         "encrypt" => EncryptAction(p),
         "decrypt" => DecryptAction(p),
         "watermark" => WatermarkAction(p),
@@ -497,6 +498,14 @@ public static class MessageProcessor
             return DocumentImport.ToPdf(data, o["kind"]?.GetValue<string>() ?? "pdf");
         }).ToList();
         return new { pdf = Convert.ToBase64String(Merger.Merge(pdfs)) };
+    }
+
+    // Converts a single non-PDF input (image or Word doc) to a PDF so it can be opened and edited
+    // directly, not just merged. { data: base64, kind: "image"|"docx" }.
+    private static object ImportAction(JsonObject p)
+    {
+        byte[] data = Convert.FromBase64String(p["data"]!.GetValue<string>());
+        return new { pdf = Convert.ToBase64String(DocumentImport.ToPdf(data, p["kind"]?.GetValue<string>() ?? "image")) };
     }
 
     private static object EncryptAction(JsonObject p) => new

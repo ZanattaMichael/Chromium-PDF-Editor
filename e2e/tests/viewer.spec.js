@@ -348,6 +348,22 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('open image: a PNG opens as an editable one-page PDF (#26)', async () => {
+    // A 16x16 solid-red opaque PNG, generated once (zlib-deflated RGB scanlines).
+    const pngB64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGO4IyJCEmIY1TCqYfhqAAACcQQQFwFJQgAAAABJRU5ErkJggg==';
+    const imgPath = path.join(fixtureDir, 'photo.png');
+    fs.writeFileSync(imgPath, Buffer.from(pngB64, 'base64'));
+
+    // Opening the image converts it to a PDF page in the host, then loads it like any document.
+    const page = await openViewerWith(imgPath);
+    await expect(page.locator('#page-total')).toHaveText('1');
+    await expect(page.locator('#status')).toContainText('photo.pdf');
+
+    // The red image is drawn on the page — ink in the centred band it was fitted into.
+    expect(await inkFraction(page, { x: 120, y: 350, width: 300, height: 150 })).toBeGreaterThan(0);
+    await page.close();
+  });
+
   test('redaction: draw, preview window, apply — content removed and box painted', async () => {
     const file = fixture('redact.pdf', [[
       { text: 'TOP SECRET DATA', x: 72, y: 700 },

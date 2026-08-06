@@ -10,7 +10,7 @@
     <!-- Always-visible essentials: open/save/print, history, and the default hand tool. -->
     <fieldset class="group" aria-label="Document">
       <button id="btn-sidebar" title="Toggle the page thumbnails sidebar" disabled>☰</button>
-      <button id="btn-open" title="Open a PDF file">📂 Open</button>
+      <button id="btn-open" title="Open a PDF or image file">📂 Open</button>
       <button id="btn-save" title="Save the edited PDF" disabled>💾 Save</button>
       <button id="btn-print" title="Print the document" disabled>🖨 Print</button>
       <button id="btn-undo" title="Undo last change" disabled>↩</button>
@@ -104,8 +104,8 @@
       <div id="pages"></div>
       <div id="empty-state">
         <h1>PDF Editor</h1>
-        <p>Open a PDF to start editing, or navigate to any PDF and it will open here automatically.</p>
-        <button id="btn-open-empty">📂 Open a PDF…</button>
+        <p>Open a PDF or an image to start editing, or navigate to any PDF and it will open here automatically.</p>
+        <button id="btn-open-empty">📂 Open a PDF or image…</button>
         <p id="host-status" class="muted"></p>
       </div>
     </div>
@@ -350,7 +350,9 @@
   </dialog>
 
   <dialog id="modal"></dialog>
-  <input id="file-input" type="file" accept="application/pdf" aria-label="Open PDF file" hidden />
+  <input id="file-input" type="file"
+    accept="application/pdf,image/png,image/jpeg,image/gif,image/bmp,image/tiff,image/webp"
+    aria-label="Open a PDF or image file" hidden />
   <input id="merge-input" type="file" multiple hidden aria-label="Files to merge"
     accept="application/pdf,.pdf,image/png,image/jpeg,image/*,.docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
   <input id="pfx-input" type="file" accept=".p12,.pfx" aria-label="Certificate file (.p12 or .pfx)" hidden />

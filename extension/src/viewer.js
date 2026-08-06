@@ -2538,7 +2538,15 @@ async function findReplace() {
 
 // ------------------------------------------------------------ open / save
 
-async function openFromBytes(bytes, name) {
+/** Classifies a file as pdf/image/docx by name extension (used when no MIME type is available). */
+function kindForName(name) {
+  const n = (name || '').toLowerCase();
+  if (/\.(png|jpe?g|gif|bmp|tiff?|webp)$/.test(n)) return 'image';
+  if (/\.docx?$/.test(n)) return 'docx';
+  return 'pdf';
+}
+
+async function openFromBytes(bytes, name, kind) {
   try {
     state.history = [];
     state.future = [];
@@ -2547,10 +2555,23 @@ async function openFromBytes(bytes, name) {
     state.keepActiveContent = false; // re-arm the strip-on-save default for each new document
     state.keepLinks = false;
     state.urlVerdicts = [];
-    activity.add('info', 'opening document', `${name} (${bytes.length} bytes)`);
-    await loadDocument(bytes, name);
-    activity.add('info', 'document opened', `${name} — ${state.info.pageCount} page(s)`);
-    toast(`Opened ${name}.`);
+
+    // #26: an image (or Word doc) is opened by first converting it to a PDF page in the host, so it
+    // can be edited, OCR'd and merged like any other document. The working name becomes <name>.pdf.
+    let workingName = name;
+    const fileKind = kind ?? kindForName(name);
+    if (fileKind === 'image' || fileKind === 'docx') {
+      activity.add('info', 'importing', `${name} (${fileKind})`);
+      setStatus(`Importing ${fileKind === 'image' ? 'image' : 'document'}…`, true);
+      const res = await host.call('import', { data: bytesToBase64(bytes), kind: fileKind });
+      bytes = base64ToBytes(res.pdf);
+      workingName = name.replace(/\.[^.]+$/, '') + '.pdf';
+    }
+
+    activity.add('info', 'opening document', `${workingName} (${bytes.length} bytes)`);
+    await loadDocument(bytes, workingName);
+    activity.add('info', 'document opened', `${workingName} — ${state.info.pageCount} page(s)`);
+    toast(`Opened ${workingName}.`);
   } catch (e) {
     fail(e);
   }
@@ -2560,7 +2581,8 @@ async function openFilePicker() {
   $('file-input').onchange = async () => {
     const file = $('file-input').files[0];
     $('file-input').value = '';
-    if (file) await openFromBytes(new Uint8Array(await file.arrayBuffer()), file.name);
+    // Prefer the browser-supplied MIME type (mergeKind) and fall back to the name extension.
+    if (file) await openFromBytes(new Uint8Array(await file.arrayBuffer()), file.name, mergeKind(file));
   };
   $('file-input').click();
 }

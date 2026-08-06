@@ -10,10 +10,11 @@ so your documents never leave your machine.
 | Feature | Notes |
 | --- | --- |
 | ✏ **Edit existing text** | Drag a box around text, edit it in place. The original text operators are removed from the file and the new text is stamped into the same region. Includes document-wide find & replace. |
-| ⬛ **Redaction** | Draw boxes over anything. A **preview window** shows the result before you commit. Applying **permanently removes** the content underneath (text operators, image pixels, annotations) — not just covers it — then paints an opaque black box. |
+| ⬛ **Redaction** | Draw boxes over anything. A **preview window** shows the result before you commit. Applying **permanently removes** the content underneath (text operators, image pixels, annotations) — not just covers it — then paints an opaque black box. An **auditable report** afterwards lists what was removed per page (text runs, images, annotations) and flags any JavaScript or metadata that redaction leaves behind. |
 | 💾 **Save changes** | Save the edited document via the file picker or the downloads bar. Undo history while editing. |
 | 🧭 **Sits on top of browser PDF viewing** | Navigating to a `.pdf` opens the editor automatically (toggleable). Embedded PDF viewers on web pages get an “Edit in PDF Editor” overlay button, plus a toolbar button and right-click menu. Adobe sites and viewers are always left alone. |
 | 🔒 **Password protection** | AES-256 encryption with user/owner passwords; open, edit, and decrypt protected files. |
+| 🖼 **Open images** | Open a PNG/JPEG/etc. directly — it becomes a one-page PDF you can edit, OCR and merge like any document. |
 | ➕ **Merge & arrange** | Append PDFs, images, or Word documents; a **Merge & arrange** dialog lets you set the combine order (or drop files) before merging. Images are laid onto standard A4 pages. |
 | 🗂 **Organize pages** | Reorder pages by drag or ▲/▼ and delete the ones you don't need. |
 | 🗒 **Fillable forms** | Insert text, multi-line, checkbox, dropdown (choice), and JavaScript **button** fields others can fill in, and fill/flatten existing AcroForm fields. |
@@ -22,7 +23,9 @@ so your documents never leave your machine.
 | 🖱 **Right-click menu** | Context actions: on selected text — Edit, Redact, Highlight, Copy, Open link; on blank page — Make searchable (OCR), Show source code, Save, Print, Zoom, Undo/Redo. |
 | ⚙ **Interactive JavaScript** | Add document-level scripts in a small code editor for form calculations/validation (runs in Acrobat/Chrome, never inside the viewer). |
 | 🧹 **Remove hidden information** | Scan for and strip metadata, embedded attachments, scripts/actions, comments, bookmarks, and hidden layers before sharing. |
-| 🔀 **Compare versions** | Word-level diff against another version, with a per-page summary of added and removed text. |
+| 🔀 **Compare versions** | Word-level diff against another version, with a per-page summary of added and removed text. Click a changed page to **jump** to it, or open a rendered **visual (pixel) diff** — added content in red, removed in blue — which catches changes text extraction misses (moved images, scans, spacing). |
+| 💧 **Watermark** | Stamp text (e.g. *CONFIDENTIAL*) diagonally across every page, with colour, opacity and rotation. Baked into the page content, not a removable annotation or layer. |
+| 🔢 **Bates numbering** | Stamp sequential, zero-padded identifiers (e.g. `ACME000001`) into a page corner — prefix, start number, digit count, suffix and position all configurable. |
 | 🔎 **OCR** | Turn a scanned document into searchable, selectable text. Requires Tesseract — see [Optional external tools](#optional-external-tools). |
 | 🔒 **Password protection** | AES-256 encryption with user/owner passwords; open, edit, and decrypt protected files. |
 | 🖋 **Electronic signatures** | Draw a signature on a pad (or upload an image) and place it anywhere; or apply a cryptographic **digital signature** from a PKCS#12 certificate — the editor can also generate a self-signed certificate for you. Signature validity is verified and shown in the status bar. |

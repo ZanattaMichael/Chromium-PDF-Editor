@@ -85,6 +85,7 @@ public static class MessageProcessor
         "encrypt" => EncryptAction(p),
         "decrypt" => DecryptAction(p),
         "watermark" => WatermarkAction(p),
+        "bates" => BatesAction(p),
         "sign-image" => SignImage(p),
         "sign-digital" => SignDigital(p),
         "signatures" => Signatures(p),
@@ -518,6 +519,21 @@ public static class MessageProcessor
             p["fontSize"]?.GetValue<float>(),
             pages, Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object BatesAction(JsonObject p)
+    {
+        var pages = p["pages"]?.AsArray().Select(n => n!.GetValue<int>()).ToList();
+        var result = BatesTool.AddBatesNumbers(Pdf(p),
+            p["prefix"]?.GetValue<string>(),
+            p["suffix"]?.GetValue<string>(),
+            p["start"]?.GetValue<int>() ?? 1,
+            p["digits"]?.GetValue<int>() ?? 6,
+            BatesTool.ParseCorner(p["position"]?.GetValue<string>()),
+            p["fontSize"]?.GetValue<float>() ?? 10f,
+            p[ColorKey]?.GetValue<string>(),
+            pages, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), first = result.FirstLabel, last = result.LastLabel };
     }
 
     private static object SignImage(JsonObject p) => new

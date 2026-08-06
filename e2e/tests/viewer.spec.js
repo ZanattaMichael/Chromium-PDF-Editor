@@ -2412,6 +2412,27 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('bates numbering: stamps a sequential number in the bottom-right corner (#27)', async () => {
+    const file = fixture('bates.pdf', [[{ text: 'body copy', x: 72, y: 400 }]]);
+    const page = await openViewerWith(file);
+
+    // Bottom-right corner band is blank before numbering.
+    const corner = { x: 470, y: 20, width: 110, height: 22 };
+    expect(await inkFraction(page, corner)).toBe(0);
+
+    await ui(page, '#btn-bates');
+    const dialog = page.locator('dialog#modal');
+    await dialog.locator('input').nth(0).fill('ACME');   // prefix
+    await dialog.locator('input').nth(1).fill('1');       // start
+    await dialog.locator('input').nth(2).fill('6');       // digits
+    await dialog.locator('select').selectOption('bottom-right');
+    await dialog.getByRole('button', { name: 'Apply' }).click();
+
+    await expect(page.locator('#status')).toContainText('ACME000001');
+    expect(await inkFraction(page, corner)).toBeGreaterThan(0);
+    await page.close();
+  });
+
   test('drawn signature is placed on the page', async () => {
     // Keep the signature area in the upper part of the page: the drag helper works in
     // viewport coordinates, and A4 at 100% zoom extends below the fold.

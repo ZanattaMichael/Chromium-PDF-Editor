@@ -869,7 +869,7 @@ function updateChrome() {
   for (const id of ['btn-save', 'btn-print', 'btn-sidebar', 'tool-text', 'tool-draw',
     'tool-highlight', 'tool-edit', 'tool-move', 'tool-redact', 'tool-sign',
     'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-organize', 'btn-js', 'btn-sanitize', 'btn-ocr',
-    'btn-find', 'btn-merge', 'btn-watermark', 'btn-protect', 'btn-digital',
+    'btn-find', 'btn-merge', 'btn-watermark', 'btn-bates', 'btn-protect', 'btn-digital',
     'menu-read-trigger', 'menu-edit-trigger', 'btn-compare',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
     $(id).disabled = !loaded;
@@ -1352,10 +1352,23 @@ function promptDialog(title, fields, confirmLabel = 'OK') {
     for (const field of fields) {
       const label = document.createElement('label');
       label.textContent = field.label;
-      const input = document.createElement('input');
-      input.type = field.type ?? 'text';
-      input.value = field.value ?? '';
-      if (field.placeholder) input.placeholder = field.placeholder;
+      let input;
+      if (field.type === 'select') {
+        // Options are {value, label} pairs; the option text is set via textContent (never HTML).
+        input = document.createElement('select');
+        for (const opt of field.options ?? []) {
+          const option = document.createElement('option');
+          option.value = opt.value;
+          option.textContent = opt.label;
+          input.appendChild(option);
+        }
+        if (field.value != null) input.value = field.value;
+      } else {
+        input = document.createElement('input');
+        input.type = field.type ?? 'text';
+        input.value = field.value ?? '';
+        if (field.placeholder) input.placeholder = field.placeholder;
+      }
       label.appendChild(input);
       modal.appendChild(label);
       inputs[field.id] = input;
@@ -2383,6 +2396,47 @@ async function addWatermark() {
       pdfPassword: state.password,
     });
     await applyResult(result.pdf, 'Watermark added.');
+  } catch (e) {
+    fail(e);
+  }
+}
+
+/**
+ * #27: stamps sequential Bates numbers (prefix + zero-padded counter + suffix) into a corner of
+ * each page. Like the watermark, the number is baked into the page content by the host.
+ */
+async function addBates() {
+  if (!state.pdf) return;
+  const value = await promptDialog('Bates numbering', [
+    { id: 'prefix', label: 'Prefix', placeholder: 'ACME' },
+    { id: 'start', label: 'Start at', type: 'number', value: '1' },
+    { id: 'digits', label: 'Digits (zero-padded)', type: 'number', value: '6' },
+    { id: 'suffix', label: 'Suffix (optional)', placeholder: '' },
+    { id: 'position', label: 'Position', type: 'select', value: 'bottom-right', options: [
+      { value: 'bottom-right', label: 'Bottom right' },
+      { value: 'bottom-center', label: 'Bottom centre' },
+      { value: 'bottom-left', label: 'Bottom left' },
+      { value: 'top-right', label: 'Top right' },
+      { value: 'top-center', label: 'Top centre' },
+      { value: 'top-left', label: 'Top left' },
+    ] },
+  ], 'Apply');
+  if (!value) return;
+
+  const start = Number.parseInt(value.start, 10);
+  const digits = Number.parseInt(value.digits, 10);
+  try {
+    setStatus('Adding Bates numbers…', true);
+    const result = await host.call('bates', {
+      pdf: state.pdfB64,
+      prefix: value.prefix,
+      suffix: value.suffix,
+      start: Number.isFinite(start) && start >= 0 ? start : 1,
+      digits: Number.isFinite(digits) ? Math.min(12, Math.max(1, digits)) : 6,
+      position: value.position,
+      pdfPassword: state.password,
+    });
+    await applyResult(result.pdf, `Bates numbers added (${result.first} – ${result.last}).`);
   } catch (e) {
     fail(e);
   }
@@ -3804,6 +3858,7 @@ function wire() {
   $('btn-protect').addEventListener('click', protect);
   $('btn-decrypt').addEventListener('click', removeEncryption);
   $('btn-watermark').addEventListener('click', addWatermark);
+  $('btn-bates').addEventListener('click', addBates);
   $('btn-digital').addEventListener('click', digitallySign);
 
   $('btn-prev').addEventListener('click', () => goToPage(state.page - 1));

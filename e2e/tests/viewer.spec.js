@@ -2342,6 +2342,34 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('compare versions: visual diff renders a pixel-diff image for a page (#46/#47)', async () => {
+    const current = fixture('vdiff-new.pdf', [[{ text: 'Amount Due 750 dollars', x: 72, y: 700 }]]);
+    const older = fixture('vdiff-old.pdf', [[{ text: 'Amount Due 500 dollars', x: 72, y: 700 }]]);
+    const page = await openViewerWith(current);
+
+    const chooser = page.waitForEvent('filechooser');
+    await ui(page, '#btn-compare');
+    await (await chooser).setFiles(older);
+    await expect(page.locator('#panel-compare')).toBeVisible();
+
+    // The changed page carries a "Visual diff" button; clicking it renders the pixel diff modal.
+    await page.locator('#compare-list .compare-visual').first().click();
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Visual diff');
+    await expect(dialog).toContainText('% of pixels');
+    await expect(dialog.locator('img.visual-diff-img')).toHaveAttribute('src', /^data:image\/png;base64,/);
+
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await expect(dialog).toBeHidden();
+
+    // The standalone page picker works too (for pages the text diff didn't flag).
+    await page.locator('.compare-visual-row .compare-visual-page').fill('1');
+    await page.locator('.compare-visual-row button', { hasText: 'Show' }).click();
+    await expect(dialog.locator('img.visual-diff-img')).toHaveAttribute('src', /^data:image\/png;base64,/);
+    await page.close();
+  });
+
   test('compare versions: identical documents report no differences', async () => {
     const same = fixture('compare-same.pdf', [[{ text: 'Unchanged content here', x: 72, y: 700 }]]);
     const page = await openViewerWith(same);

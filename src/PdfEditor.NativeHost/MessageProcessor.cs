@@ -69,6 +69,7 @@ public static class MessageProcessor
         "inspect-hidden" => InspectHiddenAction(p),
         "sanitize" => SanitizeAction(p),
         "compare" => CompareAction(p),
+        "visual-diff" => VisualDiffAction(p),
         "ocr-available" => new { available = OcrTool.CanOcr },
         "ocr-text" => OcrTextAction(p),
         "ocr-searchable" => OcrSearchableAction(p),
@@ -345,6 +346,23 @@ public static class MessageProcessor
             {
                 page = pg.Page, added = pg.Added, removed = pg.Removed
             })
+        };
+    }
+
+    private static object VisualDiffAction(JsonObject p)
+    {
+        // Same orientation as compare: 'other' is the previous version, the loaded document is newer.
+        byte[] other = Convert.FromBase64String(p["other"]?.GetValue<string>()
+            ?? throw new InvalidDataException("Missing 'other' document."));
+        string? otherPassword = p["otherPassword"]?.GetValue<string>();
+        int page = p["page"]!.GetValue<int>();
+        int dpi = p["dpi"]?.GetValue<int>() ?? 120;
+        var diff = VisualDiff.DiffPage(other, Pdf(p), page, dpi, otherPassword, Password(p));
+        return new
+        {
+            page = diff.Page,
+            changedFraction = diff.ChangedFraction,
+            png = Convert.ToBase64String(diff.Png),
         };
     }
 

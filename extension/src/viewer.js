@@ -65,6 +65,7 @@ const state = {
   // or a figure, so it stays available rather than being inferred.
   highlightMode: 'sweep',
   safety: null,         // { hasActiveContent, javaScriptCount, urlCount, samples }
+  compareOther: null,   // { b64, name } — the last document compared against, kept for visual diff
   keepActiveContent: false, // false = strip JavaScript on save until the user opts in
   keepLinks: false,     // false = strip link URLs on save until the user enables them
   links: [],            // extracted { page, url } — the side panel's list
@@ -2555,6 +2556,7 @@ async function openFromBytes(bytes, name, kind) {
     state.keepActiveContent = false; // re-arm the strip-on-save default for each new document
     state.keepLinks = false;
     state.urlVerdicts = [];
+    state.compareOther = null; // a new document invalidates any prior comparison
 
     // #26: an image (or Word doc) is opened by first converting it to a PDF page in the host, so it
     // can be edited, OCR'd and merged like any other document. The working name becomes <name>.pdf.
@@ -3112,6 +3114,8 @@ function pickCompareFile() {
         pdf: state.pdfB64, other, pdfPassword: state.password,
       });
       setStatus('');
+      // Keep the compared bytes so the visual (pixel) diff can be requested per page (#46).
+      state.compareOther = { b64: other, name: file.name };
       renderCompare(report, file.name);
     } catch (e) {
       fail(e);
@@ -3149,9 +3153,11 @@ function renderCompare(report, otherName) {
     li.className = 'organize-item compare-page';
     const label = document.createElement('div');
     label.className = 'organize-label';
-    const num = document.createElement('span');
-    num.className = 'compare-page-num';
+    const num = document.createElement('button');
+    num.className = 'compare-page-num compare-jump';
     num.textContent = `Page ${pg.page}`;
+    num.title = 'Jump to this page';
+    num.addEventListener('click', () => goToPage(pg.page)); // #47: navigate to the changed page
     const words = document.createElement('div');
     words.className = 'compare-words';
     for (const w of pg.removed ?? []) {
@@ -3167,8 +3173,71 @@ function renderCompare(report, otherName) {
       words.appendChild(s);
     }
     label.append(num, words);
+    const vbtn = document.createElement('button');
+    vbtn.className = 'compare-visual';
+    vbtn.textContent = '🖼 Visual diff';
+    vbtn.title = 'Show a rendered pixel diff of this page';
+    vbtn.addEventListener('click', () => showVisualDiff(pg.page));
+    label.appendChild(vbtn);
     li.appendChild(label);
     list.appendChild(li);
+  }
+
+  // A visual diff can be run on ANY page, not only the text-changed ones — that is the point of a
+  // pixel diff: it catches changes text extraction misses (#46). Offer a page picker for that.
+  const vrow = document.createElement('div');
+  vrow.className = 'compare-visual-row';
+  vrow.append('Visual diff — page ');
+  const pageInput = document.createElement('input');
+  pageInput.type = 'number';
+  pageInput.min = '1';
+  pageInput.value = String(state.page);
+  pageInput.className = 'compare-visual-page';
+  pageInput.setAttribute('aria-label', 'Page to visually diff');
+  const showBtn = document.createElement('button');
+  showBtn.textContent = 'Show';
+  showBtn.addEventListener('click', () => showVisualDiff(Number.parseInt(pageInput.value, 10) || 1));
+  vrow.append(pageInput, showBtn);
+  summary.appendChild(vrow);
+}
+
+/** #46: fetches and shows the rendered pixel diff for one page against the compared document. */
+async function showVisualDiff(page) {
+  if (!state.compareOther) { toast('Compare a document first.'); return; }
+  try {
+    setStatus('Rendering visual diff…', true);
+    const res = await host.call('visual-diff', {
+      pdf: state.pdfB64,
+      other: state.compareOther.b64,
+      page,
+      pdfPassword: state.password,
+    });
+    setStatus('');
+
+    modal.innerHTML = '<h2>Visual diff</h2>';
+    const legend = document.createElement('p');
+    legend.className = 'muted';
+    legend.textContent = `Page ${res.page} · ${(res.changedFraction * 100).toFixed(1)}% of pixels `
+      + 'changed. Red = added in this version, blue = removed, grey = unchanged.';
+    modal.appendChild(legend);
+
+    const img = document.createElement('img');
+    img.className = 'visual-diff-img';
+    img.alt = `Visual diff of page ${res.page}`;
+    img.src = `data:image/png;base64,${res.png}`;
+    modal.appendChild(img);
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    const close = document.createElement('button');
+    close.textContent = 'Close';
+    actions.appendChild(close);
+    modal.appendChild(actions);
+    modal.showModal();
+    close.addEventListener('click', () => modal.close());
+    close.focus();
+  } catch (e) {
+    fail(e);
   }
 }
 

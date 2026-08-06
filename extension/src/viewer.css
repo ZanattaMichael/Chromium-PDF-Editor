@@ -630,6 +630,13 @@ textarea.code-editor:focus { outline: 1px solid var(--accent-2); }
 .report-table .report-total th { border-top: 2px solid var(--border, #ccc); border-bottom: none; }
 .report-note { color: var(--warn, #b26a00); margin: 6px 0 0; }
 
+/* Visual diff (#46/#47). */
+.compare-jump { background: none; border: none; padding: 0; color: var(--accent-2, #1a73e8); cursor: pointer; text-decoration: underline; font: inherit; }
+.compare-visual { margin-top: 4px; font-size: 12px; }
+.compare-visual-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.compare-visual-page { width: 60px; }
+.visual-diff-img { display: block; max-width: 100%; margin: 8px auto 0; border: 1px solid var(--border, #ccc); background: #fff; }
+
 .tabs { display: flex; gap: 4px; margin-bottom: 8px; }
 .tab.active { background: var(--accent-2); color: #fff; }
 

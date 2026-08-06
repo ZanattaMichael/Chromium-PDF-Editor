@@ -10,7 +10,7 @@ public class BatesToolTests
     {
         byte[] pdf = TestPdfs.MultiPage(3);
 
-        var result = BatesTool.AddBatesNumbers(pdf, prefix: "ACME", start: 1, digits: 6);
+        var result = BatesTool.AddBatesNumbers(pdf, new BatesOptions(Prefix: "ACME", Start: 1, Digits: 6));
 
         Assert.Equal("ACME000001", result.FirstLabel);
         Assert.Equal("ACME000003", result.LastLabel);
@@ -24,7 +24,8 @@ public class BatesToolTests
     {
         byte[] pdf = TestPdfs.MultiPage(2);
 
-        var result = BatesTool.AddBatesNumbers(pdf, prefix: "DOC", suffix: "-X", start: 100, digits: 4);
+        var result = BatesTool.AddBatesNumbers(pdf,
+            new BatesOptions(Prefix: "DOC", Suffix: "-X", Start: 100, Digits: 4));
 
         Assert.Equal("DOC0100-X", result.FirstLabel);
         Assert.Equal("DOC0101-X", result.LastLabel);
@@ -38,7 +39,7 @@ public class BatesToolTests
         byte[] pdf = TestPdfs.MultiPage(3);
 
         // Only pages 1 and 3 are stamped; the counter increments per stamped page, not per document page.
-        var result = BatesTool.AddBatesNumbers(pdf, start: 1, digits: 3, pages: new[] { 1, 3 });
+        var result = BatesTool.AddBatesNumbers(pdf, new BatesOptions(Start: 1, Digits: 3, Pages: new[] { 1, 3 }));
 
         Assert.Contains("001", TestPdfAssert.ExtractText(result.Pdf, 1));
         Assert.DoesNotContain("002", TestPdfAssert.ExtractText(result.Pdf, 2));
@@ -50,8 +51,8 @@ public class BatesToolTests
     {
         byte[] pdf = TestPdfs.WithText(("body", 72, 400, 12)); // A4, text mid-page
 
-        var result = BatesTool.AddBatesNumbers(pdf, prefix: "N", start: 1, digits: 6,
-            position: BatesTool.Corner.BottomRight);
+        var result = BatesTool.AddBatesNumbers(pdf,
+            new BatesOptions(Prefix: "N", Start: 1, Digits: 6, Position: BatesTool.Corner.BottomRight));
 
         // The bottom-right corner band (inset ~24pt) gains ink; the bottom-left stays blank.
         Assert.True(TestPdfAssert.InkFraction(result.Pdf, 1, 470, 20, 585, 40, 200) > 0,
@@ -64,7 +65,7 @@ public class BatesToolTests
     {
         byte[] pdf = TestPdfs.WithText(("x", 72, 700, 12));
         Assert.Throws<System.ArgumentOutOfRangeException>(() =>
-            BatesTool.AddBatesNumbers(pdf, start: -1));
+            BatesTool.AddBatesNumbers(pdf, new BatesOptions(Start: -1)));
     }
 
     [Theory]

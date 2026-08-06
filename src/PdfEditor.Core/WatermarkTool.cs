@@ -18,30 +18,26 @@ public static class WatermarkTool
     private static readonly DeviceRgb DefaultColour = new(128, 128, 128);
 
     /// <summary>
-    /// Draws <paramref name="text"/> centred on and rotated across each target page.
+    /// Draws <paramref name="text"/> centred on and rotated across each target page, styled per
+    /// <paramref name="options"/>.
     /// </summary>
-    /// <param name="opacity">Fill opacity 0–1 (clamped to 0.05–1). Lower is fainter.</param>
-    /// <param name="rotationDegrees">Rotation of the text, anticlockwise. 45° is the usual diagonal.</param>
-    /// <param name="fontSize">Explicit point size, or null to size the text to ~80% of the page diagonal.</param>
-    /// <param name="pages">1-based page numbers to stamp, or null/empty for every page.</param>
     public static EditResult AddTextWatermark(byte[] pdf, string text,
-        string? fontFamily = null, bool bold = false, bool italic = false,
-        string? colorHex = null, float opacity = 0.3f, float rotationDegrees = 45f,
-        float? fontSize = null, IReadOnlyList<int>? pages = null, string? password = null)
+        WatermarkOptions? options = null, string? password = null)
     {
         if (string.IsNullOrWhiteSpace(text))
             throw new ArgumentException("Watermark text is required.", nameof(text));
 
-        opacity = Math.Clamp(opacity, 0.05f, 1f);
-        var colour = (TextTools.ParseColor(colorHex) as DeviceRgb) ?? DefaultColour;
-        var font = PdfFontFactory.CreateFont(TextTools.ResolveFont(fontFamily, bold, italic));
-        double theta = rotationDegrees * Math.PI / 180.0;
+        var o = options ?? new WatermarkOptions();
+        float opacity = Math.Clamp(o.Opacity, 0.05f, 1f);
+        var colour = (TextTools.ParseColor(o.ColorHex) as DeviceRgb) ?? DefaultColour;
+        var font = PdfFontFactory.CreateFont(TextTools.ResolveFont(o.FontFamily, o.Bold, o.Italic));
+        double theta = o.RotationDegrees * Math.PI / 180.0;
         float cos = (float)Math.Cos(theta), sin = (float)Math.Sin(theta);
 
         using var output = new MemoryStream();
         using (var doc = PdfIo.Open(pdf, output, password))
         {
-            var target = NormalizePages(pages, doc.GetNumberOfPages());
+            var target = NormalizePages(o.Pages, doc.GetNumberOfPages());
             // One extended graphics state, shared across pages: it only carries the fill opacity.
             var gs = new PdfExtGState().SetFillOpacity(opacity);
 
@@ -52,7 +48,7 @@ public static class WatermarkTool
                 float cx = (box.GetLeft() + box.GetRight()) / 2f;
                 float cy = (box.GetBottom() + box.GetTop()) / 2f;
 
-                float fs = fontSize ?? FitFontSize(font, text, box);
+                float fs = o.FontSize ?? FitFontSize(font, text, box);
                 float halfW = font.GetWidth(text, fs) / 2f;
                 float halfH = fs * 0.35f; // roughly half a cap height, to centre the line vertically
 
@@ -94,3 +90,13 @@ public static class WatermarkTool
         return pages.Where(p => p >= 1 && p <= total).Distinct().OrderBy(p => p).ToList();
     }
 }
+
+/// <summary>Styling options for <see cref="WatermarkTool.AddTextWatermark"/>.</summary>
+/// <param name="Opacity">Fill opacity 0–1 (clamped to 0.05–1). Lower is fainter.</param>
+/// <param name="RotationDegrees">Rotation of the text, anticlockwise. 45° is the usual diagonal.</param>
+/// <param name="FontSize">Explicit point size, or null to size to ~80% of the page diagonal.</param>
+/// <param name="Pages">1-based page numbers to stamp, or null/empty for every page.</param>
+public sealed record WatermarkOptions(
+    string? FontFamily = null, bool Bold = false, bool Italic = false,
+    string? ColorHex = null, float Opacity = 0.3f, float RotationDegrees = 45f,
+    float? FontSize = null, IReadOnlyList<int>? Pages = null);

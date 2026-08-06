@@ -2421,7 +2421,7 @@ async function removeEncryption() {
       'This document is digitally signed. Removing encryption rewrites the file and breaks ' +
       'existing signatures — sign again afterwards. Type YES to continue.',
       [{ id: 'confirm', label: 'Confirmation' }], 'Continue');
-    if (!confirmed || confirmed.confirm !== 'YES') return;
+    if (confirmed?.confirm !== 'YES') return;
   }
   try {
     setStatus('Removing encryption…', true);
@@ -4086,8 +4086,10 @@ function closeAllMenus() {
 /** Condenses the (long) user-agent string to the browser + version, for bug reports. */
 function browserSummary() {
   const ua = navigator.userAgent || '';
-  const m = ua.match(/(Edg|Chrome|Chromium)\/([\d.]+)/);
-  return m ? `${m[1] === 'Edg' ? 'Edge' : m[1]} ${m[2]}` : (ua || 'unknown');
+  const m = /(Edg|Chrome|Chromium)\/([\d.]+)/.exec(ua);
+  if (!m) return ua || 'unknown';
+  const name = m[1] === 'Edg' ? 'Edge' : m[1];
+  return `${name} ${m[2]}`;
 }
 
 /** #103: shows version, build commit and build time, plus the browser, in a modal. */

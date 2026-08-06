@@ -59,6 +59,17 @@ public class VisualDiffTests
         Assert.True(changed > 0, "a page present on only one side should be all change");
     }
 
+    [Fact]
+    public void DiffPage_PageAbsentFromBothSides_IsBlankWithNoChange()
+    {
+        byte[] onePage = TestPdfs.WithText(("only page", 72, 700, 14));
+
+        var diff = VisualDiff.DiffPage(onePage, onePage, page: 5);
+
+        Assert.Equal(0d, diff.ChangedFraction);
+        Assert.NotEmpty(diff.Png); // a valid (blank) PNG, not an empty array
+    }
+
     private static bool HasColourNear(SKBitmap bmp, int r, int g, int b, int tol = 40)
     {
         for (int y = 0; y < bmp.Height; y += 2)

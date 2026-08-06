@@ -26,43 +26,39 @@ public static class BatesTool
     private const float Margin = 24f;
 
     /// <summary>
-    /// Adds a Bates number to each target page: <paramref name="prefix"/> + the page's index
-    /// (starting at <paramref name="start"/>, zero-padded to <paramref name="digits"/>) +
-    /// <paramref name="suffix"/>.
+    /// Adds a Bates number to each target page: prefix + the page's index (starting at
+    /// <c>Start</c>, zero-padded to <c>Digits</c>) + suffix, per <paramref name="options"/>.
     /// </summary>
-    /// <param name="start">Number given to the first stamped page.</param>
-    /// <param name="digits">Minimum digit count; the number is left-padded with zeros to reach it.</param>
-    /// <param name="pages">1-based pages to stamp, or null/empty for every page.</param>
     /// <returns>The edited document, plus the first and last labels applied.</returns>
-    public static BatesResult AddBatesNumbers(byte[] pdf, string? prefix = null, string? suffix = null,
-        int start = 1, int digits = 6, Corner position = Corner.BottomRight,
-        float fontSize = 10f, string? colorHex = null, IReadOnlyList<int>? pages = null,
-        string? password = null)
+    public static BatesResult AddBatesNumbers(byte[] pdf, BatesOptions? options = null, string? password = null)
     {
-        if (start < 0) throw new ArgumentOutOfRangeException(nameof(start), "Start must be zero or greater.");
-        digits = Math.Clamp(digits, 1, 12);
-        fontSize = Math.Clamp(fontSize, 4f, 72f);
-        prefix ??= "";
-        suffix ??= "";
-        var colour = (TextTools.ParseColor(colorHex) as DeviceRgb) ?? DefaultColour;
+        var o = options ?? new BatesOptions();
+        if (o.Start < 0) throw new ArgumentOutOfRangeException(nameof(options), "Start must be zero or greater.");
+        int digits = Math.Clamp(o.Digits, 1, 12);
+        float fontSize = Math.Clamp(o.FontSize, 4f, 72f);
+        string prefix = o.Prefix ?? "";
+        string suffix = o.Suffix ?? "";
+        var colour = (TextTools.ParseColor(o.ColorHex) as DeviceRgb) ?? DefaultColour;
         var font = PdfFontFactory.CreateFont(iText.IO.Font.Constants.StandardFonts.HELVETICA);
 
         string? firstLabel = null, lastLabel = null;
         using var output = new MemoryStream();
         using (var doc = PdfIo.Open(pdf, output, password))
         {
-            var target = NormalizePages(pages, doc.GetNumberOfPages());
+            var target = NormalizePages(o.Pages, doc.GetNumberOfPages());
             for (int i = 0; i < target.Count; i++)
             {
                 int pageNum = target[i];
-                string label = prefix + (start + i).ToString().PadLeft(digits, '0') + suffix;
+                // Invariant culture: a Bates number is an identifier, not locale-formatted text.
+                string number = (o.Start + i).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                string label = prefix + number.PadLeft(digits, '0') + suffix;
                 firstLabel ??= label;
                 lastLabel = label;
 
                 var page = doc.GetPage(pageNum);
                 var box = page.GetPageSize();
                 float textWidth = font.GetWidth(label, fontSize);
-                var (x, y) = Anchor(position, box, textWidth, fontSize);
+                var (x, y) = Anchor(o.Position, box, textWidth, fontSize);
 
                 var canvas = PdfContentGuard.InDefaultUserSpace(page, doc);
                 canvas.BeginText().SetFontAndSize(font, fontSize).SetFillColor(colour)
@@ -112,6 +108,15 @@ public static class BatesTool
         return pages.Where(p => p >= 1 && p <= total).Distinct().OrderBy(p => p).ToList();
     }
 }
+
+/// <summary>Options for <see cref="BatesTool.AddBatesNumbers"/>.</summary>
+/// <param name="Start">Number given to the first stamped page.</param>
+/// <param name="Digits">Minimum digit count; the number is left-padded with zeros to reach it.</param>
+/// <param name="Pages">1-based pages to stamp, or null/empty for every page.</param>
+public sealed record BatesOptions(
+    string? Prefix = null, string? Suffix = null, int Start = 1, int Digits = 6,
+    BatesTool.Corner Position = BatesTool.Corner.BottomRight, float FontSize = 10f,
+    string? ColorHex = null, IReadOnlyList<int>? Pages = null);
 
 /// <summary>Result of a Bates run: the edited PDF and the first/last labels stamped.</summary>
 public sealed record BatesResult(byte[] Pdf, string FirstLabel, string LastLabel);

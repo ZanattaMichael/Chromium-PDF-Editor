@@ -21,7 +21,7 @@ public class WatermarkToolTests
     {
         byte[] pdf = TestPdfs.MultiPage(3);
 
-        var result = WatermarkTool.AddTextWatermark(pdf, "DRAFT", pages: new[] { 2 });
+        var result = WatermarkTool.AddTextWatermark(pdf, "DRAFT", new WatermarkOptions(Pages: new[] { 2 }));
 
         Assert.DoesNotContain("DRAFT", TestPdfAssert.ExtractText(result.Pdf, 1));
         Assert.Contains("DRAFT", TestPdfAssert.ExtractText(result.Pdf, 2));
@@ -37,7 +37,8 @@ public class WatermarkToolTests
         byte[] pdf = TestPdfs.WithText(("body", 72, 60, 12));
         Assert.Equal(0d, TestPdfAssert.InkFraction(pdf, 1, 120, 350, 470, 490, 150), 3);
 
-        var result = WatermarkTool.AddTextWatermark(pdf, "SECRET", colorHex: "#000000", opacity: 1f);
+        var result = WatermarkTool.AddTextWatermark(pdf, "SECRET",
+            new WatermarkOptions(ColorHex: "#000000", Opacity: 1f));
 
         Assert.True(TestPdfAssert.InkFraction(result.Pdf, 1, 120, 350, 470, 490, 150) > 0,
             "the watermark should add visible ink to the centre of the page");
@@ -55,7 +56,7 @@ public class WatermarkToolTests
     {
         byte[] pdf = TestPdfs.MultiPage(2);
 
-        var result = WatermarkTool.AddTextWatermark(pdf, "NOPE", pages: new[] { 99 });
+        var result = WatermarkTool.AddTextWatermark(pdf, "NOPE", new WatermarkOptions(Pages: new[] { 99 }));
 
         Assert.DoesNotContain("NOPE", TestPdfAssert.ExtractText(result.Pdf, 1));
         Assert.DoesNotContain("NOPE", TestPdfAssert.ExtractText(result.Pdf, 2));

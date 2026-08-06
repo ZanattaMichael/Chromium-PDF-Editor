@@ -400,4 +400,83 @@ public class NewActionsTests
         Assert.Equal("yellow", verdict!["level"]!.GetValue<string>());
         Assert.Equal("heuristic", verdict["source"]!.GetValue<string>());
     }
+
+    [Fact]
+    public void Watermark_ReturnsStampedPdf()
+    {
+        var r = Handle("watermark", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage()),
+            text = "CONFIDENTIAL", color = "#808080", opacity = 0.3f, rotation = 45f,
+        });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+    }
+
+    [Fact]
+    public void Watermark_OnNamedPages_ReturnsPdf()
+    {
+        var r = Handle("watermark", new
+        {
+            pdf = TestPdf.Base64(TestPdf.ManyPages(3)),
+            text = "DRAFT", pages = new[] { 2 }, bold = true, italic = true, fontFamily = "times",
+        });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+    }
+
+    [Fact]
+    public void Bates_ReturnsPdfAndFirstLastLabels()
+    {
+        var r = Handle("bates", new
+        {
+            pdf = TestPdf.Base64(TestPdf.ManyPages(3)),
+            prefix = "ACME", start = 1, digits = 6, position = "bottom-right",
+        });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+        Assert.Equal("ACME000001", Result(r)["first"]!.GetValue<string>());
+        Assert.Equal("ACME000003", Result(r)["last"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void VisualDiff_ReturnsPngAndChangedFraction()
+    {
+        var r = Handle("visual-diff", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage("new text")),
+            other = TestPdf.Base64(TestPdf.OnePage("old text")),
+            page = 1,
+        });
+        Assert.True(Ok(r));
+        Assert.Equal(1, Result(r)["page"]!.GetValue<int>());
+        Assert.NotNull(Result(r)["png"]);
+        Assert.True(Result(r)["changedFraction"]!.GetValue<double>() >= 0);
+    }
+
+    [Fact]
+    public void Import_ConvertsAnImageToPdf()
+    {
+        // A minimal 16x16 PNG (see the extension's open-image e2e); import wraps it in a PDF page.
+        const string pngB64 =
+            "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGO4IyJCEmIY1TCqYfhqAAACcQQQFwFJQgAAAABJRU5ErkJggg==";
+        var r = Handle("import", new { data = pngB64, kind = "image" });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+    }
+
+    [Fact]
+    public void Redact_ReturnsAnAuditReport()
+    {
+        var r = Handle("redact", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage("secret text here")),
+            regions = new[] { new { page = 1, x = 60, y = 60, width = 200, height = 40 } },
+        });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+        var report = Result(r)["report"]!;
+        Assert.Equal(1, report["regions"]!.GetValue<int>());
+        Assert.NotNull(report["pages"]);
+    }
 }

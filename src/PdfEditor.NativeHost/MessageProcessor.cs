@@ -540,32 +540,31 @@ public static class MessageProcessor
 
     private static object WatermarkAction(JsonObject p)
     {
-        var pages = p["pages"]?.AsArray().Select(n => n!.GetValue<int>()).ToList();
-        var result = WatermarkTool.AddTextWatermark(Pdf(p),
-            p["text"]!.GetValue<string>(),
-            p["fontFamily"]?.GetValue<string>(),
-            p["bold"]?.GetValue<bool>() ?? false,
-            p["italic"]?.GetValue<bool>() ?? false,
-            p[ColorKey]?.GetValue<string>(),
-            p["opacity"]?.GetValue<float>() ?? 0.3f,
-            p["rotation"]?.GetValue<float>() ?? 45f,
-            p["fontSize"]?.GetValue<float>(),
-            pages, Password(p));
+        var options = new WatermarkOptions(
+            FontFamily: p["fontFamily"]?.GetValue<string>(),
+            Bold: p["bold"]?.GetValue<bool>() ?? false,
+            Italic: p["italic"]?.GetValue<bool>() ?? false,
+            ColorHex: p[ColorKey]?.GetValue<string>(),
+            Opacity: p["opacity"]?.GetValue<float>() ?? 0.3f,
+            RotationDegrees: p["rotation"]?.GetValue<float>() ?? 45f,
+            FontSize: p["fontSize"]?.GetValue<float>(),
+            Pages: p["pages"]?.AsArray().Select(n => n!.GetValue<int>()).ToList());
+        var result = WatermarkTool.AddTextWatermark(Pdf(p), p["text"]!.GetValue<string>(), options, Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
     }
 
     private static object BatesAction(JsonObject p)
     {
-        var pages = p["pages"]?.AsArray().Select(n => n!.GetValue<int>()).ToList();
-        var result = BatesTool.AddBatesNumbers(Pdf(p),
-            p["prefix"]?.GetValue<string>(),
-            p["suffix"]?.GetValue<string>(),
-            p["start"]?.GetValue<int>() ?? 1,
-            p["digits"]?.GetValue<int>() ?? 6,
-            BatesTool.ParseCorner(p["position"]?.GetValue<string>()),
-            p["fontSize"]?.GetValue<float>() ?? 10f,
-            p[ColorKey]?.GetValue<string>(),
-            pages, Password(p));
+        var options = new BatesOptions(
+            Prefix: p["prefix"]?.GetValue<string>(),
+            Suffix: p["suffix"]?.GetValue<string>(),
+            Start: p["start"]?.GetValue<int>() ?? 1,
+            Digits: p["digits"]?.GetValue<int>() ?? 6,
+            Position: BatesTool.ParseCorner(p["position"]?.GetValue<string>()),
+            FontSize: p["fontSize"]?.GetValue<float>() ?? 10f,
+            ColorHex: p[ColorKey]?.GetValue<string>(),
+            Pages: p["pages"]?.AsArray().Select(n => n!.GetValue<int>()).ToList());
+        var result = BatesTool.AddBatesNumbers(Pdf(p), options, Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), first = result.FirstLabel, last = result.LastLabel };
     }
 

@@ -209,16 +209,20 @@ public static class TextTools
         return new iText.Kernel.Colors.DeviceRgb((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
     }
 
-    /// <summary>Finds every occurrence of a phrase across the document.</summary>
-    public static IReadOnlyList<TextMatch> FindText(byte[] pdf, string phrase, string? password = null)
+    /// <summary>
+    /// Finds every occurrence of a phrase across the document, honouring the match mode and case
+    /// sensitivity in <paramref name="options"/> (default: case-insensitive, anywhere in a word).
+    /// </summary>
+    public static IReadOnlyList<TextMatch> FindText(byte[] pdf, string phrase, string? password = null,
+        SearchOptions? options = null)
     {
         if (string.IsNullOrEmpty(phrase)) return Array.Empty<TextMatch>();
+        string pattern = BuildSearchPattern(phrase, options ?? new SearchOptions());
         using var doc = PdfIo.OpenReadOnly(pdf, password);
         var matches = new List<TextMatch>();
         for (int p = 1; p <= doc.GetNumberOfPages(); p++)
         {
-            var strategy = new RegexBasedLocationExtractionStrategy(
-                System.Text.RegularExpressions.Regex.Escape(phrase));
+            var strategy = new RegexBasedLocationExtractionStrategy(pattern);
             int page = p;
             PdfIo.Guarded($"searching page {page}", () =>
             {
@@ -234,11 +238,27 @@ public static class TextTools
         return matches;
     }
 
+    /// <summary>Builds the regex for a search: escapes the phrase, applies the match mode and case flag.</summary>
+    internal static string BuildSearchPattern(string phrase, SearchOptions options)
+    {
+        string core = System.Text.RegularExpressions.Regex.Escape(phrase);
+        // \b is a word boundary: "starts with" anchors the left, "ends with" the right, "whole word" both.
+        string pattern = options.Mode switch
+        {
+            TextMatchMode.StartsWith => $@"\b{core}",
+            TextMatchMode.EndsWith => $@"{core}\b",
+            TextMatchMode.WholeWord => $@"\b{core}\b",
+            _ => core, // Contains (anywhere, including within a word)
+        };
+        return options.CaseSensitive ? pattern : "(?i)" + pattern;
+    }
+
     /// <summary>Replaces every occurrence of a phrase document-wide. Returns the count replaced.</summary>
     public static (EditResult Result, int Count) ReplaceAll(byte[] pdf, string phrase, string replacement,
         string? password = null)
     {
-        var matches = FindText(pdf, phrase, password);
+        // Find & replace stays an exact, case-sensitive substring match (its long-standing behaviour).
+        var matches = FindText(pdf, phrase, password, new SearchOptions(TextMatchMode.Contains, CaseSensitive: true));
         if (matches.Count == 0) return (EditResult.Of(pdf), 0);
 
         var warnings = new List<string>();
@@ -526,5 +546,35 @@ public static class TextTools
             }
         }
         return sb.ToString();
+    }
+}
+
+/// <summary>Where a phrase must sit relative to a word for a text search to match it.</summary>
+public enum TextMatchMode
+{
+    /// <summary>Anywhere, including within a word (the default).</summary>
+    Contains,
+    /// <summary>At the start of a word.</summary>
+    StartsWith,
+    /// <summary>At the end of a word.</summary>
+    EndsWith,
+    /// <summary>The whole word, bounded on both sides.</summary>
+    WholeWord,
+}
+
+/// <summary>How a text search matches. Defaults to case-insensitive, anywhere within a word.</summary>
+public sealed record SearchOptions(TextMatchMode Mode = TextMatchMode.Contains, bool CaseSensitive = false)
+{
+    /// <summary>Parses the wire values (any casing) to options; unknown mode falls back to Contains.</summary>
+    public static SearchOptions Parse(string? mode, bool caseSensitive)
+    {
+        var m = (mode ?? "").Replace("-", "").Replace("_", "").Trim().ToLowerInvariant() switch
+        {
+            "startswith" or "starts" or "prefix" => TextMatchMode.StartsWith,
+            "endswith" or "ends" or "suffix" => TextMatchMode.EndsWith,
+            "wholeword" or "word" or "exact" => TextMatchMode.WholeWord,
+            _ => TextMatchMode.Contains,
+        };
+        return new SearchOptions(m, caseSensitive);
     }
 }

@@ -497,6 +497,35 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('search & mark: match mode and case sensitivity control what is marked (#search)', async () => {
+    const file = fixture('search-modes.pdf', [[
+      { text: 'Assignment assign ASSIGN', x: 72, y: 700 },
+    ]]);
+    const page = await openViewerWith(file);
+    await ui(page, '#tool-redact');
+
+    // Default: case-insensitive, contains → "assign" matches inside "Assignment", "assign", "ASSIGN".
+    await page.fill('#redact-search-text', 'assign');
+    await page.click('#redact-search-btn');
+    await expect(page.locator('#redact-list li')).toHaveCount(3);
+    await page.click('#redact-clear');
+    await expect(page.locator('#redact-list li')).toHaveCount(0);
+
+    // Whole word → only the standalone "assign"/"ASSIGN" (still case-insensitive), not "Assignment".
+    await page.selectOption('#redact-match-mode', 'wholeWord');
+    await page.fill('#redact-search-text', 'assign');
+    await page.click('#redact-search-btn');
+    await expect(page.locator('#redact-list li')).toHaveCount(2);
+    await page.click('#redact-clear');
+
+    // Case sensitive whole word → only the exact-case "ASSIGN".
+    await page.check('#redact-case');
+    await page.fill('#redact-search-text', 'ASSIGN');
+    await page.click('#redact-search-btn');
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+    await page.close();
+  });
+
   test('search & mark: finds every occurrence of a phrase, marks boxes, redacts them', async () => {
     // Two copies of the secret word plus an unrelated line. Searching marks both copies as
     // redaction boxes; applying blacks out both spots and leaves the other line untouched.

@@ -502,7 +502,9 @@ public static class MessageProcessor
 
     private static object FindTextAction(JsonObject p)
     {
-        var matches = TextTools.FindText(Pdf(p), p["phrase"]?.GetValue<string>() ?? "", Password(p));
+        var options = SearchOptions.Parse(p["matchMode"]?.GetValue<string>(),
+            p["caseSensitive"]?.GetValue<bool>() ?? false);
+        var matches = TextTools.FindText(Pdf(p), p["phrase"]?.GetValue<string>() ?? "", Password(p), options);
         return new
         {
             matches = matches.Select(m => new

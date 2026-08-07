@@ -120,6 +120,15 @@
           <input id="redact-search-text" type="text" placeholder="Find text to redact…" aria-label="Text to redact" />
           <button id="redact-search-btn">🔍 Find &amp; mark</button>
         </div>
+        <div id="redact-search-opts">
+          <select id="redact-match-mode" aria-label="How to match the search text">
+            <option value="contains">Contains</option>
+            <option value="startsWith">Starts with</option>
+            <option value="endsWith">Ends with</option>
+            <option value="wholeWord">Whole word</option>
+          </select>
+          <label class="redact-opt"><input id="redact-case" type="checkbox" /> Case sensitive</label>
+        </div>
         <label id="redact-intensity-row" class="redact-mode"
           title="Higher settings merge adjacent boxes and widen them so the black box does not reveal how long the removed text was">
           <span>Privacy: <output id="redact-intensity-label">Exact</output></span>

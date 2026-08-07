@@ -432,6 +432,10 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
 .panel-section h2 { margin: 0 0 8px; font-size: 15px; }
 
 #redact-search { display: flex; gap: 6px; margin: 8px 0; }
+#redact-search-opts { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 12px; }
+#redact-search-opts select { flex: 1; }
+.redact-opt { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); white-space: nowrap; }
+.redact-opt input { width: auto; margin: 0; }
 #redact-search input { flex: 1; margin: 0; }
 #redact-search button { white-space: nowrap; }
 

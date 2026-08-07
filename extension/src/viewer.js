@@ -1479,6 +1479,8 @@ async function searchAndMarkRedactions() {
     setStatus(`Searching for “${phrase}”…`, true);
     const result = await host.call('find-text', {
       pdf: state.pdfB64, phrase, pdfPassword: state.password,
+      matchMode: $('redact-match-mode')?.value ?? 'contains',
+      caseSensitive: $('redact-case')?.checked ?? false,
     });
     const matches = result.matches ?? [];
     setStatus('');

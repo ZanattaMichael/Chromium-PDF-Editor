@@ -120,7 +120,6 @@
           <input id="redact-search-text" type="text" placeholder="Find text to redact…" aria-label="Text to redact" />
           <button id="redact-search-btn">🔍 Find &amp; mark</button>
         </div>
-        <ul id="redact-list"></ul>
         <label id="redact-intensity-row" class="redact-mode"
           title="Higher settings merge adjacent boxes and widen them so the black box does not reveal how long the removed text was">
           <span>Privacy: <output id="redact-intensity-label">Exact</output></span>
@@ -132,6 +131,10 @@
           <button id="redact-apply" class="danger" disabled>Apply redaction</button>
           <button id="redact-clear" disabled>Clear</button>
         </div>
+        <!-- Marked areas live below the actions so a growing list never pushes the buttons around,
+             and render as wrapping chips (not a scrolling list) so there is no scrollbar to jump. -->
+        <div id="redact-count" class="muted" aria-live="polite"></div>
+        <ul id="redact-list" aria-label="Marked areas"></ul>
       </div>
 
       <div id="panel-links" class="panel-section" hidden>

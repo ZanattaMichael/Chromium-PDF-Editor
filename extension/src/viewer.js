@@ -1017,10 +1017,13 @@ function renderRedactList() {
   for (const [index, region] of state.regions.entries()) {
     const item = document.createElement('li');
     const label = document.createElement('span');
-    label.textContent = `#${index + 1} — page ${region.page}`;
+    // Compact chip label; the on-page box already carries its number (#N).
+    label.textContent = `#${index + 1} p${region.page}`;
     item.appendChild(label);
     const remove = document.createElement('button');
     remove.textContent = '✕';
+    remove.title = `Remove marked area #${index + 1}`;
+    remove.setAttribute('aria-label', `Remove marked area #${index + 1} on page ${region.page}`);
     remove.addEventListener('click', () => {
       state.regions.splice(index, 1);
       drawRegions();
@@ -1028,7 +1031,11 @@ function renderRedactList() {
     item.appendChild(remove);
     list.appendChild(item);
   }
-  const any = state.regions.length > 0;
+  const count = state.regions.length;
+  $('redact-count').textContent = count === 0
+    ? 'No areas marked yet.'
+    : `${count} area${count === 1 ? '' : 's'} marked — click ✕ to remove one.`;
+  const any = count > 0;
   $('redact-preview').disabled = !any;
   $('redact-apply').disabled = !any;
   $('redact-clear').disabled = !any;

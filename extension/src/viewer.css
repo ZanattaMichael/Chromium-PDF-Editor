@@ -435,16 +435,30 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
 #redact-search input { flex: 1; margin: 0; }
 #redact-search button { white-space: nowrap; }
 
-#redact-list { list-style: none; padding: 0; margin: 8px 0; }
+/* Marked areas as wrapping chips (not a scrolling list): the row grows by wrapping, so no
+   scrollbar appears and — sitting below the actions — nothing displaces the buttons. */
+#redact-count { font-size: 12px; margin: 8px 0 0; }
+#redact-list { list-style: none; padding: 0; margin: 6px 0 0; display: flex; flex-wrap: wrap; gap: 6px; }
 #redact-list li {
-  display: flex;
-  justify-content: space-between;
-  padding: 4px 6px;
-  border-bottom: 1px solid #4a4a52;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 2px 2px 8px;
+  border-radius: 12px;
+  background: var(--accent-2, #33415a);
+  color: #fff;
   font-size: 12px;
-  color: var(--muted);
 }
-#redact-list button { padding: 0 6px; font-size: 12px; }
+#redact-list button {
+  padding: 0 5px;
+  font-size: 12px;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 10px;
+}
+#redact-list button:hover { background: rgba(255, 255, 255, 0.25); }
 
 textarea, input[type="number"], input[type="text"], input[type="password"] {
   width: 100%;

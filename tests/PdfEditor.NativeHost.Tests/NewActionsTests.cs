@@ -466,6 +466,15 @@ public class NewActionsTests
     }
 
     [Fact]
+    public void Flatten_Forms_ReturnsPdfAndCount()
+    {
+        var r = Handle("flatten", new { pdf = TestPdf.Base64(TestPdf.WithField("name", "Jane")), mode = "forms" });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+        Assert.Equal(1, Result(r)["formFields"]!.GetValue<int>());
+    }
+
+    [Fact]
     public void Redact_ReturnsAnAuditReport()
     {
         var r = Handle("redact", new

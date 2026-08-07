@@ -793,6 +793,28 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('flatten: forms mode bakes fields into static content (#44)', async () => {
+    const file = path.join(fixtureDir, 'flatten-forms.pdf');
+    fs.writeFileSync(file, buildFormPdf('fullName', 'Ada Lovelace'));
+    const page = await openViewerWith(file);
+
+    // The field is interactive before flattening.
+    await ui(page, '#btn-forms');
+    await expect(page.locator('#forms-list [data-field="fullName"]')).toHaveCount(1);
+
+    await ui(page, '#btn-flatten');
+    const dialog = page.locator('dialog#modal');
+    await dialog.locator('select').selectOption('forms');
+    await dialog.getByRole('button', { name: 'Flatten' }).click();
+    await expect(page.locator('#status')).toContainText('Flattened 1 form field');
+
+    // No interactive field remains, but its value is still drawn in the field's rectangle.
+    await ui(page, '#btn-forms');
+    await expect(page.locator('#forms-list [data-field="fullName"]')).toHaveCount(0);
+    expect(await inkFraction(page, { x: 102, y: 702, width: 196, height: 20 })).toBeGreaterThan(0.01);
+    await page.close();
+  });
+
   test('forms: insert a new text field by drawing a box', async () => {
     const file = fixture('insertfield.pdf', [[{ text: 'blank form', x: 72, y: 100 }]]);
     const page = await openViewerWith(file);

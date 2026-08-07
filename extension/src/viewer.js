@@ -870,7 +870,7 @@ function updateChrome() {
   for (const id of ['btn-save', 'btn-print', 'btn-sidebar', 'tool-text', 'tool-draw',
     'tool-highlight', 'tool-edit', 'tool-move', 'tool-redact', 'tool-sign',
     'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-organize', 'btn-js', 'btn-sanitize', 'btn-ocr',
-    'btn-find', 'btn-merge', 'btn-watermark', 'btn-bates', 'btn-protect', 'btn-digital',
+    'btn-find', 'btn-merge', 'btn-watermark', 'btn-bates', 'btn-flatten', 'btn-protect', 'btn-digital',
     'menu-read-trigger', 'menu-edit-trigger', 'btn-compare',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
     $(id).disabled = !loaded;
@@ -2624,6 +2624,35 @@ async function addBates() {
   }
 }
 
+/**
+ * #44: flattens interactive layers into static page content. The mode chooses how much: forms only,
+ * annotations only, or everything. Flattened content prints identically everywhere and can no longer
+ * be edited or removed as an object.
+ */
+async function flattenDocument() {
+  if (!state.pdf) return;
+  const value = await promptDialog('Flatten', [
+    { id: 'mode', label: 'What to flatten', type: 'select', value: 'everything', options: [
+      { value: 'everything', label: 'Everything (forms + annotations)' },
+      { value: 'forms', label: 'Form fields only' },
+      { value: 'annotations', label: 'Annotations only (comments, markup)' },
+    ] },
+  ], 'Flatten');
+  if (!value) return;
+  try {
+    setStatus('Flattening…', true);
+    const result = await host.call('flatten', {
+      pdf: state.pdfB64, mode: value.mode, pdfPassword: state.password,
+    });
+    const parts = [];
+    if (result.formFields > 0) parts.push(`${result.formFields} form field${result.formFields === 1 ? '' : 's'}`);
+    if (result.annotations > 0) parts.push(`${result.annotations} annotation${result.annotations === 1 ? '' : 's'}`);
+    await applyResult(result.pdf, parts.length ? `Flattened ${parts.join(' and ')}.` : 'Nothing to flatten.');
+  } catch (e) {
+    fail(e);
+  }
+}
+
 // ------------------------------------------------------- find and replace
 
 async function findReplace() {
@@ -4131,6 +4160,7 @@ function wire() {
   $('btn-decrypt').addEventListener('click', removeEncryption);
   $('btn-watermark').addEventListener('click', addWatermark);
   $('btn-bates').addEventListener('click', addBates);
+  $('btn-flatten').addEventListener('click', flattenDocument);
   $('btn-digital').addEventListener('click', digitallySign);
 
   $('btn-prev').addEventListener('click', () => goToPage(state.page - 1));

@@ -88,6 +88,7 @@ public static class MessageProcessor
         "decrypt" => DecryptAction(p),
         "watermark" => WatermarkAction(p),
         "bates" => BatesAction(p),
+        "flatten" => FlattenAction(p),
         "sign-image" => SignImage(p),
         "sign-digital" => SignDigital(p),
         "signatures" => Signatures(p),
@@ -564,6 +565,23 @@ public static class MessageProcessor
             Pages: p["pages"]?.AsArray().Select(n => n!.GetValue<int>()).ToList());
         var result = WatermarkTool.AddTextWatermark(Pdf(p), p["text"]!.GetValue<string>(), options, Password(p));
         return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object FlattenAction(JsonObject p)
+    {
+        var mode = (p["mode"]?.GetValue<string>() ?? "everything").ToLowerInvariant() switch
+        {
+            "forms" => FlattenTool.Mode.Forms,
+            "annotations" => FlattenTool.Mode.AnnotationsOnly,
+            _ => FlattenTool.Mode.Everything,
+        };
+        var result = FlattenTool.Flatten(Pdf(p), mode, Password(p));
+        return new
+        {
+            pdf = Convert.ToBase64String(result.Pdf),
+            formFields = result.FormFieldsFlattened,
+            annotations = result.AnnotationsFlattened,
+        };
     }
 
     private static object BatesAction(JsonObject p)

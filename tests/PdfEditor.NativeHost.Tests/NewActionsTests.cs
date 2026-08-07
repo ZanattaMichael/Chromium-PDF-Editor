@@ -400,4 +400,124 @@ public class NewActionsTests
         Assert.Equal("yellow", verdict!["level"]!.GetValue<string>());
         Assert.Equal("heuristic", verdict["source"]!.GetValue<string>());
     }
+
+    [Fact]
+    public void Watermark_ReturnsStampedPdf()
+    {
+        var r = Handle("watermark", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage()),
+            text = "CONFIDENTIAL", color = "#808080", opacity = 0.3f, rotation = 45f,
+        });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+    }
+
+    [Fact]
+    public void Watermark_OnNamedPages_ReturnsPdf()
+    {
+        var r = Handle("watermark", new
+        {
+            pdf = TestPdf.Base64(TestPdf.ManyPages(3)),
+            text = "DRAFT", pages = new[] { 2 }, bold = true, italic = true, fontFamily = "times",
+        });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+    }
+
+    [Fact]
+    public void Bates_ReturnsPdfAndFirstLastLabels()
+    {
+        var r = Handle("bates", new
+        {
+            pdf = TestPdf.Base64(TestPdf.ManyPages(3)),
+            prefix = "ACME", start = 1, digits = 6, position = "bottom-right",
+        });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+        Assert.Equal("ACME000001", Result(r)["first"]!.GetValue<string>());
+        Assert.Equal("ACME000003", Result(r)["last"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void VisualDiff_ReturnsPngAndChangedFraction()
+    {
+        var r = Handle("visual-diff", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage("new text")),
+            other = TestPdf.Base64(TestPdf.OnePage("old text")),
+            page = 1,
+        });
+        Assert.True(Ok(r));
+        Assert.Equal(1, Result(r)["page"]!.GetValue<int>());
+        Assert.NotNull(Result(r)["png"]);
+        Assert.True(Result(r)["changedFraction"]!.GetValue<double>() >= 0);
+    }
+
+    [Fact]
+    public void Import_ConvertsAnImageToPdf()
+    {
+        // A minimal 16x16 PNG (see the extension's open-image e2e); import wraps it in a PDF page.
+        const string pngB64 =
+            "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGO4IyJCEmIY1TCqYfhqAAACcQQQFwFJQgAAAABJRU5ErkJggg==";
+        var r = Handle("import", new { data = pngB64, kind = "image" });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+    }
+
+    [Fact]
+    public void Flatten_Forms_ReturnsPdfAndCount()
+    {
+        var r = Handle("flatten", new { pdf = TestPdf.Base64(TestPdf.WithField("name", "Jane")), mode = "forms" });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+        Assert.Equal(1, Result(r)["formFields"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void Redact_ReturnsAnAuditReport()
+    {
+        var r = Handle("redact", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage("secret text here")),
+            regions = new[] { new { page = 1, x = 60, y = 60, width = 200, height = 40 } },
+        });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+        var report = Result(r)["report"]!;
+        Assert.Equal(1, report["regions"]!.GetValue<int>());
+        Assert.NotNull(report["pages"]);
+    }
+
+    [Fact]
+    public void Redact_WithPrivacyIntensity_StillReturnsPdfAndReport()
+    {
+        var r = Handle("redact", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage("secret text here")),
+            regions = new[] { new { page = 1, x = 60, y = 60, width = 60, height = 20 } },
+            intensity = 4, // full-line widening + textured hatch fill
+        });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+        Assert.NotNull(Result(r)["report"]);
+    }
+
+    [Fact]
+    public void Redact_WithPerRegionIntensity_IsAccepted()
+    {
+        // Two regions with different per-area Privacy levels, no global override.
+        var r = Handle("redact", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage("secret text here")),
+            regions = new object[]
+            {
+                new { page = 1, x = 60, y = 60, width = 60, height = 20, intensity = 3 },
+                new { page = 1, x = 200, y = 60, width = 40, height = 20, intensity = 0 },
+            },
+        });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+        Assert.Equal(2, Result(r)["report"]!["regions"]!.GetValue<int>());
+    }
 }

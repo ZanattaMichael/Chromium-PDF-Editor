@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PDF Editor",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Edit text, redact, merge, sign, and password-protect PDFs directly in your browser. Powered by a local native host.",
   "minimum_chrome_version": "116",
   "permissions": [

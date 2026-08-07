@@ -5,6 +5,7 @@ import { HostClient, bytesToBase64, base64ToBytes } from './host-client.js';
 import { runFormScript } from './formScript.js';
 import { ActivityLog, formatTime } from './activity-log.js';
 import { displayToPage, pageToDisplay } from './geometry.js';
+import { formatBuildInfo, loadBuildMeta } from './build-info.js';
 
 const host = new HostClient();
 
@@ -22,13 +23,27 @@ host.call = async (action, payload = {}) => {
   const elapsed = () => `${Math.round(performance.now() - started)} ms`;
   try {
     const result = await rawHostCall(action, payload);
-    activity.add('info', action, elapsed());
+    // With diagnostics on (#97), the per-action line also carries the payload/result sizes — the
+    // other half of "why is this slow" beyond the duration — and is tagged as diagnostic.
+    const detail = diagnosticsOn
+      ? `${elapsed()} · sent ${approxSize(payload)} · recv ${approxSize(result)}`
+      : elapsed();
+    activity.add('info', action, detail, { diagnostic: diagnosticsOn });
     return result;
   } catch (e) {
-    activity.add('error', `${action} failed`, `${e?.message ?? e} (after ${elapsed()})`);
+    activity.add('error', `${action} failed`, `${e?.message ?? e} (after ${elapsed()})`,
+      { diagnostic: diagnosticsOn });
     throw e;
   }
 };
+
+/** Rough transfer size of a host payload/result: the base64 doc if present, else the JSON length. */
+function approxSize(obj) {
+  const b64 = typeof obj?.pdf === 'string' ? obj.pdf.length : 0;
+  let bytes = b64 ? Math.round(b64 * 0.75) : 0; // base64 is 4 chars per 3 bytes
+  if (!bytes && obj) { try { bytes = JSON.stringify(obj).length; } catch { bytes = 0; } }
+  return bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} B`;
+}
 
 // URL/link handling: a document with links shows a warning badge, links are disabled (stripped on
 // save) by default, and the 🔗 Links panel lists every URL (the "source") so the user can review
@@ -64,6 +79,7 @@ const state = {
   // or a figure, so it stays available rather than being inferred.
   highlightMode: 'sweep',
   safety: null,         // { hasActiveContent, javaScriptCount, urlCount, samples }
+  compareOther: null,   // { b64, name } — the last document compared against, kept for visual diff
   keepActiveContent: false, // false = strip JavaScript on save until the user opts in
   keepLinks: false,     // false = strip link URLs on save until the user enables them
   links: [],            // extracted { page, url } — the side panel's list
@@ -186,6 +202,8 @@ function fail(err) {
 // so a toast can't be clobbered by a log entry the way placeField()'s once was.
 
 const CONSOLE_OPEN_KEY = 'activityConsoleOpen';
+const CONSOLE_DIAGNOSTICS_KEY = 'activityConsoleDiagnostics';
+let diagnosticsOn = false;    // #97: opt-in extra logging (sizes, environment) for bug reports
 let consoleRenderedSeq = 0;   // seq of the newest entry that is in the DOM
 let consoleFlushQueued = false;
 
@@ -198,7 +216,7 @@ function consoleOpen() { return !$('console-pane').hidden; }
  */
 function consoleEntryEl(entry) {
   const row = document.createElement('div');
-  row.className = `console-entry ${entry.level}`;
+  row.className = `console-entry ${entry.level}${entry.diagnostic ? ' diag' : ''}`;
   const time = document.createElement('span');
   time.className = 'console-time';
   time.textContent = formatTime(entry.time);
@@ -278,6 +296,53 @@ async function copyConsole() {
   }
 }
 
+/** #97: turns opt-in diagnostic logging on/off, records an environment snapshot when enabled. */
+function setDiagnostics(on, persist = true) {
+  diagnosticsOn = on;
+  $('console-diagnostics').checked = on;
+  if (persist) {
+    chrome.storage?.local?.set({ [CONSOLE_DIAGNOSTICS_KEY]: on })
+      ?.catch((e) => activity.add('warn', 'could not save the diagnostics setting', e?.message ?? e));
+  }
+  if (on) logEnvironment();
+}
+
+/** Logs the runtime environment (versions, browser, platform) as diagnostic entries. */
+async function logEnvironment() {
+  const m = chrome.runtime.getManifest();
+  activity.add('info', 'diagnostics enabled', 'extra detail is now recorded', { diagnostic: true });
+  activity.add('info', 'extension version', m.version, { diagnostic: true });
+  activity.add('info', 'browser', browserSummary(), { diagnostic: true });
+  activity.add('info', 'platform', navigator.platform || 'unknown', { diagnostic: true });
+  try {
+    const pong = await host.call('ping');
+    activity.add('info', 'native host version', pong?.version ?? 'unknown', { diagnostic: true });
+  } catch {
+    // A failed ping is already logged by the host.call wrapper; nothing to add.
+  }
+}
+
+/** Saves the activity log to a text file (with an environment header) for attaching to bug reports. */
+function downloadConsole() {
+  const m = chrome.runtime.getManifest();
+  const header = [
+    'Chromium PDF Editor — activity log',
+    `Extension: v${m.version}`,
+    `Browser: ${browserSummary()}`,
+    `Platform: ${navigator.platform || 'unknown'}`,
+    `Generated: ${new Date().toISOString()}`,
+    '', '',
+  ].join('\n');
+  const blob = new Blob([header + activity.toText() + '\n'], { type: 'text/plain' });
+  chrome.downloads.download({
+    url: URL.createObjectURL(blob),
+    filename: 'pdf-editor-activity-log.txt',
+    saveAs: true,
+  });
+  activity.add('info', 'activity log downloaded', '', { diagnostic: diagnosticsOn });
+  toast('Activity log downloaded.');
+}
+
 function initConsole() {
   activity.subscribe((entry) => {
     if (entry === null) {
@@ -289,17 +354,23 @@ function initConsole() {
     scheduleConsoleFlush();
   });
   $('btn-console').addEventListener('click', () => setConsoleOpen(!consoleOpen()));
+  $('btn-about').addEventListener('click', showAbout);
   $('console-close').addEventListener('click', () => setConsoleOpen(false));
   $('console-clear').addEventListener('click', () => activity.clear());
   $('console-copy').addEventListener('click', copyConsole);
+  $('console-download').addEventListener('click', downloadConsole);
+  $('console-diagnostics').addEventListener('change', (e) => setDiagnostics(e.target.checked));
   updateConsoleCount();
 }
 
 /** Restores the pane's last open/closed state (the log itself never persists). */
 async function restoreConsoleState() {
   try {
-    const stored = await chrome.storage.local.get({ [CONSOLE_OPEN_KEY]: false });
+    const stored = await chrome.storage.local.get({
+      [CONSOLE_OPEN_KEY]: false, [CONSOLE_DIAGNOSTICS_KEY]: false,
+    });
     if (stored[CONSOLE_OPEN_KEY]) setConsoleOpen(true, false);
+    if (stored[CONSOLE_DIAGNOSTICS_KEY]) setDiagnostics(true, false);
   } catch (e) {
     activity.add('warn', 'could not read the console state', e?.message ?? e);
   }
@@ -867,12 +938,14 @@ function updateChrome() {
   for (const id of ['btn-save', 'btn-print', 'btn-sidebar', 'tool-text', 'tool-draw',
     'tool-highlight', 'tool-edit', 'tool-move', 'tool-redact', 'tool-sign',
     'btn-rotate-left', 'btn-rotate-right', 'btn-forms', 'btn-organize', 'btn-js', 'btn-sanitize', 'btn-ocr',
-    'btn-find', 'btn-merge', 'btn-protect', 'btn-digital',
+    'btn-find', 'btn-merge', 'btn-watermark', 'btn-bates', 'btn-flatten', 'btn-protect', 'btn-digital',
     'menu-read-trigger', 'menu-edit-trigger', 'btn-compare',
     'btn-prev', 'btn-next', 'btn-zoom-in', 'btn-zoom-out']) {
     $(id).disabled = !loaded;
   }
   $('page-input').disabled = !loaded;
+  // "Remove encryption" only makes sense on an open, encrypted document.
+  $('btn-decrypt').disabled = !loaded || !(state.info?.encrypted || state.password);
   $('btn-undo').disabled = state.history.length === 0;
   $('btn-redo').disabled = state.future.length === 0;
   if (loaded) {
@@ -938,16 +1011,36 @@ function addRegionDiv(region, kind, label = '') {
   pe.overlay.appendChild(div);
 }
 
+// Redaction Privacy levels, indexed by intensity 0–4 (see #privacy). Named here so both the slider
+// label and the per-area chips can show them.
+const REDACT_INTENSITY = ['Exact', 'Merge words', 'Rounded', 'Full line', 'Textured'];
+
+/** The current global Privacy intensity (0–4) from the slider. */
+function redactIntensity() { return Number($('redact-intensity')?.value ?? 0); }
+
+/** Marks a region for redaction, stamping it with the current Privacy intensity (per-redaction). */
+function markRegion(region) {
+  region.intensity = redactIntensity();
+  state.regions.push(region);
+}
+
 function renderRedactList() {
   const list = $('redact-list');
   list.innerHTML = '';
   for (const [index, region] of state.regions.entries()) {
     const item = document.createElement('li');
     const label = document.createElement('span');
-    label.textContent = `#${index + 1} — page ${region.page}`;
+    // Compact chip label; the on-page box already carries its number (#N). Show the per-area
+    // Privacy type when it is not the plain default, so mixed settings are visible at a glance.
+    const level = region.intensity ?? 0;
+    label.textContent = level > 0
+      ? `#${index + 1} p${region.page} · ${REDACT_INTENSITY[level]}`
+      : `#${index + 1} p${region.page}`;
     item.appendChild(label);
     const remove = document.createElement('button');
     remove.textContent = '✕';
+    remove.title = `Remove marked area #${index + 1}`;
+    remove.setAttribute('aria-label', `Remove marked area #${index + 1} on page ${region.page}`);
     remove.addEventListener('click', () => {
       state.regions.splice(index, 1);
       drawRegions();
@@ -955,7 +1048,11 @@ function renderRedactList() {
     item.appendChild(remove);
     list.appendChild(item);
   }
-  const any = state.regions.length > 0;
+  const count = state.regions.length;
+  $('redact-count').textContent = count === 0
+    ? 'No areas marked yet.'
+    : `${count} area${count === 1 ? '' : 's'} marked — click ✕ to remove one.`;
+  const any = count > 0;
   $('redact-preview').disabled = !any;
   $('redact-apply').disabled = !any;
   $('redact-clear').disabled = !any;
@@ -1157,7 +1254,7 @@ pagesEl.addEventListener('pointerup', async (e) => {
   };
 
   if (state.tool === 'redact') {
-    state.regions.push(region);
+    markRegion(region);
     drawRegions();
   } else if (state.tool === 'field') {
     placeField(region);
@@ -1228,7 +1325,7 @@ function buildContextItems(e) {
   if (region) {
     // Text context: act on the selected text / clicked run.
     items.push(ctxItem('✏ Edit text', () => { setTool('select'); beginTextEdit(region); }));
-    items.push(ctxItem('⬛ Redact this', () => { state.regions.push(region); setTool('redact'); drawRegions(); toast('Marked for redaction — review and Apply.'); }));
+    items.push(ctxItem('⬛ Redact this', () => { markRegion(region); setTool('redact'); drawRegions(); toast('Marked for redaction — review and Apply.'); }));
     // Highlighting a selection marks the characters selected, exactly as the sweep tool does.
     // Going through applyHighlight(region) instead would paint selectionRegion()'s single bounding
     // rectangle — a block covering both lines and the gap between them for any selection spanning
@@ -1348,10 +1445,23 @@ function promptDialog(title, fields, confirmLabel = 'OK') {
     for (const field of fields) {
       const label = document.createElement('label');
       label.textContent = field.label;
-      const input = document.createElement('input');
-      input.type = field.type ?? 'text';
-      input.value = field.value ?? '';
-      if (field.placeholder) input.placeholder = field.placeholder;
+      let input;
+      if (field.type === 'select') {
+        // Options are {value, label} pairs; the option text is set via textContent (never HTML).
+        input = document.createElement('select');
+        for (const opt of field.options ?? []) {
+          const option = document.createElement('option');
+          option.value = opt.value;
+          option.textContent = opt.label;
+          input.appendChild(option);
+        }
+        if (field.value != null) input.value = field.value;
+      } else {
+        input = document.createElement('input');
+        input.type = field.type ?? 'text';
+        input.value = field.value ?? '';
+        if (field.placeholder) input.placeholder = field.placeholder;
+      }
       label.appendChild(input);
       modal.appendChild(label);
       inputs[field.id] = input;
@@ -1386,6 +1496,8 @@ async function searchAndMarkRedactions() {
     setStatus(`Searching for “${phrase}”…`, true);
     const result = await host.call('find-text', {
       pdf: state.pdfB64, phrase, pdfPassword: state.password,
+      matchMode: $('redact-match-mode')?.value ?? 'contains',
+      caseSensitive: $('redact-case')?.checked ?? false,
     });
     const matches = result.matches ?? [];
     setStatus('');
@@ -1393,7 +1505,7 @@ async function searchAndMarkRedactions() {
     // Pad each match slightly so the box fully covers the glyphs' edges.
     const pad = 1;
     for (const m of matches) {
-      state.regions.push({
+      markRegion({
         page: m.page,
         x: m.x - pad, y: m.y - pad,
         width: m.width + 2 * pad, height: m.height + 2 * pad,
@@ -1412,6 +1524,7 @@ async function previewRedaction() {
     setStatus('Building redaction preview…', true);
     const result = await host.call('redact', {
       pdf: state.pdfB64, regions: state.regions, pdfPassword: state.password,
+      intensity: Number($('redact-intensity')?.value ?? 0),
     });
     const pages = [...new Set(state.regions.map((r) => r.page))].sort((a, b) => a - b);
     const images = [];
@@ -1463,15 +1576,217 @@ async function applyRedaction(precomputed) {
     setStatus('Applying redaction…', true);
     const result = precomputed ?? await host.call('redact', {
       pdf: state.pdfB64, regions: state.regions, pdfPassword: state.password,
+      intensity: Number($('redact-intensity')?.value ?? 0),
     });
     const count = state.regions.length;
     state.regions = [];
     await applyResult(result.pdf,
       `Redacted ${count} region${count === 1 ? '' : 's'} — content removed.` +
       (result.warnings?.length ? ` ⚠ ${result.warnings.join(' ')}` : ''));
+    // #48: an auditable summary of what was removed, and what redaction leaves behind.
+    if (result.report) showRedactionReport(result);
   } catch (e) {
     fail(e);
   }
+}
+
+/** #48: renders the redaction audit — per-page counts by category, plus what survives redaction. */
+function showRedactionReport(result) {
+  const report = result.report;
+  modal.innerHTML = '<h2>Redaction report</h2>';
+  modal.appendChild(reportSummaryEl(report));
+  if (report.pages.length) modal.appendChild(reportTableEl(report));
+  const removed = reportRemovedEl(report);
+  if (removed) modal.appendChild(removed);
+  for (const note of reportResidualNotes(report.residual)) modal.appendChild(note);
+
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const download = document.createElement('button');
+  download.className = 'danger';
+  download.textContent = '⬇ Download compliance report';
+  download.addEventListener('click', () => downloadComplianceReport(result));
+  const close = document.createElement('button');
+  close.textContent = 'Close';
+  actions.append(download, close);
+  modal.appendChild(actions);
+  modal.showModal();
+  close.addEventListener('click', () => modal.close());
+  close.focus();
+}
+
+function reportSummaryEl(report) {
+  const summary = document.createElement('p');
+  summary.className = 'muted';
+  const rs = report.regions === 1 ? '' : 's';
+  const ps = report.pagesAffected === 1 ? '' : 's';
+  summary.textContent = `Removed content from ${report.regions} region${rs} `
+    + `across ${report.pagesAffected} page${ps}.`;
+  return summary;
+}
+
+function reportTableEl(report) {
+  const table = document.createElement('table');
+  table.className = 'report-table';
+  const head = document.createElement('tr');
+  for (const h of ['Page', 'Regions', 'Text runs', 'Images', 'Annotations']) {
+    const th = document.createElement('th');
+    th.textContent = h;
+    head.appendChild(th);
+  }
+  table.appendChild(head);
+  const addRow = (cells, isTotal) => {
+    const tr = document.createElement('tr');
+    if (isTotal) tr.className = 'report-total';
+    cells.forEach((c, i) => {
+      const cell = document.createElement(isTotal || i === 0 ? 'th' : 'td');
+      cell.textContent = String(c);
+      tr.appendChild(cell);
+    });
+    table.appendChild(tr);
+  };
+  for (const p of report.pages) addRow([p.page, p.regions, p.textRuns, p.images, p.annotations], false);
+  const t = report.totals;
+  addRow(['Total', report.regions, t.textRuns, t.images, t.annotations], true);
+  return table;
+}
+
+/** A preview of the removed text per region (full text + thumbnails live in the download). Null if none. */
+function reportRemovedEl(report) {
+  const withText = (report.regionDetails ?? []).filter((r) => r.removed.text.trim() || r.removed.images > 0);
+  if (!withText.length) return null;
+  const frag = document.createDocumentFragment();
+  const h = document.createElement('h3');
+  h.textContent = 'Removed content';
+  h.className = 'report-subhead';
+  frag.appendChild(h);
+  for (const r of withText.slice(0, 8)) frag.appendChild(reportRemovedLineEl(r));
+  return frag;
+}
+
+function reportRemovedLineEl(r) {
+  const p = document.createElement('p');
+  p.className = 'report-removed';
+  const where = document.createElement('span');
+  where.className = 'report-removed-where';
+  where.textContent = `p${r.page}: `;
+  p.appendChild(where);
+  const snippet = r.removed.text.replace(/\s+/g, ' ').trim();
+  p.append(snippet.length > 140 ? snippet.slice(0, 140) + '…' : snippet);
+  if (r.removed.images > 0) {
+    const im = document.createElement('em');
+    const s = r.removed.images === 1 ? '' : 's';
+    im.textContent = `${snippet ? ' ' : ''}(${r.removed.images} image${s})`;
+    p.appendChild(im);
+  }
+  return p;
+}
+
+/**
+ * Redaction removes page content, but not document-level JavaScript or metadata — surface those so
+ * an auditor knows to run "Remove hidden info" too. Returns a <p> element per note.
+ */
+function reportResidualNotes(res) {
+  const notes = [];
+  if (res.remainingJavaScript > 0) {
+    const s = res.remainingJavaScript === 1 ? '' : 's';
+    notes.push(`⚠ ${res.remainingJavaScript} embedded script${s} still present — `
+      + 'redaction does not remove JavaScript. Use “Remove hidden info…”.');
+  }
+  if (res.remainingMetadata) {
+    notes.push('⚠ Document metadata is still present — use “Remove hidden info…” to strip it.');
+  }
+  return notes.map((text) => {
+    const p = document.createElement('p');
+    p.className = 'report-note';
+    p.textContent = text;
+    return p;
+  });
+}
+
+/** Escapes text for safe inclusion in the generated (downloaded) HTML report. */
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+}
+
+/** One region's HTML block for the downloaded report. Built by concatenation to avoid nesting templates. */
+function regionBlockHtml(r) {
+  const coords = `x ${r.x.toFixed(1)}, y ${r.y.toFixed(1)}, ${r.width.toFixed(1)}×${r.height.toFixed(1)} pt`;
+  const text = r.removed.text.trim()
+    ? `<pre class="rtext">${escapeHtml(r.removed.text)}</pre>`
+    : '<p class="muted">No extractable text.</p>';
+  const imgTags = (r.removed.imageThumbnails ?? [])
+    .map((b64) => `<img class="rimg" alt="Removed image" src="data:image/png;base64,${b64}" />`).join('');
+  const imgsBlock = imgTags ? `<div class="rimgs">${imgTags}</div>` : '';
+  const counts = `${r.removed.textRuns} text run(s), ${r.removed.images} image(s), `
+    + `${r.removed.annotations} annotation(s) removed.`;
+  return `<div class="region"><h4>Page ${r.page} · region (${escapeHtml(coords)})</h4>`
+    + `<p class="muted">${counts}</p>${text}${imgsBlock}</div>`;
+}
+
+/**
+ * Builds a self-contained HTML compliance report — document identity, integrity hashes, per-page
+ * and per-region detail, the exact text removed and thumbnails of the images removed, and residual
+ * risk — and downloads it. Kept as one printable file so it can be archived or printed to PDF.
+ */
+function downloadComplianceReport(result) {
+  const report = result.report;
+  const version = chrome.runtime.getManifest().version;
+  const generated = result.generatedUtc || new Date().toISOString();
+
+  const pageRows = report.pages.map((p) =>
+    `<tr><td>${p.page}</td><td>${p.regions}</td><td>${p.textRuns}</td><td>${p.images}</td><td>${p.annotations}</td></tr>`).join('');
+
+  const regionBlocks = (report.regionDetails ?? []).map(regionBlockHtml).join('');
+
+  const res = report.residual;
+  const residual = [];
+  if (res.remainingJavaScript > 0) residual.push(`${res.remainingJavaScript} embedded script(s) still present.`);
+  if (res.remainingMetadata) residual.push('Identifying document metadata still present.');
+  const residualItems = residual.map((r) => `<li>${escapeHtml(r)}</li>`).join('');
+  const residualHtml = residual.length
+    ? `<ul>${residualItems}</ul>`
+    : '<p>None detected. (Redaction does not remove JavaScript or metadata; none were found.)</p>';
+
+  const t = report.totals;
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<title>Redaction Compliance Report — ${escapeHtml(state.fileName)}</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; color: #1a1a1a; max-width: 820px; margin: 32px auto; padding: 0 20px; }
+  h1 { font-size: 22px; margin-bottom: 4px; } h2 { font-size: 16px; margin-top: 28px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; } th, td { border: 1px solid #ccc; padding: 4px 10px; text-align: right; } th:first-child, td:first-child { text-align: left; }
+  .meta td { text-align: left; } .muted { color: #666; }
+  .region { border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px 14px; margin: 10px 0; }
+  .region h4 { margin: 0 0 4px; font-size: 14px; }
+  .rtext { white-space: pre-wrap; background: #f6f6f6; padding: 8px; border-radius: 4px; font: 12.5px ui-monospace, monospace; }
+  .rimgs { display: flex; flex-wrap: wrap; gap: 8px; } .rimg { max-width: 220px; border: 1px solid #ccc; }
+  code { font: 12px ui-monospace, monospace; word-break: break-all; }
+</style></head><body>
+<h1>Redaction Compliance Report</h1>
+<p class="muted">Generated ${escapeHtml(generated)} by Chromium PDF Editor v${escapeHtml(version)}.</p>
+<h2>Document</h2>
+<table class="meta">
+  <tr><td>File</td><td>${escapeHtml(state.fileName)}</td></tr>
+  <tr><td>Original SHA-256</td><td><code>${escapeHtml(result.originalSha256 || 'n/a')}</code></td></tr>
+  <tr><td>Redacted SHA-256</td><td><code>${escapeHtml(result.outputSha256 || 'n/a')}</code></td></tr>
+</table>
+<h2>Summary</h2>
+<p>Removed content from <strong>${report.regions}</strong> region(s) across <strong>${report.pagesAffected}</strong> page(s): ${t.textRuns} text run(s), ${t.images} image(s), ${t.annotations} annotation(s).</p>
+<table><tr><th>Page</th><th>Regions</th><th>Text runs</th><th>Images</th><th>Annotations</th></tr>${pageRows}
+<tr><th>Total</th><th>${report.regions}</th><th>${t.textRuns}</th><th>${t.images}</th><th>${t.annotations}</th></tr></table>
+<h2>Removed content by region</h2>
+${regionBlocks || '<p class="muted">No itemised content.</p>'}
+<h2>Residual risk</h2>
+${residualHtml}
+</body></html>`;
+
+  const blob = new Blob([html], { type: 'text/html' });
+  const suggested = state.fileName.replace(/\.pdf$/i, '') + '-redaction-report.html';
+  chrome.downloads.download({ url: URL.createObjectURL(blob), filename: suggested, saveAs: true });
+  activity.add('info', 'redaction report downloaded', suggested);
+  toast('Compliance report downloaded.');
 }
 
 // ------------------------------------------------------------- text edit
@@ -2311,6 +2626,149 @@ async function protect() {
   }
 }
 
+/**
+ * #25: strips password protection, producing an unencrypted copy. The password was captured when
+ * the document was opened (state.password), so no re-prompt is needed in the normal case; we only
+ * ask if it is somehow missing. state.password is cleared *after* applyResult so the undo snapshot
+ * loadDocument pushes still pairs the original encrypted bytes with their password.
+ */
+async function removeEncryption() {
+  if (!state.pdf) return;
+  if (!(state.info?.encrypted || state.password)) {
+    toast('This document is not encrypted.');
+    return;
+  }
+  let password = state.password;
+  if (!password) {
+    const entered = await promptDialog('Enter the current password to remove encryption', [
+      { id: 'pw', label: 'Password', type: 'password' },
+    ], 'Remove');
+    if (!entered) return;
+    password = entered.pw;
+  }
+  if (state.signatures.length > 0) {
+    const confirmed = await promptDialog(
+      'This document is digitally signed. Removing encryption rewrites the file and breaks ' +
+      'existing signatures — sign again afterwards. Type YES to continue.',
+      [{ id: 'confirm', label: 'Confirmation' }], 'Continue');
+    if (confirmed?.confirm !== 'YES') return;
+  }
+  try {
+    setStatus('Removing encryption…', true);
+    const result = await host.call('decrypt', { pdf: state.pdfB64, password });
+    await applyResult(result.pdf, 'Encryption removed.');
+    state.password = null;
+    updateChrome(); // clear the 🔒 badge and disable "Remove encryption" now the doc is open
+  } catch (e) {
+    fail(e);
+  }
+}
+
+/**
+ * #30: stamps a diagonal text watermark across every page. The mark is baked into each page's
+ * content stream by the host (not added as a removable annotation or layer), so it survives being
+ * reopened in another viewer and can't be toggled off from a layers/annotations panel.
+ */
+async function addWatermark() {
+  if (!state.pdf) return;
+  const value = await promptDialog('Add watermark', [
+    { id: 'text', label: 'Text', placeholder: 'CONFIDENTIAL' },
+    { id: 'color', label: 'Colour', type: 'color', value: '#808080' },
+    { id: 'opacity', label: 'Opacity (%)', type: 'number', value: '30' },
+    { id: 'rotation', label: 'Rotation (°)', type: 'number', value: '45' },
+  ], 'Apply');
+  if (!value) return;
+  if (!value.text.trim()) { toast('Watermark text is required.'); return; }
+
+  // The dialog collects opacity as a 0–100 percentage; the host wants a 0–1 fraction.
+  const opacity = Math.min(1, Math.max(0.05, (Number(value.opacity) || 30) / 100));
+  const rotation = Number(value.rotation);
+  try {
+    setStatus('Adding watermark…', true);
+    const result = await host.call('watermark', {
+      pdf: state.pdfB64,
+      text: value.text,
+      color: value.color,
+      opacity,
+      rotation: Number.isFinite(rotation) ? rotation : 45,
+      pdfPassword: state.password,
+    });
+    await applyResult(result.pdf, 'Watermark added.');
+  } catch (e) {
+    fail(e);
+  }
+}
+
+/**
+ * #27: stamps sequential Bates numbers (prefix + zero-padded counter + suffix) into a corner of
+ * each page. Like the watermark, the number is baked into the page content by the host.
+ */
+async function addBates() {
+  if (!state.pdf) return;
+  const value = await promptDialog('Bates numbering', [
+    { id: 'prefix', label: 'Prefix', placeholder: 'ACME' },
+    { id: 'start', label: 'Start at', type: 'number', value: '1' },
+    { id: 'digits', label: 'Digits (zero-padded)', type: 'number', value: '6' },
+    { id: 'suffix', label: 'Suffix (optional)', placeholder: '' },
+    { id: 'position', label: 'Position', type: 'select', value: 'bottom-right', options: [
+      { value: 'bottom-right', label: 'Bottom right' },
+      { value: 'bottom-center', label: 'Bottom centre' },
+      { value: 'bottom-left', label: 'Bottom left' },
+      { value: 'top-right', label: 'Top right' },
+      { value: 'top-center', label: 'Top centre' },
+      { value: 'top-left', label: 'Top left' },
+    ] },
+  ], 'Apply');
+  if (!value) return;
+
+  const start = Number.parseInt(value.start, 10);
+  const digits = Number.parseInt(value.digits, 10);
+  try {
+    setStatus('Adding Bates numbers…', true);
+    const result = await host.call('bates', {
+      pdf: state.pdfB64,
+      prefix: value.prefix,
+      suffix: value.suffix,
+      start: Number.isFinite(start) && start >= 0 ? start : 1,
+      digits: Number.isFinite(digits) ? Math.min(12, Math.max(1, digits)) : 6,
+      position: value.position,
+      pdfPassword: state.password,
+    });
+    await applyResult(result.pdf, `Bates numbers added (${result.first} – ${result.last}).`);
+  } catch (e) {
+    fail(e);
+  }
+}
+
+/**
+ * #44: flattens interactive layers into static page content. The mode chooses how much: forms only,
+ * annotations only, or everything. Flattened content prints identically everywhere and can no longer
+ * be edited or removed as an object.
+ */
+async function flattenDocument() {
+  if (!state.pdf) return;
+  const value = await promptDialog('Flatten', [
+    { id: 'mode', label: 'What to flatten', type: 'select', value: 'everything', options: [
+      { value: 'everything', label: 'Everything (forms + annotations)' },
+      { value: 'forms', label: 'Form fields only' },
+      { value: 'annotations', label: 'Annotations only (comments, markup)' },
+    ] },
+  ], 'Flatten');
+  if (!value) return;
+  try {
+    setStatus('Flattening…', true);
+    const result = await host.call('flatten', {
+      pdf: state.pdfB64, mode: value.mode, pdfPassword: state.password,
+    });
+    const parts = [];
+    if (result.formFields > 0) parts.push(`${result.formFields} form field${result.formFields === 1 ? '' : 's'}`);
+    if (result.annotations > 0) parts.push(`${result.annotations} annotation${result.annotations === 1 ? '' : 's'}`);
+    await applyResult(result.pdf, parts.length ? `Flattened ${parts.join(' and ')}.` : 'Nothing to flatten.');
+  } catch (e) {
+    fail(e);
+  }
+}
+
 // ------------------------------------------------------- find and replace
 
 async function findReplace() {
@@ -2340,7 +2798,15 @@ async function findReplace() {
 
 // ------------------------------------------------------------ open / save
 
-async function openFromBytes(bytes, name) {
+/** Classifies a file as pdf/image/docx by name extension (used when no MIME type is available). */
+function kindForName(name) {
+  const n = (name || '').toLowerCase();
+  if (/\.(png|jpe?g|gif|bmp|tiff?|webp)$/.test(n)) return 'image';
+  if (/\.docx?$/.test(n)) return 'docx';
+  return 'pdf';
+}
+
+async function openFromBytes(bytes, name, kind) {
   try {
     state.history = [];
     state.future = [];
@@ -2349,10 +2815,35 @@ async function openFromBytes(bytes, name) {
     state.keepActiveContent = false; // re-arm the strip-on-save default for each new document
     state.keepLinks = false;
     state.urlVerdicts = [];
-    activity.add('info', 'opening document', `${name} (${bytes.length} bytes)`);
-    await loadDocument(bytes, name);
-    activity.add('info', 'document opened', `${name} — ${state.info.pageCount} page(s)`);
-    toast(`Opened ${name}.`);
+    state.compareOther = null; // a new document invalidates any prior comparison
+
+    // #26: an image (or Word doc) is opened by first converting it to a PDF page in the host, so it
+    // can be edited, OCR'd and merged like any other document. The working name becomes <name>.pdf.
+    let workingName = name;
+    const fileKind = kind ?? kindForName(name);
+    if (fileKind === 'image' || fileKind === 'docx') {
+      activity.add('info', 'importing', `${name} (${fileKind})`);
+      setStatus(`Importing ${fileKind === 'image' ? 'image' : 'document'}…`, true);
+      let res;
+      try {
+        res = await host.call('import', { data: bytesToBase64(bytes), kind: fileKind });
+      } catch (e) {
+        // A native host installed before image support lacks this action; say so plainly rather
+        // than surfacing a bare "unknown action".
+        if (/unknown action/i.test(e?.message ?? '')) {
+          throw new Error('Opening images needs an updated native host. Please reinstall the '
+            + 'PDF Editor native host (it was installed before image support was added), then retry.');
+        }
+        throw e;
+      }
+      bytes = base64ToBytes(res.pdf);
+      workingName = name.replace(/\.[^.]+$/, '') + '.pdf';
+    }
+
+    activity.add('info', 'opening document', `${workingName} (${bytes.length} bytes)`);
+    await loadDocument(bytes, workingName);
+    activity.add('info', 'document opened', `${workingName} — ${state.info.pageCount} page(s)`);
+    toast(`Opened ${workingName}.`);
   } catch (e) {
     fail(e);
   }
@@ -2362,9 +2853,42 @@ async function openFilePicker() {
   $('file-input').onchange = async () => {
     const file = $('file-input').files[0];
     $('file-input').value = '';
-    if (file) await openFromBytes(new Uint8Array(await file.arrayBuffer()), file.name);
+    // Prefer the browser-supplied MIME type (mergeKind) and fall back to the name extension.
+    if (file) await openFromBytes(new Uint8Array(await file.arrayBuffer()), file.name, mergeKind(file));
   };
   $('file-input').click();
+}
+
+/**
+ * Lets a PDF or image be opened by dragging it onto the window. Without this, dropping a file makes
+ * Chrome navigate away from the viewer — so a dragged image simply never opened. Only file drops are
+ * handled; a drag that carries no files (e.g. selecting text) is left alone.
+ */
+function initDragDrop() {
+  const carriesFiles = (e) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+  // Chrome only leaves the file on the page (rather than navigating to it) if the default is
+  // prevented on *every* drag event in the sequence — dragenter and dragover as well as drop.
+  const allow = (e) => {
+    if (!carriesFiles(e)) return false;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    return true;
+  };
+  for (const type of ['dragenter', 'dragover']) {
+    window.addEventListener(type, (e) => { if (allow(e)) document.body.classList.add('drag-over'); });
+  }
+  window.addEventListener('dragleave', (e) => {
+    // relatedTarget is null when the pointer leaves the window entirely.
+    if (e.relatedTarget === null) document.body.classList.remove('drag-over');
+  });
+  window.addEventListener('drop', async (e) => {
+    if (!allow(e)) return;
+    document.body.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (!file) { toast('Drop a single PDF or image file.'); return; }
+    activity.add('info', 'file dropped', `${file.name} (${file.type || 'unknown type'})`);
+    await openFromBytes(new Uint8Array(await file.arrayBuffer()), file.name, mergeKind(file));
+  });
 }
 
 // Blocks loopback/private/link-local hosts -- including the 169.254.169.254 cloud metadata
@@ -2892,6 +3416,8 @@ function pickCompareFile() {
         pdf: state.pdfB64, other, pdfPassword: state.password,
       });
       setStatus('');
+      // Keep the compared bytes so the visual (pixel) diff can be requested per page (#46).
+      state.compareOther = { b64: other, name: file.name };
       renderCompare(report, file.name);
     } catch (e) {
       fail(e);
@@ -2929,9 +3455,11 @@ function renderCompare(report, otherName) {
     li.className = 'organize-item compare-page';
     const label = document.createElement('div');
     label.className = 'organize-label';
-    const num = document.createElement('span');
-    num.className = 'compare-page-num';
+    const num = document.createElement('button');
+    num.className = 'compare-page-num compare-jump';
     num.textContent = `Page ${pg.page}`;
+    num.title = 'Jump to this page';
+    num.addEventListener('click', () => goToPage(pg.page)); // #47: navigate to the changed page
     const words = document.createElement('div');
     words.className = 'compare-words';
     for (const w of pg.removed ?? []) {
@@ -2947,8 +3475,71 @@ function renderCompare(report, otherName) {
       words.appendChild(s);
     }
     label.append(num, words);
+    const vbtn = document.createElement('button');
+    vbtn.className = 'compare-visual';
+    vbtn.textContent = '🖼 Visual diff';
+    vbtn.title = 'Show a rendered pixel diff of this page';
+    vbtn.addEventListener('click', () => showVisualDiff(pg.page));
+    label.appendChild(vbtn);
     li.appendChild(label);
     list.appendChild(li);
+  }
+
+  // A visual diff can be run on ANY page, not only the text-changed ones — that is the point of a
+  // pixel diff: it catches changes text extraction misses (#46). Offer a page picker for that.
+  const vrow = document.createElement('div');
+  vrow.className = 'compare-visual-row';
+  vrow.append('Visual diff — page ');
+  const pageInput = document.createElement('input');
+  pageInput.type = 'number';
+  pageInput.min = '1';
+  pageInput.value = String(state.page);
+  pageInput.className = 'compare-visual-page';
+  pageInput.setAttribute('aria-label', 'Page to visually diff');
+  const showBtn = document.createElement('button');
+  showBtn.textContent = 'Show';
+  showBtn.addEventListener('click', () => showVisualDiff(Number.parseInt(pageInput.value, 10) || 1));
+  vrow.append(pageInput, showBtn);
+  summary.appendChild(vrow);
+}
+
+/** #46: fetches and shows the rendered pixel diff for one page against the compared document. */
+async function showVisualDiff(page) {
+  if (!state.compareOther) { toast('Compare a document first.'); return; }
+  try {
+    setStatus('Rendering visual diff…', true);
+    const res = await host.call('visual-diff', {
+      pdf: state.pdfB64,
+      other: state.compareOther.b64,
+      page,
+      pdfPassword: state.password,
+    });
+    setStatus('');
+
+    modal.innerHTML = '<h2>Visual diff</h2>';
+    const legend = document.createElement('p');
+    legend.className = 'muted';
+    legend.textContent = `Page ${res.page} · ${(res.changedFraction * 100).toFixed(1)}% of pixels `
+      + 'changed. Red = added in this version, blue = removed, grey = unchanged.';
+    modal.appendChild(legend);
+
+    const img = document.createElement('img');
+    img.className = 'visual-diff-img';
+    img.alt = `Visual diff of page ${res.page}`;
+    img.src = `data:image/png;base64,${res.png}`;
+    modal.appendChild(img);
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    const close = document.createElement('button');
+    close.textContent = 'Close';
+    actions.appendChild(close);
+    modal.appendChild(actions);
+    modal.showModal();
+    close.addEventListener('click', () => modal.close());
+    close.focus();
+  } catch (e) {
+    fail(e);
   }
 }
 
@@ -3725,6 +4316,10 @@ function wire() {
   $('btn-find').addEventListener('click', findReplace);
   $('btn-merge').addEventListener('click', mergeFiles);
   $('btn-protect').addEventListener('click', protect);
+  $('btn-decrypt').addEventListener('click', removeEncryption);
+  $('btn-watermark').addEventListener('click', addWatermark);
+  $('btn-bates').addEventListener('click', addBates);
+  $('btn-flatten').addEventListener('click', flattenDocument);
   $('btn-digital').addEventListener('click', digitallySign);
 
   $('btn-prev').addEventListener('click', () => goToPage(state.page - 1));
@@ -3735,6 +4330,17 @@ function wire() {
   $('redact-preview').addEventListener('click', previewRedaction);
   $('redact-apply').addEventListener('click', () => applyRedaction());
   $('redact-clear').addEventListener('click', () => { state.regions = []; drawRegions(); });
+  // Privacy intensity: 0 exact, 1 merge adjacent boxes, 2 round widths, 3 full line, 4 textured.
+  $('redact-intensity').addEventListener('input', (e) => {
+    $('redact-intensity-label').textContent = REDACT_INTENSITY[Number(e.target.value)] ?? 'Exact';
+  });
+  // "Apply to all" sets every already-marked area to the current Privacy level (global override).
+  $('redact-apply-all').addEventListener('click', () => {
+    if (state.regions.length === 0) { toast('No marked areas to update.'); return; }
+    for (const r of state.regions) r.intensity = redactIntensity();
+    drawRegions();
+    toast(`Set all marked areas to “${REDACT_INTENSITY[redactIntensity()]}”.`);
+  });
   $('redact-search-btn').addEventListener('click', searchAndMarkRedactions);
   $('redact-search-text').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); searchAndMarkRedactions(); }
@@ -3763,6 +4369,7 @@ function wire() {
   initMenus();
   initConsole();
   initSignaturePad();
+  initDragDrop();
   window.addEventListener('resize', drawRegions);
 }
 
@@ -3789,6 +4396,68 @@ function closeAllMenus() {
     menu.classList.remove('open');
     menu.querySelector('.menu-trigger')?.setAttribute('aria-expanded', 'false');
   }
+}
+
+/** Condenses the (long) user-agent string to the browser + version, for bug reports. */
+function browserSummary() {
+  const ua = navigator.userAgent || '';
+  const m = /(Edg|Chrome|Chromium)\/([\d.]+)/.exec(ua);
+  if (!m) return ua || 'unknown';
+  const name = m[1] === 'Edg' ? 'Edge' : m[1];
+  return `${name} ${m[2]}`;
+}
+
+/** #103: shows version, build commit and build time, plus the browser, in a modal. */
+async function showAbout() {
+  const manifest = chrome.runtime.getManifest();
+  const meta = await loadBuildMeta((p) => chrome.runtime.getURL(p));
+  const info = formatBuildInfo({
+    version: manifest.version,
+    commit: meta.commit,
+    builtAt: meta.builtAt,
+  });
+
+  // Static markup via innerHTML, every dynamic value via textContent — see #73/#74.
+  modal.innerHTML = '<h2>About</h2>';
+
+  const name = document.createElement('p');
+  name.className = 'about-name';
+  name.textContent = manifest.name || 'Chromium PDF Editor';
+  modal.appendChild(name);
+
+  if (manifest.description) {
+    const desc = document.createElement('p');
+    desc.className = 'muted';
+    desc.textContent = manifest.description;
+    modal.appendChild(desc);
+  }
+
+  const dl = document.createElement('dl');
+  dl.className = 'about-list';
+  const row = (label, value, mono = false) => {
+    const dt = document.createElement('dt');
+    dt.textContent = label;
+    const dd = document.createElement('dd');
+    dd.textContent = value;
+    if (mono) dd.classList.add('about-mono');
+    dl.append(dt, dd);
+  };
+  row('Version', info.version);
+  row('Build', info.commit, info.isRelease);
+  row('Built', info.builtAt);
+  row('Browser', browserSummary());
+  modal.appendChild(dl);
+
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  const close = document.createElement('button');
+  close.textContent = 'Close';
+  actions.appendChild(close);
+  modal.appendChild(actions);
+
+  modal.showModal();
+  close.addEventListener('click', () => modal.close());
+  close.focus();
 }
 
 async function start() {

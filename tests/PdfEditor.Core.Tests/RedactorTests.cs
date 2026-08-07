@@ -33,6 +33,21 @@ public class RedactorTests
     }
 
     [Fact]
+    public void HatchFill_StillRedacts_AndCoversTheRegion()
+    {
+        byte[] pdf = TestPdfs.WithText(("TOP SECRET", 72, 700, 14));
+
+        var result = Redactor.Redact(pdf, new[] { new RectRegion(1, 60, 690, 200, 30) },
+            fill: Redactor.Fill.Hatch);
+
+        // The text is still truly removed...
+        Assert.DoesNotContain("SECRET", TestPdfAssert.ExtractText(result.Pdf));
+        // ...and the region is heavily inked (the solid base under the hatch keeps it opaque).
+        Assert.True(TestPdfAssert.InkFraction(result.Pdf, 1, 62, 692, 258, 718, 150) > 0.8,
+            "the hatched box should still fully cover its region");
+    }
+
+    [Fact]
     public void RemovesOnlyTheCoveredWord_WhenRegionCoversPartOfALine()
     {
         byte[] pdf = TestPdfs.WithText(("Alpha Bravo Charlie", 72, 700, 14));

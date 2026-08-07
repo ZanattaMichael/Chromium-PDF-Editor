@@ -348,6 +348,73 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('open image: a PNG opens as an editable one-page PDF (#26)', async () => {
+    // A 16x16 solid-red opaque PNG, generated once (zlib-deflated RGB scanlines).
+    const pngB64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGO4IyJCEmIY1TCqYfhqAAACcQQQFwFJQgAAAABJRU5ErkJggg==';
+    const imgPath = path.join(fixtureDir, 'photo.png');
+    fs.writeFileSync(imgPath, Buffer.from(pngB64, 'base64'));
+
+    // Opening the image converts it to a PDF page in the host, then loads it like any document.
+    const page = await openViewerWith(imgPath);
+    await expect(page.locator('#page-total')).toHaveText('1');
+    await expect(page.locator('#status')).toContainText('photo.pdf');
+
+    // The red image is drawn on the page — ink in the centred band it was fitted into.
+    expect(await inkFraction(page, { x: 120, y: 350, width: 300, height: 150 })).toBeGreaterThan(0);
+    await page.close();
+  });
+
+  test('drag-and-drop: dropping an image onto the window opens it (#26)', async () => {
+    const pngB64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGO4IyJCEmIY1TCqYfhqAAACcQQQFwFJQgAAAABJRU5ErkJggg==';
+    const page = await ext.context.newPage();
+    await page.goto(ext.viewerUrl);
+
+    // Build a DataTransfer carrying a PNG File and dispatch a real drop on the body.
+    const dt = await page.evaluateHandle((b64) => {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const data = new DataTransfer();
+      data.items.add(new File([bytes], 'dropped.png', { type: 'image/png' }));
+      return data;
+    }, pngB64);
+    await page.dispatchEvent('body', 'drop', { dataTransfer: dt });
+
+    // It is converted to a one-page PDF and rendered, exactly like the file-picker path.
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+    await expect(page.locator('#page-total')).toHaveText('1');
+    await expect(page.locator('#status')).toContainText('dropped.pdf');
+    await page.close();
+  });
+
+  test('redaction: "Apply to all" sets the Privacy level on existing marked areas (#privacy)', async () => {
+    const file = fixture('privacy-all.pdf', [[
+      { text: 'SECRET', x: 72, y: 700 },
+      { text: 'PUBLIC', x: 320, y: 700 },
+    ]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-redact');
+    // Mark one word at the default (Exact) level — the chip shows no type suffix.
+    await dragPdfRect(page, { x: 60, y: 690, width: 120, height: 34 });
+    await expect(page.locator('#redact-list li')).toContainText('#1 p1');
+    await expect(page.locator('#redact-list li')).not.toContainText('Full line');
+
+    // Raise Privacy to Full line and push it onto the existing area.
+    await page.locator('#redact-intensity').evaluate((el) => {
+      el.value = '3';
+      el.dispatchEvent(new Event('input'));
+    });
+    await page.click('#redact-apply-all');
+    await expect(page.locator('#redact-list li')).toContainText('Full line');
+
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+    // Full-line took effect globally: the far end of the line is blacked out and its text is gone.
+    const stats = await bandStats(page, { x: 300, y: 694, width: 240, height: 22 });
+    expect(stats.ink).toBe(1);
+    await expectText(page).not.toContain('PUBLIC');
+    await page.close();
+  });
+
   test('redaction: draw, preview window, apply — content removed and box painted', async () => {
     const file = fixture('redact.pdf', [[
       { text: 'TOP SECRET DATA', x: 72, y: 700 },
@@ -398,6 +465,98 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     expect(survivorAfter.y).toBeCloseTo(survivorBefore.y, 0);
     expect(survivorAfter.width).toBeCloseTo(survivorBefore.width, 0);
     expect(survivorAfter.height).toBeCloseTo(survivorBefore.height, 0);
+    await page.close();
+  });
+
+  test('redaction report: shows per-page counts after applying (#48)', async () => {
+    const file = fixture('redact-report.pdf', [[
+      { text: 'TOP SECRET DATA', x: 72, y: 700 },
+      { text: 'public information', x: 72, y: 600 },
+    ]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-redact');
+    await dragPdfRect(page, { x: 60, y: 690, width: 260, height: 34 });
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
+
+    await page.click('#redact-apply');
+
+    // The audit modal appears with a per-page table and a totals row.
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Redaction report');
+    await expect(dialog.locator('.report-table')).toContainText('Text runs');
+    const totals = dialog.locator('.report-total');
+    await expect(totals).toContainText('Total');
+    // One region was applied; at least one text run sat under it.
+    await expect(totals).toContainText('1');
+
+    // The compliance detail shows the actual text that was removed, and offers a download.
+    await expect(dialog).toContainText('Removed content');
+    await expect(dialog.locator('.report-removed')).toContainText('TOP SECRET');
+    await expect(dialog.getByRole('button', { name: /Download compliance report/ })).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await expect(dialog).toBeHidden();
+    await page.close();
+  });
+
+  test('redaction: full-line box hides the length and clears the whole line (#privacy)', async () => {
+    // Two words on one line; we mark only the first, but choose the length-hiding "Full line" box.
+    const file = fixture('rlen.pdf', [[
+      { text: 'SECRET', x: 72, y: 700 },
+      { text: 'PUBLIC', x: 320, y: 700 },
+    ]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-redact');
+    // Privacy intensity 3 = "Full line". Set it before marking so the box captures the level;
+    // "Apply to all" would also push it onto existing boxes.
+    await page.locator('#redact-intensity').evaluate((el) => {
+      el.value = '3';
+      el.dispatchEvent(new Event('input'));
+    });
+    await dragPdfRect(page, { x: 60, y: 690, width: 120, height: 34 });
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+
+    // The black box now spans the whole line, so its width leaks nothing about the marked word...
+    const farRight = { x: 300, y: 694, width: 240, height: 22 };
+    const stats = await bandStats(page, farRight);
+    expect(stats.ink).toBe(1);
+    expect(stats.dominant).toEqual([0, 0, 0]);
+    // ...and every word on the line — not just the one marked — is gone from the file.
+    await expectText(page).not.toContain('SECRET');
+    await expectText(page).not.toContain('PUBLIC');
+    await page.close();
+  });
+
+  test('search & mark: match mode and case sensitivity control what is marked (#search)', async () => {
+    const file = fixture('search-modes.pdf', [[
+      { text: 'Assignment assign ASSIGN', x: 72, y: 700 },
+    ]]);
+    const page = await openViewerWith(file);
+    await ui(page, '#tool-redact');
+
+    // Default: case-insensitive, contains → "assign" matches inside "Assignment", "assign", "ASSIGN".
+    await page.fill('#redact-search-text', 'assign');
+    await page.click('#redact-search-btn');
+    await expect(page.locator('#redact-list li')).toHaveCount(3);
+    await page.click('#redact-clear');
+    await expect(page.locator('#redact-list li')).toHaveCount(0);
+
+    // Whole word → only the standalone "assign"/"ASSIGN" (still case-insensitive), not "Assignment".
+    await page.selectOption('#redact-match-mode', 'wholeWord');
+    await page.fill('#redact-search-text', 'assign');
+    await page.click('#redact-search-btn');
+    await expect(page.locator('#redact-list li')).toHaveCount(2);
+    await page.click('#redact-clear');
+
+    // Case sensitive whole word → only the exact-case "ASSIGN".
+    await page.check('#redact-case');
+    await page.fill('#redact-search-text', 'ASSIGN');
+    await page.click('#redact-search-btn');
+    await expect(page.locator('#redact-list li')).toHaveCount(1);
     await page.close();
   });
 
@@ -741,6 +900,28 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const drawn = await inkBounds(page, wholeLine);
     expect(drawn.x).toBeGreaterThanOrEqual(100);
     expect(drawn.x + drawn.width).toBeLessThanOrEqual(300);
+    await page.close();
+  });
+
+  test('flatten: forms mode bakes fields into static content (#44)', async () => {
+    const file = path.join(fixtureDir, 'flatten-forms.pdf');
+    fs.writeFileSync(file, buildFormPdf('fullName', 'Ada Lovelace'));
+    const page = await openViewerWith(file);
+
+    // The field is interactive before flattening.
+    await ui(page, '#btn-forms');
+    await expect(page.locator('#forms-list [data-field="fullName"]')).toHaveCount(1);
+
+    await ui(page, '#btn-flatten');
+    const dialog = page.locator('dialog#modal');
+    await dialog.locator('select').selectOption('forms');
+    await dialog.getByRole('button', { name: 'Flatten' }).click();
+    await expect(page.locator('#status')).toContainText('Flattened 1 form field');
+
+    // No interactive field remains, but its value is still drawn in the field's rectangle.
+    await ui(page, '#btn-forms');
+    await expect(page.locator('#forms-list [data-field="fullName"]')).toHaveCount(0);
+    expect(await inkFraction(page, { x: 102, y: 702, width: 196, height: 20 })).toBeGreaterThan(0.01);
     await page.close();
   });
 
@@ -1241,7 +1422,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.mouse.move(cx(320), cy(825), { steps: 5 });
     await page.mouse.up();
 
-    await expect(page.locator('#redact-list li')).toHaveText(/page 2/);
+    await expect(page.locator('#redact-list li')).toContainText('p2');
     await page.click('#redact-apply');
     await expect(page.locator('#status')).toContainText('content removed');
 
@@ -2298,6 +2479,34 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('compare versions: visual diff renders a pixel-diff image for a page (#46/#47)', async () => {
+    const current = fixture('vdiff-new.pdf', [[{ text: 'Amount Due 750 dollars', x: 72, y: 700 }]]);
+    const older = fixture('vdiff-old.pdf', [[{ text: 'Amount Due 500 dollars', x: 72, y: 700 }]]);
+    const page = await openViewerWith(current);
+
+    const chooser = page.waitForEvent('filechooser');
+    await ui(page, '#btn-compare');
+    await (await chooser).setFiles(older);
+    await expect(page.locator('#panel-compare')).toBeVisible();
+
+    // The changed page carries a "Visual diff" button; clicking it renders the pixel diff modal.
+    await page.locator('#compare-list .compare-visual').first().click();
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('Visual diff');
+    await expect(dialog).toContainText('% of pixels');
+    await expect(dialog.locator('img.visual-diff-img')).toHaveAttribute('src', /^data:image\/png;base64,/);
+
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await expect(dialog).toBeHidden();
+
+    // The standalone page picker works too (for pages the text diff didn't flag).
+    await page.locator('.compare-visual-row .compare-visual-page').fill('1');
+    await page.locator('.compare-visual-row button', { hasText: 'Show' }).click();
+    await expect(dialog.locator('img.visual-diff-img')).toHaveAttribute('src', /^data:image\/png;base64,/);
+    await page.close();
+  });
+
   test('compare versions: identical documents report no differences', async () => {
     const same = fixture('compare-same.pdf', [[{ text: 'Unchanged content here', x: 72, y: 700 }]]);
     const page = await openViewerWith(same);
@@ -2361,6 +2570,75 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.click('#btn-zoom-in');
     await expect(page.locator('#zoom-label')).toHaveText('125%');
     await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+    await page.close();
+  });
+
+  test('remove encryption: strips the password from a protected document (#25)', async () => {
+    const file = fixture('decrypt.pdf', [[{ text: 'classified', x: 72, y: 700 }]]);
+    const page = await openViewerWith(file);
+
+    // "Remove encryption" is disabled until the document is actually encrypted.
+    await page.click('#menu-edit-trigger');
+    await expect(page.locator('#btn-decrypt')).toBeDisabled();
+    await page.click('#menu-edit-trigger'); // close the menu again
+
+    // Encrypt it, then strip the encryption back off.
+    await ui(page, '#btn-protect');
+    await fillDialog(page, ['s3cret', null], 'Encrypt');
+    await expect(page.locator('#badges .badge.locked')).toBeVisible();
+
+    await ui(page, '#btn-decrypt');
+    await expect(page.locator('#status')).toContainText('Encryption removed');
+    await expect(page.locator('#badges .badge.locked')).toHaveCount(0);
+
+    // Still a working document, and the control is disabled again now that it is not encrypted.
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+    await page.click('#menu-edit-trigger');
+    await expect(page.locator('#btn-decrypt')).toBeDisabled();
+    await page.close();
+  });
+
+  test('watermark: stamps text across the page and bakes it in (#30)', async () => {
+    // Body text sits low on the page; the centred watermark paints the middle, previously-blank band.
+    const file = fixture('watermark.pdf', [[{ text: 'body copy', x: 72, y: 80 }]]);
+    const page = await openViewerWith(file);
+
+    const band = { x: 150, y: 360, width: 300, height: 120 };
+    expect(await inkFraction(page, band)).toBe(0);
+
+    // Opaque black so the stamped glyphs clear the ink/darkness threshold. The colour input is a
+    // native picker (fill() doesn't apply to type=color), so set its value directly.
+    await ui(page, '#btn-watermark');
+    const dialog = page.locator('dialog#modal');
+    await dialog.locator('input').nth(0).fill('CONFIDENTIAL');
+    await dialog.locator('input[type=color]').evaluate((el) => { el.value = '#000000'; });
+    await dialog.locator('input').nth(2).fill('100'); // opacity %
+    await dialog.locator('input').nth(3).fill('45');  // rotation °
+    await dialog.getByRole('button', { name: 'Apply' }).click();
+    await expect(page.locator('#status')).toContainText('Watermark added');
+
+    expect(await inkFraction(page, band)).toBeGreaterThan(0);
+    await page.close();
+  });
+
+  test('bates numbering: stamps a sequential number in the bottom-right corner (#27)', async () => {
+    const file = fixture('bates.pdf', [[{ text: 'body copy', x: 72, y: 400 }]]);
+    const page = await openViewerWith(file);
+
+    // Bottom-right corner band is blank before numbering.
+    const corner = { x: 470, y: 20, width: 110, height: 22 };
+    expect(await inkFraction(page, corner)).toBe(0);
+
+    await ui(page, '#btn-bates');
+    const dialog = page.locator('dialog#modal');
+    await dialog.locator('input').nth(0).fill('ACME');   // prefix
+    await dialog.locator('input').nth(1).fill('1');       // start
+    await dialog.locator('input').nth(2).fill('6');       // digits
+    await dialog.locator('select').selectOption('bottom-right');
+    await dialog.getByRole('button', { name: 'Apply' }).click();
+
+    await expect(page.locator('#status')).toContainText('ACME000001');
+    expect(await inkFraction(page, corner)).toBeGreaterThan(0);
     await page.close();
   });
 
@@ -2496,6 +2774,43 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
 
     await page.locator('#console-close').click();
     await expect(page.locator('#console-pane')).toBeHidden();
+    await page.close();
+  });
+
+  test('help: About shows the version, build and browser (#103)', async () => {
+    // Help is reachable with no document open, so About works from the empty state.
+    const page = await ext.context.newPage();
+    await page.goto(ext.viewerUrl);
+    const version = await page.evaluate(() => chrome.runtime.getManifest().version);
+
+    await ui(page, '#btn-about');
+    const dialog = page.locator('dialog#modal');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('About');
+    // The manifest version, and rows for the build stamp and the browser.
+    await expect(dialog.locator('.about-list')).toContainText(version);
+    await expect(dialog.locator('.about-list')).toContainText('Build');
+    await expect(dialog.locator('.about-list')).toContainText('Browser');
+
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await expect(dialog).toBeHidden();
+    await page.close();
+  });
+
+  test('activity console: diagnostics mode records environment and transfer sizes (#97)', async () => {
+    const page = await openViewerWith(fixture('diag.pdf', [[{ text: 'Diag', x: 72, y: 700 }]]));
+    await openConsole(page);
+    const log = page.locator('#console-log');
+
+    await page.check('#console-diagnostics');
+    // Enabling it records an environment snapshot as tagged diagnostic entries.
+    await expect(log.locator('.console-entry.diag', { hasText: 'extension version' })).toHaveCount(1);
+    await expect(log.locator('.console-entry.diag', { hasText: 'browser' })).toHaveCount(1);
+    await expect(log.locator('.console-entry.diag', { hasText: 'native host version' })).toHaveCount(1);
+
+    // A subsequent host round-trip now carries transfer sizes and is tagged diagnostic.
+    await page.click('#btn-zoom-in');
+    await expect(log.locator('.console-entry.diag', { hasText: 'recv' }).first()).toBeVisible();
     await page.close();
   });
 

@@ -69,6 +69,7 @@ public static class MessageProcessor
         "inspect-hidden" => InspectHiddenAction(p),
         "sanitize" => SanitizeAction(p),
         "compare" => CompareAction(p),
+        "visual-diff" => VisualDiffAction(p),
         "ocr-available" => new { available = OcrTool.CanOcr },
         "ocr-text" => OcrTextAction(p),
         "ocr-searchable" => OcrSearchableAction(p),
@@ -82,8 +83,12 @@ public static class MessageProcessor
         "replace-all" => ReplaceAllAction(p),
         "merge" => MergeAction(p),
         "merge-files" => MergeFilesAction(p),
+        "import" => ImportAction(p),
         "encrypt" => EncryptAction(p),
         "decrypt" => DecryptAction(p),
+        "watermark" => WatermarkAction(p),
+        "bates" => BatesAction(p),
+        "flatten" => FlattenAction(p),
         "sign-image" => SignImage(p),
         "sign-digital" => SignDigital(p),
         "signatures" => Signatures(p),
@@ -118,9 +123,45 @@ public static class MessageProcessor
 
     private static object Redact(JsonObject p)
     {
-        var result = Redactor.Redact(Pdf(p), Regions(p["regions"]!.AsArray()), Password(p));
-        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+        var pdf = Pdf(p);
+        var password = Password(p);
+        int globalIntensity = p["intensity"]?.GetValue<int>() ?? 0;
+        // Each region may carry its own Privacy level (per-redaction); anything without one uses the
+        // global level. Group by effective level and prepare each group — merging/widening only make
+        // sense within a single level. The prepared boxes drive both the removal and the report, so
+        // nothing live is ever left hidden under a box.
+        var groups = new Dictionary<int, List<RectRegion>>();
+        foreach (var n in p["regions"]!.AsArray())
+        {
+            var o = n!.AsObject();
+            int gi = o["intensity"]?.GetValue<int>() ?? globalIntensity;
+            if (!groups.TryGetValue(gi, out var list)) groups[gi] = list = new List<RectRegion>();
+            list.Add(Region(o));
+        }
+        var regions = new List<RectRegion>();
+        foreach (var (gi, regs) in groups)
+            regions.AddRange(RedactionBox.Prepare(pdf, regs, gi, password));
+        // The top level (4) paints a textured hatch instead of flat black; apply it if any box asks.
+        var fill = groups.Keys.Any(k => k >= 4) ? Redactor.Fill.Hatch : Redactor.Fill.Solid;
+        // Audit the original document before the content is removed: what was under the boxes is
+        // exactly what the redaction takes out (#48).
+        var report = RedactionReporter.Analyze(pdf, regions, password);
+        var result = Redactor.Redact(pdf, regions, password, fill);
+        // Integrity: SHA-256 of the document before and after, so the downloadable compliance
+        // report can be tied to the exact files it describes.
+        return new
+        {
+            pdf = Convert.ToBase64String(result.Pdf),
+            warnings = result.Warnings,
+            report,
+            originalSha256 = Sha256Hex(pdf),
+            outputSha256 = Sha256Hex(result.Pdf),
+            generatedUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture),
+        };
     }
+
+    private static string Sha256Hex(byte[] data) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(data)).ToLowerInvariant();
 
     private static object RotateAction(JsonObject p)
     {
@@ -339,6 +380,23 @@ public static class MessageProcessor
         };
     }
 
+    private static object VisualDiffAction(JsonObject p)
+    {
+        // Same orientation as compare: 'other' is the previous version, the loaded document is newer.
+        byte[] other = Convert.FromBase64String(p["other"]?.GetValue<string>()
+            ?? throw new InvalidDataException("Missing 'other' document."));
+        string? otherPassword = p["otherPassword"]?.GetValue<string>();
+        int page = p["page"]!.GetValue<int>();
+        int dpi = p["dpi"]?.GetValue<int>() ?? 120;
+        var diff = VisualDiff.DiffPage(other, Pdf(p), page, dpi, otherPassword, Password(p));
+        return new
+        {
+            page = diff.Page,
+            changedFraction = diff.ChangedFraction,
+            png = Convert.ToBase64String(diff.Png),
+        };
+    }
+
     private static object InspectHiddenAction(JsonObject p)
     {
         var r = Sanitizer.Inspect(Pdf(p), Password(p));
@@ -454,7 +512,9 @@ public static class MessageProcessor
 
     private static object FindTextAction(JsonObject p)
     {
-        var matches = TextTools.FindText(Pdf(p), p["phrase"]?.GetValue<string>() ?? "", Password(p));
+        var options = SearchOptions.Parse(p["matchMode"]?.GetValue<string>(),
+            p["caseSensitive"]?.GetValue<bool>() ?? false);
+        var matches = TextTools.FindText(Pdf(p), p["phrase"]?.GetValue<string>() ?? "", Password(p), options);
         return new
         {
             matches = matches.Select(m => new
@@ -491,6 +551,14 @@ public static class MessageProcessor
         return new { pdf = Convert.ToBase64String(Merger.Merge(pdfs)) };
     }
 
+    // Converts a single non-PDF input (image or Word doc) to a PDF so it can be opened and edited
+    // directly, not just merged. { data: base64, kind: "image"|"docx" }.
+    private static object ImportAction(JsonObject p)
+    {
+        byte[] data = Convert.FromBase64String(p["data"]!.GetValue<string>());
+        return new { pdf = Convert.ToBase64String(DocumentImport.ToPdf(data, p["kind"]?.GetValue<string>() ?? "image")) };
+    }
+
     private static object EncryptAction(JsonObject p) => new
     {
         pdf = Convert.ToBase64String(Encryptor.Encrypt(Pdf(p),
@@ -502,6 +570,53 @@ public static class MessageProcessor
     {
         pdf = Convert.ToBase64String(Encryptor.Decrypt(Pdf(p), p["password"]!.GetValue<string>()))
     };
+
+    private static object WatermarkAction(JsonObject p)
+    {
+        var options = new WatermarkOptions(
+            FontFamily: p["fontFamily"]?.GetValue<string>(),
+            Bold: p["bold"]?.GetValue<bool>() ?? false,
+            Italic: p["italic"]?.GetValue<bool>() ?? false,
+            ColorHex: p[ColorKey]?.GetValue<string>(),
+            Opacity: p["opacity"]?.GetValue<float>() ?? 0.3f,
+            RotationDegrees: p["rotation"]?.GetValue<float>() ?? 45f,
+            FontSize: p["fontSize"]?.GetValue<float>(),
+            Pages: p["pages"]?.AsArray().Select(n => n!.GetValue<int>()).ToList());
+        var result = WatermarkTool.AddTextWatermark(Pdf(p), p["text"]!.GetValue<string>(), options, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings };
+    }
+
+    private static object FlattenAction(JsonObject p)
+    {
+        var mode = (p["mode"]?.GetValue<string>() ?? "everything").ToLowerInvariant() switch
+        {
+            "forms" => FlattenTool.Mode.Forms,
+            "annotations" => FlattenTool.Mode.AnnotationsOnly,
+            _ => FlattenTool.Mode.Everything,
+        };
+        var result = FlattenTool.Flatten(Pdf(p), mode, Password(p));
+        return new
+        {
+            pdf = Convert.ToBase64String(result.Pdf),
+            formFields = result.FormFieldsFlattened,
+            annotations = result.AnnotationsFlattened,
+        };
+    }
+
+    private static object BatesAction(JsonObject p)
+    {
+        var options = new BatesOptions(
+            Prefix: p["prefix"]?.GetValue<string>(),
+            Suffix: p["suffix"]?.GetValue<string>(),
+            Start: p["start"]?.GetValue<int>() ?? 1,
+            Digits: p["digits"]?.GetValue<int>() ?? 6,
+            Position: BatesTool.ParseCorner(p["position"]?.GetValue<string>()),
+            FontSize: p["fontSize"]?.GetValue<float>() ?? 10f,
+            ColorHex: p[ColorKey]?.GetValue<string>(),
+            Pages: p["pages"]?.AsArray().Select(n => n!.GetValue<int>()).ToList());
+        var result = BatesTool.AddBatesNumbers(Pdf(p), options, Password(p));
+        return new { pdf = Convert.ToBase64String(result.Pdf), first = result.FirstLabel, last = result.LastLabel };
+    }
 
     private static object SignImage(JsonObject p) => new
     {

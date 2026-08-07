@@ -23,7 +23,10 @@ export function formatTime(date) {
 export function formatEntry(entry) {
   const level = entry.level.toUpperCase().padEnd(5, ' ');
   const detail = entry.detail ? ` — ${entry.detail}` : '';
-  return `${formatTime(entry.time)}  ${level}  ${entry.message}${detail}`;
+  // Diagnostic entries are marked so a copied/downloaded log makes clear which lines are the
+  // opt-in debugging detail (#97) versus the ordinary activity trace.
+  const tag = entry.diagnostic ? ' [diag]' : '';
+  return `${formatTime(entry.time)}  ${level}${tag}  ${entry.message}${detail}`;
 }
 
 export const DEFAULT_CAPACITY = 500;
@@ -54,13 +57,14 @@ export class ActivityLog {
    * name, say) and `detail` the optional extra (an error message, a duration, a file name).
    * Both may be attacker-controlled text — they are stored verbatim and never parsed.
    */
-  add(level, message, detail = '') {
+  add(level, message, detail = '', { diagnostic = false } = {}) {
     const entry = {
       seq: ++this.#seq,
       time: new Date(),
       level: LEVELS.includes(level) ? level : 'info',
       message: String(message),
       detail: detail ? String(detail) : '',
+      diagnostic: Boolean(diagnostic),
     };
     this.#entries.push(entry);
     while (this.#entries.length > this.#capacity) {

@@ -20,6 +20,17 @@ test('falls back to info for an unknown level', () => {
   assert.equal(log.add('shout', 'x').level, 'info');
 });
 
+test('entries are not diagnostic by default; the opt-in flag marks and tags them (#97)', () => {
+  const log = new ActivityLog();
+  const plain = log.add('info', 'render', '42 ms');
+  const diag = log.add('info', 'browser', 'Chrome 128', { diagnostic: true });
+  assert.equal(plain.diagnostic, false);
+  assert.equal(diag.diagnostic, true);
+  // The plain-text form marks diagnostic lines so a copied/downloaded log distinguishes them.
+  assert.ok(!formatEntry(plain).includes('[diag]'));
+  assert.ok(formatEntry(diag).includes('[diag]'));
+});
+
 test('caps retention so a long session cannot grow without bound', () => {
   const log = new ActivityLog(3);
   for (const n of [1, 2, 3, 4, 5]) log.add('info', `entry ${n}`);

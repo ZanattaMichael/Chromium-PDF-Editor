@@ -272,6 +272,57 @@ public class TextToolsTests
     }
 
     [Fact]
+    public void FindText_DefaultsToCaseInsensitiveContains()
+    {
+        byte[] pdf = TestPdfs.WithText(("The Assignment is Confidential", 72, 700, 12));
+
+        // Different case, and a substring inside a word ("sign" within "Assignment").
+        Assert.Single(TextTools.FindText(pdf, "confidential"));
+        Assert.Single(TextTools.FindText(pdf, "sign"));
+    }
+
+    [Fact]
+    public void FindText_CaseSensitive_OnlyMatchesExactCase()
+    {
+        byte[] pdf = TestPdfs.WithText(("Confidential", 72, 700, 12));
+        var opts = new SearchOptions(TextMatchMode.Contains, CaseSensitive: true);
+
+        Assert.Empty(TextTools.FindText(pdf, "confidential", null, opts));
+        Assert.Single(TextTools.FindText(pdf, "Confidential", null, opts));
+    }
+
+    [Fact]
+    public void FindText_WholeWord_DoesNotMatchAsubstringInsideAWord()
+    {
+        byte[] pdf = TestPdfs.WithText(("Assignment sign", 72, 700, 12));
+        var opts = new SearchOptions(TextMatchMode.WholeWord);
+
+        // "sign" as a whole word matches the standalone word, not the "sign" inside "Assignment".
+        var match = Assert.Single(TextTools.FindText(pdf, "sign", null, opts));
+        Assert.True(match.Width > 0);
+    }
+
+    [Fact]
+    public void FindText_StartsWith_AnchorsToTheWordStart()
+    {
+        byte[] pdf = TestPdfs.WithText(("apply application misapply", 72, 700, 12));
+        var opts = new SearchOptions(TextMatchMode.StartsWith);
+
+        // "appl" starts "apply" and "application" but not "misapply".
+        Assert.Equal(2, TextTools.FindText(pdf, "appl", null, opts).Count);
+    }
+
+    [Theory]
+    [InlineData("starts-with", TextMatchMode.StartsWith)]
+    [InlineData("WHOLEWORD", TextMatchMode.WholeWord)]
+    [InlineData("ends_with", TextMatchMode.EndsWith)]
+    [InlineData("anything", TextMatchMode.Contains)]
+    public void SearchOptions_Parse_MapsWireValues(string input, TextMatchMode expected)
+    {
+        Assert.Equal(expected, SearchOptions.Parse(input, false).Mode);
+    }
+
+    [Fact]
     public void ReplaceAll_ReplacesEveryOccurrence()
     {
         byte[] pdf = TestPdfs.WithText(

@@ -10,7 +10,7 @@
     <!-- Always-visible essentials: open/save/print, history, and the default hand tool. -->
     <fieldset class="group" aria-label="Document">
       <button id="btn-sidebar" title="Toggle the page thumbnails sidebar" disabled>☰</button>
-      <button id="btn-open" title="Open a PDF file">📂 Open</button>
+      <button id="btn-open" title="Open a PDF or image file">📂 Open</button>
       <button id="btn-save" title="Save the edited PDF" disabled>💾 Save</button>
       <button id="btn-print" title="Print the document" disabled>🖨 Print</button>
       <button id="btn-undo" title="Undo last change" disabled>↩</button>
@@ -52,6 +52,9 @@
         <button id="btn-rotate-right" class="menu-item" role="menuitem">⟳ Rotate right</button>
         <button id="btn-organize" class="menu-item" role="menuitem" title="Reorder or delete pages">🗂 Organize pages…</button>
         <button id="btn-merge" class="menu-item" role="menuitem" title="Append PDFs, images, or Word documents">➕ Merge files…</button>
+        <button id="btn-watermark" class="menu-item" role="menuitem" title="Stamp text (e.g. CONFIDENTIAL) diagonally across every page">💧 Watermark…</button>
+        <button id="btn-bates" class="menu-item" role="menuitem" title="Stamp sequential Bates numbers (e.g. ACME000001) on each page">🔢 Bates numbering…</button>
+        <button id="btn-flatten" class="menu-item" role="menuitem" title="Bake forms and/or annotations into static page content">▦ Flatten…</button>
         <div class="menu-sep" aria-hidden="true"></div>
         <div class="menu-label">Advanced</div>
         <button id="btn-js" class="menu-item" role="menuitem" title="Add interactive JavaScript to the document">⚙ JavaScript…</button>
@@ -60,6 +63,7 @@
         <div class="menu-sep" aria-hidden="true"></div>
         <div class="menu-label">Secure</div>
         <button id="btn-protect" class="menu-item" role="menuitem" title="Password-protect (AES-256)">🔒 Protect</button>
+        <button id="btn-decrypt" class="menu-item" role="menuitem" title="Remove password protection (needs the current password)">🔓 Remove encryption</button>
         <button id="btn-digital" class="menu-item" role="menuitem" title="Digitally sign with a certificate">🪪 Certify</button>
       </div>
     </div>
@@ -72,6 +76,8 @@
       <div class="menu-panel" role="menu">
         <button id="btn-console" class="menu-item" role="menuitem"
           aria-pressed="false" title="Show a log of actions, timings and errors">🧾 Activity console</button>
+        <button id="btn-about" class="menu-item" role="menuitem"
+          title="Version and build information">ℹ About</button>
       </div>
     </div>
 
@@ -99,8 +105,8 @@
       <div id="pages"></div>
       <div id="empty-state">
         <h1>PDF Editor</h1>
-        <p>Open a PDF to start editing, or navigate to any PDF and it will open here automatically.</p>
-        <button id="btn-open-empty">📂 Open a PDF…</button>
+        <p>Open a PDF or an image to start editing — use the button below or drag a file in. Navigating to any PDF opens it here automatically.</p>
+        <button id="btn-open-empty">📂 Open a PDF or image…</button>
         <p id="host-status" class="muted"></p>
       </div>
     </div>
@@ -114,12 +120,32 @@
           <input id="redact-search-text" type="text" placeholder="Find text to redact…" aria-label="Text to redact" />
           <button id="redact-search-btn">🔍 Find &amp; mark</button>
         </div>
-        <ul id="redact-list"></ul>
+        <div id="redact-search-opts">
+          <select id="redact-match-mode" aria-label="How to match the search text">
+            <option value="contains">Contains</option>
+            <option value="startsWith">Starts with</option>
+            <option value="endsWith">Ends with</option>
+            <option value="wholeWord">Whole word</option>
+          </select>
+          <label class="redact-opt"><input id="redact-case" type="checkbox" /> Case sensitive</label>
+        </div>
+        <label id="redact-intensity-row"
+          title="Higher settings merge adjacent boxes and widen them so the black box does not reveal how long the removed text was">
+          <span class="redact-privacy-label">Privacy: <output id="redact-intensity-label">Exact</output></span>
+          <input id="redact-intensity" type="range" min="0" max="4" step="1" value="0"
+            aria-label="Redaction privacy intensity" />
+        </label>
+        <div id="redact-privacy-hint" class="muted">New areas use this level; press “Apply to all” to change existing ones.
+          <button id="redact-apply-all" type="button">Apply to all</button></div>
         <div class="actions">
           <button id="redact-preview" disabled>👁 Preview</button>
           <button id="redact-apply" class="danger" disabled>Apply redaction</button>
           <button id="redact-clear" disabled>Clear</button>
         </div>
+        <!-- Marked areas live below the actions so a growing list never pushes the buttons around,
+             and render as wrapping chips (not a scrolling list) so there is no scrollbar to jump. -->
+        <div id="redact-count" class="muted" aria-live="polite"></div>
+        <ul id="redact-list" aria-label="Marked areas"></ul>
       </div>
 
       <div id="panel-links" class="panel-section" hidden>
@@ -301,7 +327,9 @@
       <span id="console-count" class="muted"></span>
       <span class="console-spacer"></span>
       <label class="console-option"><input id="console-autoscroll" type="checkbox" checked /> Auto-scroll</label>
+      <label class="console-option" title="Record extra detail (versions, transfer sizes) to help diagnose problems"><input id="console-diagnostics" type="checkbox" /> Diagnostics</label>
       <button id="console-copy" title="Copy the whole log to the clipboard">Copy all</button>
+      <button id="console-download" title="Download the log as a text file for a bug report">Download</button>
       <button id="console-clear" title="Discard every entry">Clear</button>
       <button id="console-close" title="Hide the console">✕</button>
     </div>
@@ -345,7 +373,9 @@
   </dialog>
 
   <dialog id="modal"></dialog>
-  <input id="file-input" type="file" accept="application/pdf" aria-label="Open PDF file" hidden />
+  <input id="file-input" type="file"
+    accept="application/pdf,image/png,image/jpeg,image/gif,image/bmp,image/tiff,image/webp"
+    aria-label="Open a PDF or image file" hidden />
   <input id="merge-input" type="file" multiple hidden aria-label="Files to merge"
     accept="application/pdf,.pdf,image/png,image/jpeg,image/*,.docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
   <input id="pfx-input" type="file" accept=".p12,.pfx" aria-label="Certificate file (.p12 or .pfx)" hidden />

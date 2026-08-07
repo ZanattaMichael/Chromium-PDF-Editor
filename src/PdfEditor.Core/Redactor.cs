@@ -12,8 +12,18 @@ namespace PdfEditor.Core;
 /// </summary>
 public static class Redactor
 {
-    public static EditResult Redact(byte[] pdf, IEnumerable<RectRegion> regions, string? password = null)
-        => Apply(pdf, regions, drawBoxes: true, password);
+    /// <summary>How the redaction box is painted (purely cosmetic; the content is removed either way).</summary>
+    public enum Fill
+    {
+        /// <summary>A flat opaque black rectangle.</summary>
+        Solid,
+        /// <summary>Solid black overlaid with a diagonal hatch, for a heavier "redacted" look.</summary>
+        Hatch,
+    }
+
+    public static EditResult Redact(byte[] pdf, IEnumerable<RectRegion> regions,
+        string? password = null, Fill fill = Fill.Solid)
+        => Apply(pdf, regions, drawBoxes: true, password, fill: fill);
 
     /// <summary>
     /// Removes the content in the regions without painting black boxes (used by text and image
@@ -26,7 +36,7 @@ public static class Redactor
         => Apply(pdf, regions, drawBoxes: false, password, kinds);
 
     private static EditResult Apply(byte[] pdf, IEnumerable<RectRegion> regions, bool drawBoxes,
-        string? password, ContentKinds kinds = ContentKinds.All)
+        string? password, ContentKinds kinds = ContentKinds.All, Fill fill = Fill.Solid)
     {
         var byPage = regions.GroupBy(r => r.Page).ToDictionary(g => g.Key, g => g.ToList());
         if (byPage.Count == 0) return EditResult.Of(pdf);
@@ -48,7 +58,7 @@ public static class Redactor
                 RemoveAnnotationsIn(page, rects);
 
                 if (drawBoxes)
-                    DrawBoxesInDefaultUserSpace(doc, page, rects);
+                    DrawBoxesInDefaultUserSpace(doc, page, rects, fill);
             }
         }
         return new EditResult(output.ToArray(), warnings);
@@ -60,13 +70,34 @@ public static class Redactor
     /// content even when the page leaves a scale/flip transform active — which is why the box used
     /// to land in the wrong place on Chrome / Google-Docs-exported PDFs while the removal was fine.
     /// </summary>
-    private static void DrawBoxesInDefaultUserSpace(PdfDocument doc, PdfPage page, IList<Rectangle> rects)
+    private static void DrawBoxesInDefaultUserSpace(PdfDocument doc, PdfPage page, IList<Rectangle> rects, Fill fill)
     {
         var canvas = PdfContentGuard.InDefaultUserSpace(page, doc);
         canvas.SetFillColor(ColorConstants.BLACK);
         foreach (var r in rects)
             canvas.Rectangle(r.GetLeft(), r.GetBottom(), r.GetWidth(), r.GetHeight());
         canvas.Fill();
+
+        // The hatch is purely visual — the content is already gone, and the solid black beneath keeps
+        // the box fully opaque. It just gives a heavier, textured "redacted" look.
+        if (fill == Fill.Hatch)
+            foreach (var r in rects)
+                DrawHatch(canvas, r);
+    }
+
+    /// <summary>Overlays a diagonal hatch, clipped to the box, in a slightly lighter grey.</summary>
+    private static void DrawHatch(PdfCanvas canvas, Rectangle r)
+    {
+        canvas.SaveState();
+        canvas.Rectangle(r.GetLeft(), r.GetBottom(), r.GetWidth(), r.GetHeight()).Clip().EndPath();
+        canvas.SetStrokeColor(new DeviceGray(0.30f)).SetLineWidth(0.8f);
+        const float step = 4f;
+        float h = r.GetHeight();
+        // 45° lines sweeping across the box; starting h to the left of the box so the whole face fills.
+        for (float x = r.GetLeft() - h; x <= r.GetRight(); x += step)
+            canvas.MoveTo(x, r.GetBottom()).LineTo(x + h, r.GetTop());
+        canvas.Stroke();
+        canvas.RestoreState();
     }
 
     private static void RemoveAnnotationsIn(PdfPage page, IList<Rectangle> regions)

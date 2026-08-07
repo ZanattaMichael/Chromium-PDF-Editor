@@ -114,9 +114,10 @@ public static class RedactionReporter
             using var src = SKBitmap.Decode(imageBytes);
             if (src == null) return null;
             float scale = Math.Min(1f, (float)ThumbnailMaxDim / Math.Max(src.Width, src.Height));
+            var sampling = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None);
             SKBitmap? resized = scale < 1f
                 ? src.Resize(new SKImageInfo(Math.Max(1, (int)(src.Width * scale)),
-                    Math.Max(1, (int)(src.Height * scale))), SKFilterQuality.Medium)
+                    Math.Max(1, (int)(src.Height * scale))), sampling)
                 : null;
             using var chosen = resized; // null when no resize was needed; src is used directly below
             using var image = SKImage.FromBitmap(resized ?? src);

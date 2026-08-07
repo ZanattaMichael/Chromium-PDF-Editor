@@ -1568,84 +1568,11 @@ async function applyRedaction(precomputed) {
 function showRedactionReport(result) {
   const report = result.report;
   modal.innerHTML = '<h2>Redaction report</h2>';
-
-  const summary = document.createElement('p');
-  summary.className = 'muted';
-  summary.textContent = `Removed content from ${report.regions} `
-    + `region${report.regions === 1 ? '' : 's'} across ${report.pagesAffected} `
-    + `page${report.pagesAffected === 1 ? '' : 's'}.`;
-  modal.appendChild(summary);
-
-  if (report.pages.length) {
-    const table = document.createElement('table');
-    table.className = 'report-table';
-    const head = document.createElement('tr');
-    for (const h of ['Page', 'Regions', 'Text runs', 'Images', 'Annotations']) {
-      const th = document.createElement('th');
-      th.textContent = h;
-      head.appendChild(th);
-    }
-    table.appendChild(head);
-
-    const row = (cells, isTotal = false) => {
-      const tr = document.createElement('tr');
-      if (isTotal) tr.className = 'report-total';
-      cells.forEach((c, i) => {
-        const cell = document.createElement(isTotal || i === 0 ? 'th' : 'td');
-        cell.textContent = String(c);
-        tr.appendChild(cell);
-      });
-      table.appendChild(tr);
-    };
-    for (const p of report.pages) row([p.page, p.regions, p.textRuns, p.images, p.annotations]);
-    const t = report.totals;
-    row(['Total', report.regions, t.textRuns, t.images, t.annotations], true);
-    modal.appendChild(table);
-  }
-
-  // A preview of the removed text per region (the full text and image thumbnails are in the
-  // downloadable report). Truncated on screen so the modal stays readable.
-  const withText = (report.regionDetails ?? []).filter((r) => r.removed.text.trim() || r.removed.images > 0);
-  if (withText.length) {
-    const h = document.createElement('h3');
-    h.textContent = 'Removed content';
-    h.className = 'report-subhead';
-    modal.appendChild(h);
-    for (const r of withText.slice(0, 8)) {
-      const p = document.createElement('p');
-      p.className = 'report-removed';
-      const where = document.createElement('span');
-      where.className = 'report-removed-where';
-      where.textContent = `p${r.page}: `;
-      p.appendChild(where);
-      const snippet = r.removed.text.replace(/\s+/g, ' ').trim();
-      p.append(snippet.length > 140 ? snippet.slice(0, 140) + '…' : snippet);
-      if (r.removed.images > 0) {
-        const im = document.createElement('em');
-        im.textContent = `${snippet ? ' ' : ''}(${r.removed.images} image${r.removed.images === 1 ? '' : 's'})`;
-        p.appendChild(im);
-      }
-      modal.appendChild(p);
-    }
-  }
-
-  // Redaction removes page content, but not document-level JavaScript or metadata — call those out
-  // explicitly so an auditor knows to run "Remove hidden info" as well.
-  const notes = [];
-  const res = report.residual;
-  if (res.remainingJavaScript > 0) {
-    notes.push(`⚠ ${res.remainingJavaScript} embedded script${res.remainingJavaScript === 1 ? '' : 's'} `
-      + 'still present — redaction does not remove JavaScript. Use “Remove hidden info…”.');
-  }
-  if (res.remainingMetadata) {
-    notes.push('⚠ Document metadata is still present — use “Remove hidden info…” to strip it.');
-  }
-  for (const note of notes) {
-    const p = document.createElement('p');
-    p.className = 'report-note';
-    p.textContent = note;
-    modal.appendChild(p);
-  }
+  modal.appendChild(reportSummaryEl(report));
+  if (report.pages.length) modal.appendChild(reportTableEl(report));
+  const removed = reportRemovedEl(report);
+  if (removed) modal.appendChild(removed);
+  for (const note of reportResidualNotes(report.residual)) modal.appendChild(note);
 
   const actions = document.createElement('div');
   actions.className = 'actions';
@@ -1662,11 +1589,115 @@ function showRedactionReport(result) {
   close.focus();
 }
 
+function reportSummaryEl(report) {
+  const summary = document.createElement('p');
+  summary.className = 'muted';
+  const rs = report.regions === 1 ? '' : 's';
+  const ps = report.pagesAffected === 1 ? '' : 's';
+  summary.textContent = `Removed content from ${report.regions} region${rs} `
+    + `across ${report.pagesAffected} page${ps}.`;
+  return summary;
+}
+
+function reportTableEl(report) {
+  const table = document.createElement('table');
+  table.className = 'report-table';
+  const head = document.createElement('tr');
+  for (const h of ['Page', 'Regions', 'Text runs', 'Images', 'Annotations']) {
+    const th = document.createElement('th');
+    th.textContent = h;
+    head.appendChild(th);
+  }
+  table.appendChild(head);
+  const addRow = (cells, isTotal) => {
+    const tr = document.createElement('tr');
+    if (isTotal) tr.className = 'report-total';
+    cells.forEach((c, i) => {
+      const cell = document.createElement(isTotal || i === 0 ? 'th' : 'td');
+      cell.textContent = String(c);
+      tr.appendChild(cell);
+    });
+    table.appendChild(tr);
+  };
+  for (const p of report.pages) addRow([p.page, p.regions, p.textRuns, p.images, p.annotations], false);
+  const t = report.totals;
+  addRow(['Total', report.regions, t.textRuns, t.images, t.annotations], true);
+  return table;
+}
+
+/** A preview of the removed text per region (full text + thumbnails live in the download). Null if none. */
+function reportRemovedEl(report) {
+  const withText = (report.regionDetails ?? []).filter((r) => r.removed.text.trim() || r.removed.images > 0);
+  if (!withText.length) return null;
+  const frag = document.createDocumentFragment();
+  const h = document.createElement('h3');
+  h.textContent = 'Removed content';
+  h.className = 'report-subhead';
+  frag.appendChild(h);
+  for (const r of withText.slice(0, 8)) frag.appendChild(reportRemovedLineEl(r));
+  return frag;
+}
+
+function reportRemovedLineEl(r) {
+  const p = document.createElement('p');
+  p.className = 'report-removed';
+  const where = document.createElement('span');
+  where.className = 'report-removed-where';
+  where.textContent = `p${r.page}: `;
+  p.appendChild(where);
+  const snippet = r.removed.text.replace(/\s+/g, ' ').trim();
+  p.append(snippet.length > 140 ? snippet.slice(0, 140) + '…' : snippet);
+  if (r.removed.images > 0) {
+    const im = document.createElement('em');
+    const s = r.removed.images === 1 ? '' : 's';
+    im.textContent = `${snippet ? ' ' : ''}(${r.removed.images} image${s})`;
+    p.appendChild(im);
+  }
+  return p;
+}
+
+/**
+ * Redaction removes page content, but not document-level JavaScript or metadata — surface those so
+ * an auditor knows to run "Remove hidden info" too. Returns a <p> element per note.
+ */
+function reportResidualNotes(res) {
+  const notes = [];
+  if (res.remainingJavaScript > 0) {
+    const s = res.remainingJavaScript === 1 ? '' : 's';
+    notes.push(`⚠ ${res.remainingJavaScript} embedded script${s} still present — `
+      + 'redaction does not remove JavaScript. Use “Remove hidden info…”.');
+  }
+  if (res.remainingMetadata) {
+    notes.push('⚠ Document metadata is still present — use “Remove hidden info…” to strip it.');
+  }
+  return notes.map((text) => {
+    const p = document.createElement('p');
+    p.className = 'report-note';
+    p.textContent = text;
+    return p;
+  });
+}
+
 /** Escapes text for safe inclusion in the generated (downloaded) HTML report. */
 function escapeHtml(s) {
   return String(s ?? '')
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+}
+
+/** One region's HTML block for the downloaded report. Built by concatenation to avoid nesting templates. */
+function regionBlockHtml(r) {
+  const coords = `x ${r.x.toFixed(1)}, y ${r.y.toFixed(1)}, ${r.width.toFixed(1)}×${r.height.toFixed(1)} pt`;
+  const text = r.removed.text.trim()
+    ? `<pre class="rtext">${escapeHtml(r.removed.text)}</pre>`
+    : '<p class="muted">No extractable text.</p>';
+  const imgTags = (r.removed.imageThumbnails ?? [])
+    .map((b64) => `<img class="rimg" alt="Removed image" src="data:image/png;base64,${b64}" />`).join('');
+  const imgsBlock = imgTags ? `<div class="rimgs">${imgTags}</div>` : '';
+  const counts = `${r.removed.textRuns} text run(s), ${r.removed.images} image(s), `
+    + `${r.removed.annotations} annotation(s) removed.`;
+  return `<div class="region"><h4>Page ${r.page} · region (${escapeHtml(coords)})</h4>`
+    + `<p class="muted">${counts}</p>${text}${imgsBlock}</div>`;
 }
 
 /**
@@ -1682,26 +1713,15 @@ function downloadComplianceReport(result) {
   const pageRows = report.pages.map((p) =>
     `<tr><td>${p.page}</td><td>${p.regions}</td><td>${p.textRuns}</td><td>${p.images}</td><td>${p.annotations}</td></tr>`).join('');
 
-  const regionBlocks = (report.regionDetails ?? []).map((r) => {
-    const coords = `x ${r.x.toFixed(1)}, y ${r.y.toFixed(1)}, ${r.width.toFixed(1)}×${r.height.toFixed(1)} pt`;
-    const text = r.removed.text.trim()
-      ? `<pre class="rtext">${escapeHtml(r.removed.text)}</pre>`
-      : '<p class="muted">No extractable text.</p>';
-    const imgs = (r.removed.imageThumbnails ?? [])
-      .map((b64) => `<img class="rimg" alt="Removed image" src="data:image/png;base64,${b64}" />`).join('');
-    return `<div class="region">
-      <h4>Page ${r.page} · region (${escapeHtml(coords)})</h4>
-      <p class="muted">${r.removed.textRuns} text run(s), ${r.removed.images} image(s), ${r.removed.annotations} annotation(s) removed.</p>
-      ${text}${imgs ? `<div class="rimgs">${imgs}</div>` : ''}
-    </div>`;
-  }).join('');
+  const regionBlocks = (report.regionDetails ?? []).map(regionBlockHtml).join('');
 
   const res = report.residual;
   const residual = [];
   if (res.remainingJavaScript > 0) residual.push(`${res.remainingJavaScript} embedded script(s) still present.`);
   if (res.remainingMetadata) residual.push('Identifying document metadata still present.');
+  const residualItems = residual.map((r) => `<li>${escapeHtml(r)}</li>`).join('');
   const residualHtml = residual.length
-    ? `<ul>${residual.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul>`
+    ? `<ul>${residualItems}</ul>`
     : '<p>None detected. (Redaction does not remove JavaScript or metadata; none were found.)</p>';
 
   const t = report.totals;

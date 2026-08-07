@@ -55,28 +55,31 @@ public static class RedactionBox
     {
         var result = new List<RectRegion>();
         foreach (var pageGroup in regions.GroupBy(r => r.Page))
-        {
-            var boxes = pageGroup.ToList();
-            // Repeatedly fold any mergeable pair together until no more merges are possible.
-            bool changed = true;
-            while (changed)
-            {
-                changed = false;
-                for (int i = 0; i < boxes.Count && !changed; i++)
-                {
-                    for (int j = i + 1; j < boxes.Count; j++)
-                    {
-                        if (!CanMerge(boxes[i], boxes[j])) continue;
-                        boxes[i] = Union(boxes[i], boxes[j]);
-                        boxes.RemoveAt(j);
-                        changed = true;
-                        break;
-                    }
-                }
-            }
-            result.AddRange(boxes);
-        }
+            result.AddRange(MergePage(pageGroup.ToList()));
         return result;
+    }
+
+    /// <summary>Repeatedly folds mergeable pairs on one page together until none remain.</summary>
+    private static List<RectRegion> MergePage(List<RectRegion> boxes)
+    {
+        while (TryMergeOnePair(boxes)) { /* keep folding */ }
+        return boxes;
+    }
+
+    /// <summary>Merges the first mergeable pair found (in place) and reports whether one was merged.</summary>
+    private static bool TryMergeOnePair(List<RectRegion> boxes)
+    {
+        for (int i = 0; i < boxes.Count; i++)
+        {
+            for (int j = i + 1; j < boxes.Count; j++)
+            {
+                if (!CanMerge(boxes[i], boxes[j])) continue;
+                boxes[i] = Union(boxes[i], boxes[j]);
+                boxes.RemoveAt(j);
+                return true;
+            }
+        }
+        return false;
     }
 
     private static bool CanMerge(RectRegion a, RectRegion b)

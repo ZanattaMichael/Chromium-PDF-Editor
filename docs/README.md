@@ -44,3 +44,8 @@ node scripts/doc-shots.js
 | Draw freehand | ![Draw](screenshots/11-draw.png) |
 | Electronic signatures — draw or upload, then place | ![Sign](screenshots/12-sign.png) |
 | Activity console — every host action, timing and error | ![Activity console](screenshots/13-activity-console.png) |
+| Watermark — diagonal text across every page | ![Watermark](screenshots/14-watermark.png) |
+| Bates numbering — sequential identifiers in a corner | ![Bates numbering](screenshots/15-bates.png) |
+| Flatten — bake forms and/or annotations into the page | ![Flatten](screenshots/16-flatten.png) |
+| About — version and build information | ![About](screenshots/17-about.png) |
+| Redaction compliance report — what was removed, per region | ![Redaction report](screenshots/18-redaction-report.png) |

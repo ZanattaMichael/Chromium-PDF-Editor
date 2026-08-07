@@ -10,11 +10,11 @@ so your documents never leave your machine.
 | Feature | Notes |
 | --- | --- |
 | ✏ **Edit existing text** | Drag a box around text, edit it in place. The original text operators are removed from the file and the new text is stamped into the same region. Includes document-wide find & replace. |
-| ⬛ **Redaction** | Draw boxes over anything. A **preview window** shows the result before you commit. Applying **permanently removes** the content underneath (text operators, image pixels, annotations) — not just covers it — then paints an opaque black box. An **auditable report** afterwards lists what was removed per page (text runs, images, annotations) and flags any JavaScript or metadata that redaction leaves behind. |
+| ⬛ **Redaction** | Draw boxes over anything, or **Find & mark** text (by contains / starts-with / ends-with / whole word, case-insensitive by default). A **preview window** shows the result before you commit. Applying **permanently removes** the content underneath (text operators, image pixels, annotations) — not just covers it — then paints the box. A **Privacy** control defeats the box-length side channel — merge adjacent boxes, round widths, extend to the full line, or add a textured fill — set globally or per area. A downloadable **compliance report** lists what was removed per page and per region (with the removed text and image thumbnails) and flags any JavaScript or metadata that redaction leaves behind. |
 | 💾 **Save changes** | Save the edited document via the file picker or the downloads bar. Undo history while editing. |
 | 🧭 **Sits on top of browser PDF viewing** | Navigating to a `.pdf` opens the editor automatically (toggleable). Embedded PDF viewers on web pages get an “Edit in PDF Editor” overlay button, plus a toolbar button and right-click menu. Adobe sites and viewers are always left alone. |
 | 🔒 **Password protection** | AES-256 encryption with user/owner passwords; open, edit, and decrypt protected files. |
-| 🖼 **Open images** | Open a PNG/JPEG/etc. directly — it becomes a one-page PDF you can edit, OCR and merge like any document. |
+| 🖼 **Open images** | Open a PNG/JPEG/etc. directly — with the Open button or by **dragging it onto the window** — and it becomes a one-page PDF you can edit, OCR and merge like any document. |
 | ➕ **Merge & arrange** | Append PDFs, images, or Word documents; a **Merge & arrange** dialog lets you set the combine order (or drop files) before merging. Images are laid onto standard A4 pages. |
 | 🗂 **Organize pages** | Reorder pages by drag or ▲/▼ and delete the ones you don't need. |
 | 🗒 **Fillable forms** | Insert text, multi-line, checkbox, dropdown (choice), and JavaScript **button** fields others can fill in, and fill/flatten existing AcroForm fields. |
@@ -22,7 +22,10 @@ so your documents never leave your machine.
 | ✥ **Move text & images** | Grab a run of text or an image with the Move tool and drag it to a new position. |
 | 🖱 **Right-click menu** | Context actions: on selected text — Edit, Redact, Highlight, Copy, Open link; on blank page — Make searchable (OCR), Show source code, Save, Print, Zoom, Undo/Redo. |
 | ⚙ **Interactive JavaScript** | Add document-level scripts in a small code editor for form calculations/validation (runs in Acrobat/Chrome, never inside the viewer). |
+| ▦ **Flatten** | Bake interactive layers into static page content, with a choice of scope: form fields to their appearances, markup/comment annotations to the page, or everything. |
 | 🧹 **Remove hidden information** | Scan for and strip metadata, embedded attachments, scripts/actions, comments, bookmarks, and hidden layers before sharing. |
+| 🧾 **Activity console** | A dockable log of every action, its timing and any error. An opt-in **Diagnostics** mode adds environment and transfer-size detail and a one-click log download for bug reports. |
+| ℹ **About** | Shows the version, build commit and browser — handy for bug reports. |
 | 🔀 **Compare versions** | Word-level diff against another version, with a per-page summary of added and removed text. Click a changed page to **jump** to it, or open a rendered **visual (pixel) diff** — added content in red, removed in blue — which catches changes text extraction misses (moved images, scans, spacing). |
 | 💧 **Watermark** | Stamp text (e.g. *CONFIDENTIAL*) diagonally across every page, with colour, opacity and rotation. Baked into the page content, not a removable annotation or layer. |
 | 🔢 **Bates numbering** | Stamp sequential, zero-padded identifiers (e.g. `ACME000001`) into a page corner — prefix, start number, digit count, suffix and position all configurable. |
@@ -42,6 +45,8 @@ The full gallery — and the scripts that regenerate both the sample and every s
 | *Text, charts and images render together.* | *Redaction shows exactly what will be permanently removed.* |
 | ![Edit existing text in place](docs/screenshots/06-edit-text.png) | ![Remove hidden information](docs/screenshots/10-remove-hidden-info.png) |
 | *Edit existing text in place — font and size are recovered.* | *Strip metadata and other hidden data before sharing.* |
+| ![Watermark](docs/screenshots/14-watermark.png) | ![Redaction compliance report](docs/screenshots/18-redaction-report.png) |
+| *Stamp a watermark across every page.* | *An auditable redaction report of exactly what was removed.* |
 
 ## Optional external tools
 

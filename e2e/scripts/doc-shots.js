@@ -219,6 +219,58 @@ async function shot(page, name, fn) {
     });
     await page.close();
 
+    // 14) Watermark dialog.
+    page = await openViewer(ext);
+    await shot(page, '14-watermark.png', async () => {
+      await ui(page, '#btn-watermark');
+      await page.waitForSelector('dialog#modal[open]', { timeout: 8000 });
+      await page.waitForTimeout(200);
+    });
+    await page.close();
+
+    // 15) Bates numbering dialog.
+    page = await openViewer(ext);
+    await shot(page, '15-bates.png', async () => {
+      await ui(page, '#btn-bates');
+      await page.waitForSelector('dialog#modal[open]', { timeout: 8000 });
+      await page.waitForTimeout(200);
+    });
+    await page.close();
+
+    // 16) Flatten dialog.
+    page = await openViewer(ext);
+    await shot(page, '16-flatten.png', async () => {
+      await ui(page, '#btn-flatten');
+      await page.waitForSelector('dialog#modal[open]', { timeout: 8000 });
+      await page.waitForTimeout(200);
+    });
+    await page.close();
+
+    // 17) About dialog.
+    page = await openViewer(ext);
+    await shot(page, '17-about.png', async () => {
+      await ui(page, '#btn-about');
+      await page.waitForSelector('dialog#modal[open]', { timeout: 8000 });
+      await page.waitForTimeout(200);
+    });
+    await page.close();
+
+    // 18) Redaction compliance report — mark a value, apply, and show the audit modal.
+    page = await openViewer(ext);
+    await shot(page, '18-redaction-report.png', async () => {
+      await ui(page, '#tool-redact');
+      await page.fill('#page-input', '2');
+      await page.press('#page-input', 'Enter');
+      await page.waitForSelector(`${pageImageSel(2)}[src^="data:image/png"]`);
+      await page.waitForTimeout(300);
+      await dragPdf(page, 250, 560, 340, 700, 2);
+      await page.waitForTimeout(200);
+      await page.click('#redact-apply');
+      await page.waitForSelector('dialog#modal[open]', { timeout: 8000 });
+      await page.waitForTimeout(300);
+    });
+    await page.close();
+
     console.log(`\nScreenshots written to ${OUT}:`);
     console.log(results.join('\n'));
   } finally {

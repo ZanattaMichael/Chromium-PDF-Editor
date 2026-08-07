@@ -2866,22 +2866,28 @@ async function openFilePicker() {
  */
 function initDragDrop() {
   const carriesFiles = (e) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
-  window.addEventListener('dragover', (e) => {
-    if (!carriesFiles(e)) return;
+  // Chrome only leaves the file on the page (rather than navigating to it) if the default is
+  // prevented on *every* drag event in the sequence — dragenter and dragover as well as drop.
+  const allow = (e) => {
+    if (!carriesFiles(e)) return false;
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-    document.body.classList.add('drag-over');
-  });
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    return true;
+  };
+  for (const type of ['dragenter', 'dragover']) {
+    window.addEventListener(type, (e) => { if (allow(e)) document.body.classList.add('drag-over'); });
+  }
   window.addEventListener('dragleave', (e) => {
     // relatedTarget is null when the pointer leaves the window entirely.
     if (e.relatedTarget === null) document.body.classList.remove('drag-over');
   });
   window.addEventListener('drop', async (e) => {
-    if (!carriesFiles(e)) return;
-    e.preventDefault();
+    if (!allow(e)) return;
     document.body.classList.remove('drag-over');
     const file = e.dataTransfer.files[0];
-    if (file) await openFromBytes(new Uint8Array(await file.arrayBuffer()), file.name, mergeKind(file));
+    if (!file) { toast('Drop a single PDF or image file.'); return; }
+    activity.add('info', 'file dropped', `${file.name} (${file.type || 'unknown type'})`);
+    await openFromBytes(new Uint8Array(await file.arrayBuffer()), file.name, mergeKind(file));
   });
 }
 

@@ -4174,7 +4174,7 @@ function wire() {
   $('redact-apply').addEventListener('click', () => applyRedaction());
   $('redact-clear').addEventListener('click', () => { state.regions = []; drawRegions(); });
   // Privacy intensity: 0 exact, 1 merge adjacent boxes, 2 round widths, 3 full line (see #privacy).
-  const REDACT_INTENSITY = ['Exact', 'Merge words', 'Rounded', 'Full line'];
+  const REDACT_INTENSITY = ['Exact', 'Merge words', 'Rounded', 'Full line', 'Textured'];
   $('redact-intensity').addEventListener('input', (e) => {
     $('redact-intensity-label').textContent = REDACT_INTENSITY[Number(e.target.value)] ?? 'Exact';
   });

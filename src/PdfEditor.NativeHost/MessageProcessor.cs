@@ -131,10 +131,12 @@ public static class MessageProcessor
         // live is ever left hidden under a box.
         int intensity = p["intensity"]?.GetValue<int>() ?? 0;
         regions = RedactionBox.Prepare(pdf, regions, intensity, password);
+        // The top of the slider (4) also paints a textured hatch instead of flat black.
+        var fill = intensity >= 4 ? Redactor.Fill.Hatch : Redactor.Fill.Solid;
         // Audit the original document before the content is removed: what was under the boxes is
         // exactly what the redaction takes out (#48).
         var report = RedactionReporter.Analyze(pdf, regions, password);
-        var result = Redactor.Redact(pdf, regions, password);
+        var result = Redactor.Redact(pdf, regions, password, fill);
         // Integrity: SHA-256 of the document before and after, so the downloadable compliance
         // report can be tied to the exact files it describes.
         return new

@@ -496,7 +496,7 @@ public class NewActionsTests
         {
             pdf = TestPdf.Base64(TestPdf.OnePage("secret text here")),
             regions = new[] { new { page = 1, x = 60, y = 60, width = 60, height = 20 } },
-            intensity = 3, // full-line box widening
+            intensity = 4, // full-line widening + textured hatch fill
         });
         Assert.True(Ok(r));
         Assert.NotNull(Result(r)["pdf"]);

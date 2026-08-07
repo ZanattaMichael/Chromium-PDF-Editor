@@ -23,13 +23,27 @@ host.call = async (action, payload = {}) => {
   const elapsed = () => `${Math.round(performance.now() - started)} ms`;
   try {
     const result = await rawHostCall(action, payload);
-    activity.add('info', action, elapsed());
+    // With diagnostics on (#97), the per-action line also carries the payload/result sizes — the
+    // other half of "why is this slow" beyond the duration — and is tagged as diagnostic.
+    const detail = diagnosticsOn
+      ? `${elapsed()} · sent ${approxSize(payload)} · recv ${approxSize(result)}`
+      : elapsed();
+    activity.add('info', action, detail, { diagnostic: diagnosticsOn });
     return result;
   } catch (e) {
-    activity.add('error', `${action} failed`, `${e?.message ?? e} (after ${elapsed()})`);
+    activity.add('error', `${action} failed`, `${e?.message ?? e} (after ${elapsed()})`,
+      { diagnostic: diagnosticsOn });
     throw e;
   }
 };
+
+/** Rough transfer size of a host payload/result: the base64 doc if present, else the JSON length. */
+function approxSize(obj) {
+  const b64 = typeof obj?.pdf === 'string' ? obj.pdf.length : 0;
+  let bytes = b64 ? Math.round(b64 * 0.75) : 0; // base64 is 4 chars per 3 bytes
+  if (!bytes && obj) { try { bytes = JSON.stringify(obj).length; } catch { bytes = 0; } }
+  return bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} B`;
+}
 
 // URL/link handling: a document with links shows a warning badge, links are disabled (stripped on
 // save) by default, and the 🔗 Links panel lists every URL (the "source") so the user can review
@@ -188,6 +202,8 @@ function fail(err) {
 // so a toast can't be clobbered by a log entry the way placeField()'s once was.
 
 const CONSOLE_OPEN_KEY = 'activityConsoleOpen';
+const CONSOLE_DIAGNOSTICS_KEY = 'activityConsoleDiagnostics';
+let diagnosticsOn = false;    // #97: opt-in extra logging (sizes, environment) for bug reports
 let consoleRenderedSeq = 0;   // seq of the newest entry that is in the DOM
 let consoleFlushQueued = false;
 
@@ -200,7 +216,7 @@ function consoleOpen() { return !$('console-pane').hidden; }
  */
 function consoleEntryEl(entry) {
   const row = document.createElement('div');
-  row.className = `console-entry ${entry.level}`;
+  row.className = `console-entry ${entry.level}${entry.diagnostic ? ' diag' : ''}`;
   const time = document.createElement('span');
   time.className = 'console-time';
   time.textContent = formatTime(entry.time);
@@ -280,6 +296,53 @@ async function copyConsole() {
   }
 }
 
+/** #97: turns opt-in diagnostic logging on/off, records an environment snapshot when enabled. */
+function setDiagnostics(on, persist = true) {
+  diagnosticsOn = on;
+  $('console-diagnostics').checked = on;
+  if (persist) {
+    chrome.storage?.local?.set({ [CONSOLE_DIAGNOSTICS_KEY]: on })
+      ?.catch((e) => activity.add('warn', 'could not save the diagnostics setting', e?.message ?? e));
+  }
+  if (on) logEnvironment();
+}
+
+/** Logs the runtime environment (versions, browser, platform) as diagnostic entries. */
+async function logEnvironment() {
+  const m = chrome.runtime.getManifest();
+  activity.add('info', 'diagnostics enabled', 'extra detail is now recorded', { diagnostic: true });
+  activity.add('info', 'extension version', m.version, { diagnostic: true });
+  activity.add('info', 'browser', browserSummary(), { diagnostic: true });
+  activity.add('info', 'platform', navigator.platform || 'unknown', { diagnostic: true });
+  try {
+    const pong = await host.call('ping');
+    activity.add('info', 'native host version', pong?.version ?? 'unknown', { diagnostic: true });
+  } catch {
+    // A failed ping is already logged by the host.call wrapper; nothing to add.
+  }
+}
+
+/** Saves the activity log to a text file (with an environment header) for attaching to bug reports. */
+function downloadConsole() {
+  const m = chrome.runtime.getManifest();
+  const header = [
+    'Chromium PDF Editor — activity log',
+    `Extension: v${m.version}`,
+    `Browser: ${browserSummary()}`,
+    `Platform: ${navigator.platform || 'unknown'}`,
+    `Generated: ${new Date().toISOString()}`,
+    '', '',
+  ].join('\n');
+  const blob = new Blob([header + activity.toText() + '\n'], { type: 'text/plain' });
+  chrome.downloads.download({
+    url: URL.createObjectURL(blob),
+    filename: 'pdf-editor-activity-log.txt',
+    saveAs: true,
+  });
+  activity.add('info', 'activity log downloaded', '', { diagnostic: diagnosticsOn });
+  toast('Activity log downloaded.');
+}
+
 function initConsole() {
   activity.subscribe((entry) => {
     if (entry === null) {
@@ -295,14 +358,19 @@ function initConsole() {
   $('console-close').addEventListener('click', () => setConsoleOpen(false));
   $('console-clear').addEventListener('click', () => activity.clear());
   $('console-copy').addEventListener('click', copyConsole);
+  $('console-download').addEventListener('click', downloadConsole);
+  $('console-diagnostics').addEventListener('change', (e) => setDiagnostics(e.target.checked));
   updateConsoleCount();
 }
 
 /** Restores the pane's last open/closed state (the log itself never persists). */
 async function restoreConsoleState() {
   try {
-    const stored = await chrome.storage.local.get({ [CONSOLE_OPEN_KEY]: false });
+    const stored = await chrome.storage.local.get({
+      [CONSOLE_OPEN_KEY]: false, [CONSOLE_DIAGNOSTICS_KEY]: false,
+    });
     if (stored[CONSOLE_OPEN_KEY]) setConsoleOpen(true, false);
+    if (stored[CONSOLE_DIAGNOSTICS_KEY]) setDiagnostics(true, false);
   } catch (e) {
     activity.add('warn', 'could not read the console state', e?.message ?? e);
   }

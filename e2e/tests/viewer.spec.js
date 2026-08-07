@@ -2713,6 +2713,23 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('activity console: diagnostics mode records environment and transfer sizes (#97)', async () => {
+    const page = await openViewerWith(fixture('diag.pdf', [[{ text: 'Diag', x: 72, y: 700 }]]));
+    await openConsole(page);
+    const log = page.locator('#console-log');
+
+    await page.check('#console-diagnostics');
+    // Enabling it records an environment snapshot as tagged diagnostic entries.
+    await expect(log.locator('.console-entry.diag', { hasText: 'extension version' })).toHaveCount(1);
+    await expect(log.locator('.console-entry.diag', { hasText: 'browser' })).toHaveCount(1);
+    await expect(log.locator('.console-entry.diag', { hasText: 'native host version' })).toHaveCount(1);
+
+    // A subsequent host round-trip now carries transfer sizes and is tagged diagnostic.
+    await page.click('#btn-zoom-in');
+    await expect(log.locator('.console-entry.diag', { hasText: 'recv' }).first()).toBeVisible();
+    await page.close();
+  });
+
   test('activity console: a forced host failure is logged instead of swallowed (#72)', async () => {
     // `form-fields` is the case #72 names by hand: its bare `catch { state.formFields = []; }`
     // turned any failure into the claim "this document has no fillable form fields".

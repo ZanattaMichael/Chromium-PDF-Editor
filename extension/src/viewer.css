@@ -699,6 +699,8 @@ textarea.code-editor:focus { outline: 1px solid var(--accent-2); }
 .console-entry.warn, .console-entry.warn .console-level { color: #ffcf70; }
 .console-entry.error, .console-entry.error .console-level { color: #ff8f86; }
 .console-entry.warn .console-detail, .console-entry.error .console-detail { color: inherit; }
+/* Diagnostic (#97) entries: dimmed and marked with a left rule so they read as the opt-in extra. */
+.console-entry.diag { opacity: 0.85; border-left: 2px solid #6fa8f5; padding-left: 6px; margin-left: -8px; }
 .console-empty { color: var(--muted); }
 
 /* -------------------------------------------------------------- statusbar */

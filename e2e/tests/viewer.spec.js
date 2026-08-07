@@ -450,6 +450,32 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('redaction: full-line box hides the length and clears the whole line (#privacy)', async () => {
+    // Two words on one line; we mark only the first, but choose the length-hiding "Full line" box.
+    const file = fixture('rlen.pdf', [[
+      { text: 'SECRET', x: 72, y: 700 },
+      { text: 'PUBLIC', x: 320, y: 700 },
+    ]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-redact');
+    await dragPdfRect(page, { x: 60, y: 690, width: 120, height: 34 });
+    // Privacy intensity 3 = "Full line".
+    await page.locator('#redact-intensity').evaluate((el) => { el.value = '3'; });
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+
+    // The black box now spans the whole line, so its width leaks nothing about the marked word...
+    const farRight = { x: 300, y: 694, width: 240, height: 22 };
+    const stats = await bandStats(page, farRight);
+    expect(stats.ink).toBe(1);
+    expect(stats.dominant).toEqual([0, 0, 0]);
+    // ...and every word on the line — not just the one marked — is gone from the file.
+    await expectText(page).not.toContain('SECRET');
+    await expectText(page).not.toContain('PUBLIC');
+    await page.close();
+  });
+
   test('search & mark: finds every occurrence of a phrase, marks boxes, redacts them', async () => {
     // Two copies of the secret word plus an unrelated line. Searching marks both copies as
     // redaction boxes; applying blacks out both spots and leaves the other line untouched.

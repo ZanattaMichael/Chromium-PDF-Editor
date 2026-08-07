@@ -632,6 +632,8 @@ textarea.code-editor:focus { outline: 1px solid var(--accent-2); }
 .report-subhead { font-size: 13px; margin: 12px 0 4px; }
 .report-removed { margin: 2px 0; font-size: 13px; }
 .report-removed-where { color: var(--muted); font-family: ui-monospace, monospace; }
+.redact-mode { display: flex; align-items: center; gap: 6px; margin: 8px 0; font-size: 13px; }
+.redact-mode select { flex: 1; }
 
 /* Visual diff (#46/#47). */
 .compare-jump { background: none; border: none; padding: 0; color: var(--accent-2, #1a73e8); cursor: pointer; text-decoration: underline; font: inherit; }

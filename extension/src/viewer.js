@@ -1430,6 +1430,7 @@ async function previewRedaction() {
     setStatus('Building redaction preview…', true);
     const result = await host.call('redact', {
       pdf: state.pdfB64, regions: state.regions, pdfPassword: state.password,
+      intensity: Number($('redact-intensity')?.value ?? 0),
     });
     const pages = [...new Set(state.regions.map((r) => r.page))].sort((a, b) => a - b);
     const images = [];
@@ -1481,6 +1482,7 @@ async function applyRedaction(precomputed) {
     setStatus('Applying redaction…', true);
     const result = precomputed ?? await host.call('redact', {
       pdf: state.pdfB64, regions: state.regions, pdfPassword: state.password,
+      intensity: Number($('redact-intensity')?.value ?? 0),
     });
     const count = state.regions.length;
     state.regions = [];
@@ -4171,6 +4173,11 @@ function wire() {
   $('redact-preview').addEventListener('click', previewRedaction);
   $('redact-apply').addEventListener('click', () => applyRedaction());
   $('redact-clear').addEventListener('click', () => { state.regions = []; drawRegions(); });
+  // Privacy intensity: 0 exact, 1 merge adjacent boxes, 2 round widths, 3 full line (see #privacy).
+  const REDACT_INTENSITY = ['Exact', 'Merge words', 'Rounded', 'Full line'];
+  $('redact-intensity').addEventListener('input', (e) => {
+    $('redact-intensity-label').textContent = REDACT_INTENSITY[Number(e.target.value)] ?? 'Exact';
+  });
   $('redact-search-btn').addEventListener('click', searchAndMarkRedactions);
   $('redact-search-text').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); searchAndMarkRedactions(); }

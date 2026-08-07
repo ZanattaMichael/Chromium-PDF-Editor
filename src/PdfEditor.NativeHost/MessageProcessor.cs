@@ -126,6 +126,11 @@ public static class MessageProcessor
         var pdf = Pdf(p);
         var regions = Regions(p["regions"]!.AsArray());
         var password = Password(p);
+        // Privacy intensity (0–3) merges adjacent boxes and/or widens them to hide how long the
+        // removed text was. The prepared boxes drive both the removal and the report, so nothing
+        // live is ever left hidden under a box.
+        int intensity = p["intensity"]?.GetValue<int>() ?? 0;
+        regions = RedactionBox.Prepare(pdf, regions, intensity, password);
         // Audit the original document before the content is removed: what was under the boxes is
         // exactly what the redaction takes out (#48).
         var report = RedactionReporter.Analyze(pdf, regions, password);

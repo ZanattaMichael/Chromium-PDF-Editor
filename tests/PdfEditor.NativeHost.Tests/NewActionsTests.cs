@@ -488,4 +488,18 @@ public class NewActionsTests
         Assert.Equal(1, report["regions"]!.GetValue<int>());
         Assert.NotNull(report["pages"]);
     }
+
+    [Fact]
+    public void Redact_WithPrivacyIntensity_StillReturnsPdfAndReport()
+    {
+        var r = Handle("redact", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage("secret text here")),
+            regions = new[] { new { page = 1, x = 60, y = 60, width = 60, height = 20 } },
+            intensity = 3, // full-line box widening
+        });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+        Assert.NotNull(Result(r)["report"]);
+    }
 }

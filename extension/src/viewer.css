@@ -629,6 +629,9 @@ textarea.code-editor:focus { outline: 1px solid var(--accent-2); }
 .report-table tr:first-child th { color: var(--muted); font-weight: 600; }
 .report-table .report-total th { border-top: 2px solid var(--border, #ccc); border-bottom: none; }
 .report-note { color: var(--warn, #b26a00); margin: 6px 0 0; }
+.report-subhead { font-size: 13px; margin: 12px 0 4px; }
+.report-removed { margin: 2px 0; font-size: 13px; }
+.report-removed-where { color: var(--muted); font-family: ui-monospace, monospace; }
 
 /* Visual diff (#46/#47). */
 .compare-jump { background: none; border: none; padding: 0; color: var(--accent-2, #1a73e8); cursor: pointer; text-decoration: underline; font: inherit; }

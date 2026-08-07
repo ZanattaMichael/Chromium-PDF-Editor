@@ -440,6 +440,11 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // One region was applied; at least one text run sat under it.
     await expect(totals).toContainText('1');
 
+    // The compliance detail shows the actual text that was removed, and offers a download.
+    await expect(dialog).toContainText('Removed content');
+    await expect(dialog.locator('.report-removed')).toContainText('TOP SECRET');
+    await expect(dialog.getByRole('button', { name: /Download compliance report/ })).toBeVisible();
+
     await dialog.getByRole('button', { name: 'Close' }).click();
     await expect(dialog).toBeHidden();
     await page.close();

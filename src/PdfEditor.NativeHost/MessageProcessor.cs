@@ -129,8 +129,21 @@ public static class MessageProcessor
         // exactly what the redaction takes out (#48).
         var report = RedactionReporter.Analyze(pdf, regions, password);
         var result = Redactor.Redact(pdf, regions, password);
-        return new { pdf = Convert.ToBase64String(result.Pdf), warnings = result.Warnings, report };
+        // Integrity: SHA-256 of the document before and after, so the downloadable compliance
+        // report can be tied to the exact files it describes.
+        return new
+        {
+            pdf = Convert.ToBase64String(result.Pdf),
+            warnings = result.Warnings,
+            report,
+            originalSha256 = Sha256Hex(pdf),
+            outputSha256 = Sha256Hex(result.Pdf),
+            generatedUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture),
+        };
     }
+
+    private static string Sha256Hex(byte[] data) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(data)).ToLowerInvariant();
 
     private static object RotateAction(JsonObject p)
     {

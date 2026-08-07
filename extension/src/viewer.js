@@ -1488,14 +1488,15 @@ async function applyRedaction(precomputed) {
       `Redacted ${count} region${count === 1 ? '' : 's'} — content removed.` +
       (result.warnings?.length ? ` ⚠ ${result.warnings.join(' ')}` : ''));
     // #48: an auditable summary of what was removed, and what redaction leaves behind.
-    if (result.report) showRedactionReport(result.report);
+    if (result.report) showRedactionReport(result);
   } catch (e) {
     fail(e);
   }
 }
 
 /** #48: renders the redaction audit — per-page counts by category, plus what survives redaction. */
-function showRedactionReport(report) {
+function showRedactionReport(result) {
+  const report = result.report;
   modal.innerHTML = '<h2>Redaction report</h2>';
 
   const summary = document.createElement('p');
@@ -1527,18 +1528,46 @@ function showRedactionReport(report) {
       table.appendChild(tr);
     };
     for (const p of report.pages) row([p.page, p.regions, p.textRuns, p.images, p.annotations]);
-    row(['Total', report.regions, report.textRuns, report.images, report.annotations], true);
+    const t = report.totals;
+    row(['Total', report.regions, t.textRuns, t.images, t.annotations], true);
     modal.appendChild(table);
+  }
+
+  // A preview of the removed text per region (the full text and image thumbnails are in the
+  // downloadable report). Truncated on screen so the modal stays readable.
+  const withText = (report.regionDetails ?? []).filter((r) => r.removed.text.trim() || r.removed.images > 0);
+  if (withText.length) {
+    const h = document.createElement('h3');
+    h.textContent = 'Removed content';
+    h.className = 'report-subhead';
+    modal.appendChild(h);
+    for (const r of withText.slice(0, 8)) {
+      const p = document.createElement('p');
+      p.className = 'report-removed';
+      const where = document.createElement('span');
+      where.className = 'report-removed-where';
+      where.textContent = `p${r.page}: `;
+      p.appendChild(where);
+      const snippet = r.removed.text.replace(/\s+/g, ' ').trim();
+      p.append(snippet.length > 140 ? snippet.slice(0, 140) + '…' : snippet);
+      if (r.removed.images > 0) {
+        const im = document.createElement('em');
+        im.textContent = `${snippet ? ' ' : ''}(${r.removed.images} image${r.removed.images === 1 ? '' : 's'})`;
+        p.appendChild(im);
+      }
+      modal.appendChild(p);
+    }
   }
 
   // Redaction removes page content, but not document-level JavaScript or metadata — call those out
   // explicitly so an auditor knows to run "Remove hidden info" as well.
   const notes = [];
-  if (report.remainingJavaScript > 0) {
-    notes.push(`⚠ ${report.remainingJavaScript} embedded script${report.remainingJavaScript === 1 ? '' : 's'} `
+  const res = report.residual;
+  if (res.remainingJavaScript > 0) {
+    notes.push(`⚠ ${res.remainingJavaScript} embedded script${res.remainingJavaScript === 1 ? '' : 's'} `
       + 'still present — redaction does not remove JavaScript. Use “Remove hidden info…”.');
   }
-  if (report.remainingMetadata) {
+  if (res.remainingMetadata) {
     notes.push('⚠ Document metadata is still present — use “Remove hidden info…” to strip it.');
   }
   for (const note of notes) {
@@ -1550,13 +1579,98 @@ function showRedactionReport(report) {
 
   const actions = document.createElement('div');
   actions.className = 'actions';
+  const download = document.createElement('button');
+  download.className = 'danger';
+  download.textContent = '⬇ Download compliance report';
+  download.addEventListener('click', () => downloadComplianceReport(result));
   const close = document.createElement('button');
   close.textContent = 'Close';
-  actions.appendChild(close);
+  actions.append(download, close);
   modal.appendChild(actions);
   modal.showModal();
   close.addEventListener('click', () => modal.close());
   close.focus();
+}
+
+/** Escapes text for safe inclusion in the generated (downloaded) HTML report. */
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+}
+
+/**
+ * Builds a self-contained HTML compliance report — document identity, integrity hashes, per-page
+ * and per-region detail, the exact text removed and thumbnails of the images removed, and residual
+ * risk — and downloads it. Kept as one printable file so it can be archived or printed to PDF.
+ */
+function downloadComplianceReport(result) {
+  const report = result.report;
+  const version = chrome.runtime.getManifest().version;
+  const generated = result.generatedUtc || new Date().toISOString();
+
+  const pageRows = report.pages.map((p) =>
+    `<tr><td>${p.page}</td><td>${p.regions}</td><td>${p.textRuns}</td><td>${p.images}</td><td>${p.annotations}</td></tr>`).join('');
+
+  const regionBlocks = (report.regionDetails ?? []).map((r) => {
+    const coords = `x ${r.x.toFixed(1)}, y ${r.y.toFixed(1)}, ${r.width.toFixed(1)}×${r.height.toFixed(1)} pt`;
+    const text = r.removed.text.trim()
+      ? `<pre class="rtext">${escapeHtml(r.removed.text)}</pre>`
+      : '<p class="muted">No extractable text.</p>';
+    const imgs = (r.removed.imageThumbnails ?? [])
+      .map((b64) => `<img class="rimg" alt="Removed image" src="data:image/png;base64,${b64}" />`).join('');
+    return `<div class="region">
+      <h4>Page ${r.page} · region (${escapeHtml(coords)})</h4>
+      <p class="muted">${r.removed.textRuns} text run(s), ${r.removed.images} image(s), ${r.removed.annotations} annotation(s) removed.</p>
+      ${text}${imgs ? `<div class="rimgs">${imgs}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  const res = report.residual;
+  const residual = [];
+  if (res.remainingJavaScript > 0) residual.push(`${res.remainingJavaScript} embedded script(s) still present.`);
+  if (res.remainingMetadata) residual.push('Identifying document metadata still present.');
+  const residualHtml = residual.length
+    ? `<ul>${residual.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul>`
+    : '<p>None detected. (Redaction does not remove JavaScript or metadata; none were found.)</p>';
+
+  const t = report.totals;
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<title>Redaction Compliance Report — ${escapeHtml(state.fileName)}</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; color: #1a1a1a; max-width: 820px; margin: 32px auto; padding: 0 20px; }
+  h1 { font-size: 22px; margin-bottom: 4px; } h2 { font-size: 16px; margin-top: 28px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; } th, td { border: 1px solid #ccc; padding: 4px 10px; text-align: right; } th:first-child, td:first-child { text-align: left; }
+  .meta td { text-align: left; } .muted { color: #666; }
+  .region { border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px 14px; margin: 10px 0; }
+  .region h4 { margin: 0 0 4px; font-size: 14px; }
+  .rtext { white-space: pre-wrap; background: #f6f6f6; padding: 8px; border-radius: 4px; font: 12.5px ui-monospace, monospace; }
+  .rimgs { display: flex; flex-wrap: wrap; gap: 8px; } .rimg { max-width: 220px; border: 1px solid #ccc; }
+  code { font: 12px ui-monospace, monospace; word-break: break-all; }
+</style></head><body>
+<h1>Redaction Compliance Report</h1>
+<p class="muted">Generated ${escapeHtml(generated)} by Chromium PDF Editor v${escapeHtml(version)}.</p>
+<h2>Document</h2>
+<table class="meta">
+  <tr><td>File</td><td>${escapeHtml(state.fileName)}</td></tr>
+  <tr><td>Original SHA-256</td><td><code>${escapeHtml(result.originalSha256 || 'n/a')}</code></td></tr>
+  <tr><td>Redacted SHA-256</td><td><code>${escapeHtml(result.outputSha256 || 'n/a')}</code></td></tr>
+</table>
+<h2>Summary</h2>
+<p>Removed content from <strong>${report.regions}</strong> region(s) across <strong>${report.pagesAffected}</strong> page(s): ${t.textRuns} text run(s), ${t.images} image(s), ${t.annotations} annotation(s).</p>
+<table><tr><th>Page</th><th>Regions</th><th>Text runs</th><th>Images</th><th>Annotations</th></tr>${pageRows}
+<tr><th>Total</th><th>${report.regions}</th><th>${t.textRuns}</th><th>${t.images}</th><th>${t.annotations}</th></tr></table>
+<h2>Removed content by region</h2>
+${regionBlocks || '<p class="muted">No itemised content.</p>'}
+<h2>Residual risk</h2>
+${residualHtml}
+</body></html>`;
+
+  const blob = new Blob([html], { type: 'text/html' });
+  const suggested = state.fileName.replace(/\.pdf$/i, '') + '-redaction-report.html';
+  chrome.downloads.download({ url: URL.createObjectURL(blob), filename: suggested, saveAs: true });
+  activity.add('info', 'redaction report downloaded', suggested);
+  toast('Compliance report downloaded.');
 }
 
 // ------------------------------------------------------------- text edit

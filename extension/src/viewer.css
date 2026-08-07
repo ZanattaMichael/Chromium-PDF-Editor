@@ -667,8 +667,11 @@ body.drag-over::after {
   pointer-events: none;
 }
 
-.redact-mode { display: flex; align-items: center; gap: 6px; margin: 8px 0; font-size: 13px; }
-.redact-mode select { flex: 1; }
+/* Privacy label on its own line above a full-width slider, so the slider's width — and therefore
+   the thumb position under the cursor — stays fixed as the label text changes length while dragging. */
+#redact-intensity-row { display: block; margin: 8px 0; font-size: 13px; }
+.redact-privacy-label { display: block; margin-bottom: 4px; }
+#redact-intensity { display: block; width: 100%; box-sizing: border-box; margin: 0; }
 #redact-privacy-hint { font-size: 11px; margin: 0 0 8px; }
 #redact-privacy-hint button { margin-top: 4px; font-size: 12px; }
 

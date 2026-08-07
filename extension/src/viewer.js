@@ -1011,14 +1011,31 @@ function addRegionDiv(region, kind, label = '') {
   pe.overlay.appendChild(div);
 }
 
+// Redaction Privacy levels, indexed by intensity 0–4 (see #privacy). Named here so both the slider
+// label and the per-area chips can show them.
+const REDACT_INTENSITY = ['Exact', 'Merge words', 'Rounded', 'Full line', 'Textured'];
+
+/** The current global Privacy intensity (0–4) from the slider. */
+function redactIntensity() { return Number($('redact-intensity')?.value ?? 0); }
+
+/** Marks a region for redaction, stamping it with the current Privacy intensity (per-redaction). */
+function markRegion(region) {
+  region.intensity = redactIntensity();
+  state.regions.push(region);
+}
+
 function renderRedactList() {
   const list = $('redact-list');
   list.innerHTML = '';
   for (const [index, region] of state.regions.entries()) {
     const item = document.createElement('li');
     const label = document.createElement('span');
-    // Compact chip label; the on-page box already carries its number (#N).
-    label.textContent = `#${index + 1} p${region.page}`;
+    // Compact chip label; the on-page box already carries its number (#N). Show the per-area
+    // Privacy type when it is not the plain default, so mixed settings are visible at a glance.
+    const level = region.intensity ?? 0;
+    label.textContent = level > 0
+      ? `#${index + 1} p${region.page} · ${REDACT_INTENSITY[level]}`
+      : `#${index + 1} p${region.page}`;
     item.appendChild(label);
     const remove = document.createElement('button');
     remove.textContent = '✕';
@@ -1237,7 +1254,7 @@ pagesEl.addEventListener('pointerup', async (e) => {
   };
 
   if (state.tool === 'redact') {
-    state.regions.push(region);
+    markRegion(region);
     drawRegions();
   } else if (state.tool === 'field') {
     placeField(region);
@@ -1308,7 +1325,7 @@ function buildContextItems(e) {
   if (region) {
     // Text context: act on the selected text / clicked run.
     items.push(ctxItem('✏ Edit text', () => { setTool('select'); beginTextEdit(region); }));
-    items.push(ctxItem('⬛ Redact this', () => { state.regions.push(region); setTool('redact'); drawRegions(); toast('Marked for redaction — review and Apply.'); }));
+    items.push(ctxItem('⬛ Redact this', () => { markRegion(region); setTool('redact'); drawRegions(); toast('Marked for redaction — review and Apply.'); }));
     // Highlighting a selection marks the characters selected, exactly as the sweep tool does.
     // Going through applyHighlight(region) instead would paint selectionRegion()'s single bounding
     // rectangle — a block covering both lines and the gap between them for any selection spanning
@@ -1488,7 +1505,7 @@ async function searchAndMarkRedactions() {
     // Pad each match slightly so the box fully covers the glyphs' edges.
     const pad = 1;
     for (const m of matches) {
-      state.regions.push({
+      markRegion({
         page: m.page,
         x: m.x - pad, y: m.y - pad,
         width: m.width + 2 * pad, height: m.height + 2 * pad,
@@ -4307,10 +4324,16 @@ function wire() {
   $('redact-preview').addEventListener('click', previewRedaction);
   $('redact-apply').addEventListener('click', () => applyRedaction());
   $('redact-clear').addEventListener('click', () => { state.regions = []; drawRegions(); });
-  // Privacy intensity: 0 exact, 1 merge adjacent boxes, 2 round widths, 3 full line (see #privacy).
-  const REDACT_INTENSITY = ['Exact', 'Merge words', 'Rounded', 'Full line', 'Textured'];
+  // Privacy intensity: 0 exact, 1 merge adjacent boxes, 2 round widths, 3 full line, 4 textured.
   $('redact-intensity').addEventListener('input', (e) => {
     $('redact-intensity-label').textContent = REDACT_INTENSITY[Number(e.target.value)] ?? 'Exact';
+  });
+  // "Apply to all" sets every already-marked area to the current Privacy level (global override).
+  $('redact-apply-all').addEventListener('click', () => {
+    if (state.regions.length === 0) { toast('No marked areas to update.'); return; }
+    for (const r of state.regions) r.intensity = redactIntensity();
+    drawRegions();
+    toast(`Set all marked areas to “${REDACT_INTENSITY[redactIntensity()]}”.`);
   });
   $('redact-search-btn').addEventListener('click', searchAndMarkRedactions);
   $('redact-search-text').addEventListener('keydown', (e) => {

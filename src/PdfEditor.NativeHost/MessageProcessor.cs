@@ -124,15 +124,25 @@ public static class MessageProcessor
     private static object Redact(JsonObject p)
     {
         var pdf = Pdf(p);
-        var regions = Regions(p["regions"]!.AsArray());
         var password = Password(p);
-        // Privacy intensity (0–3) merges adjacent boxes and/or widens them to hide how long the
-        // removed text was. The prepared boxes drive both the removal and the report, so nothing
-        // live is ever left hidden under a box.
-        int intensity = p["intensity"]?.GetValue<int>() ?? 0;
-        regions = RedactionBox.Prepare(pdf, regions, intensity, password);
-        // The top of the slider (4) also paints a textured hatch instead of flat black.
-        var fill = intensity >= 4 ? Redactor.Fill.Hatch : Redactor.Fill.Solid;
+        int globalIntensity = p["intensity"]?.GetValue<int>() ?? 0;
+        // Each region may carry its own Privacy level (per-redaction); anything without one uses the
+        // global level. Group by effective level and prepare each group — merging/widening only make
+        // sense within a single level. The prepared boxes drive both the removal and the report, so
+        // nothing live is ever left hidden under a box.
+        var groups = new Dictionary<int, List<RectRegion>>();
+        foreach (var n in p["regions"]!.AsArray())
+        {
+            var o = n!.AsObject();
+            int gi = o["intensity"]?.GetValue<int>() ?? globalIntensity;
+            if (!groups.TryGetValue(gi, out var list)) groups[gi] = list = new List<RectRegion>();
+            list.Add(Region(o));
+        }
+        var regions = new List<RectRegion>();
+        foreach (var (gi, regs) in groups)
+            regions.AddRange(RedactionBox.Prepare(pdf, regs, gi, password));
+        // The top level (4) paints a textured hatch instead of flat black; apply it if any box asks.
+        var fill = groups.Keys.Any(k => k >= 4) ? Redactor.Fill.Hatch : Redactor.Fill.Solid;
         // Audit the original document before the content is removed: what was under the boxes is
         // exactly what the redaction takes out (#48).
         var report = RedactionReporter.Analyze(pdf, regions, password);

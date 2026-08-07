@@ -385,6 +385,36 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('redaction: "Apply to all" sets the Privacy level on existing marked areas (#privacy)', async () => {
+    const file = fixture('privacy-all.pdf', [[
+      { text: 'SECRET', x: 72, y: 700 },
+      { text: 'PUBLIC', x: 320, y: 700 },
+    ]]);
+    const page = await openViewerWith(file);
+
+    await ui(page, '#tool-redact');
+    // Mark one word at the default (Exact) level — the chip shows no type suffix.
+    await dragPdfRect(page, { x: 60, y: 690, width: 120, height: 34 });
+    await expect(page.locator('#redact-list li')).toContainText('#1 p1');
+    await expect(page.locator('#redact-list li')).not.toContainText('Full line');
+
+    // Raise Privacy to Full line and push it onto the existing area.
+    await page.locator('#redact-intensity').evaluate((el) => {
+      el.value = '3';
+      el.dispatchEvent(new Event('input'));
+    });
+    await page.click('#redact-apply-all');
+    await expect(page.locator('#redact-list li')).toContainText('Full line');
+
+    await page.click('#redact-apply');
+    await expect(page.locator('#status')).toContainText('content removed');
+    // Full-line took effect globally: the far end of the line is blacked out and its text is gone.
+    const stats = await bandStats(page, { x: 300, y: 694, width: 240, height: 22 });
+    expect(stats.ink).toBe(1);
+    await expectText(page).not.toContain('PUBLIC');
+    await page.close();
+  });
+
   test('redaction: draw, preview window, apply — content removed and box painted', async () => {
     const file = fixture('redact.pdf', [[
       { text: 'TOP SECRET DATA', x: 72, y: 700 },
@@ -480,9 +510,13 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(file);
 
     await ui(page, '#tool-redact');
+    // Privacy intensity 3 = "Full line". Set it before marking so the box captures the level;
+    // "Apply to all" would also push it onto existing boxes.
+    await page.locator('#redact-intensity').evaluate((el) => {
+      el.value = '3';
+      el.dispatchEvent(new Event('input'));
+    });
     await dragPdfRect(page, { x: 60, y: 690, width: 120, height: 34 });
-    // Privacy intensity 3 = "Full line".
-    await page.locator('#redact-intensity').evaluate((el) => { el.value = '3'; });
     await page.click('#redact-apply');
     await expect(page.locator('#status')).toContainText('content removed');
 
@@ -1388,7 +1422,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.mouse.move(cx(320), cy(825), { steps: 5 });
     await page.mouse.up();
 
-    await expect(page.locator('#redact-list li')).toHaveText(/page 2/);
+    await expect(page.locator('#redact-list li')).toContainText('p2');
     await page.click('#redact-apply');
     await expect(page.locator('#status')).toContainText('content removed');
 

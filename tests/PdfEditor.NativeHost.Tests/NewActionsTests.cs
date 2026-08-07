@@ -502,4 +502,22 @@ public class NewActionsTests
         Assert.NotNull(Result(r)["pdf"]);
         Assert.NotNull(Result(r)["report"]);
     }
+
+    [Fact]
+    public void Redact_WithPerRegionIntensity_IsAccepted()
+    {
+        // Two regions with different per-area Privacy levels, no global override.
+        var r = Handle("redact", new
+        {
+            pdf = TestPdf.Base64(TestPdf.OnePage("secret text here")),
+            regions = new object[]
+            {
+                new { page = 1, x = 60, y = 60, width = 60, height = 20, intensity = 3 },
+                new { page = 1, x = 200, y = 60, width = 40, height = 20, intensity = 0 },
+            },
+        });
+        Assert.True(Ok(r));
+        Assert.NotNull(Result(r)["pdf"]);
+        Assert.Equal(2, Result(r)["report"]!["regions"]!.GetValue<int>());
+    }
 }

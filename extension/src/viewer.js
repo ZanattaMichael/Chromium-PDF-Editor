@@ -2840,6 +2840,32 @@ async function openFilePicker() {
   $('file-input').click();
 }
 
+/**
+ * Lets a PDF or image be opened by dragging it onto the window. Without this, dropping a file makes
+ * Chrome navigate away from the viewer — so a dragged image simply never opened. Only file drops are
+ * handled; a drag that carries no files (e.g. selecting text) is left alone.
+ */
+function initDragDrop() {
+  const carriesFiles = (e) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+  window.addEventListener('dragover', (e) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    document.body.classList.add('drag-over');
+  });
+  window.addEventListener('dragleave', (e) => {
+    // relatedTarget is null when the pointer leaves the window entirely.
+    if (e.relatedTarget === null) document.body.classList.remove('drag-over');
+  });
+  window.addEventListener('drop', async (e) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    document.body.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) await openFromBytes(new Uint8Array(await file.arrayBuffer()), file.name, mergeKind(file));
+  });
+}
+
 // Blocks loopback/private/link-local hosts -- including the 169.254.169.254 cloud metadata
 // address -- so a crafted `src=` param can't turn the credentialed fetch below into an SSRF
 // probe of internal network services. Hostname string matching only (no DNS is done client
@@ -4312,6 +4338,7 @@ function wire() {
   initMenus();
   initConsole();
   initSignaturePad();
+  initDragDrop();
   window.addEventListener('resize', drawRegions);
 }
 

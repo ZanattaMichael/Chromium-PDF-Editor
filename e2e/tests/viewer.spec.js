@@ -364,6 +364,27 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
+  test('drag-and-drop: dropping an image onto the window opens it (#26)', async () => {
+    const pngB64 = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR4nGO4IyJCEmIY1TCqYfhqAAACcQQQFwFJQgAAAABJRU5ErkJggg==';
+    const page = await ext.context.newPage();
+    await page.goto(ext.viewerUrl);
+
+    // Build a DataTransfer carrying a PNG File and dispatch a real drop on the body.
+    const dt = await page.evaluateHandle((b64) => {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const data = new DataTransfer();
+      data.items.add(new File([bytes], 'dropped.png', { type: 'image/png' }));
+      return data;
+    }, pngB64);
+    await page.dispatchEvent('body', 'drop', { dataTransfer: dt });
+
+    // It is converted to a one-page PDF and rendered, exactly like the file-picker path.
+    await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
+    await expect(page.locator('#page-total')).toHaveText('1');
+    await expect(page.locator('#status')).toContainText('dropped.pdf');
+    await page.close();
+  });
+
   test('redaction: draw, preview window, apply — content removed and box painted', async () => {
     const file = fixture('redact.pdf', [[
       { text: 'TOP SECRET DATA', x: 72, y: 700 },

@@ -129,11 +129,20 @@ public static class RedactionBox
         return new RectRegion(r.Page, x, r.Y, width, r.Height);
     }
 
-    /// <summary>The box keeps its left edge; its width rounds up to the next grid step, clamped to the page.</summary>
+    /// <summary>
+    /// Rounds the box width up to the next grid step, so only a bucketed length shows. The rounded
+    /// box always still covers the original marked area and stays within the page: it keeps the
+    /// original left edge, and only slides left when a box near the right margin would otherwise run
+    /// off the page (which previously clamped the width *below* the original, leaving text exposed).
+    /// </summary>
     private static RectRegion Quantize(RectRegion r, Rectangle crop)
     {
-        float rounded = MathF.Ceiling(r.Width / Grid) * Grid;
-        float maxWidth = Math.Max(1f, crop.GetRight() - Margin - r.X);
-        return new RectRegion(r.Page, r.X, r.Y, Math.Min(rounded, maxWidth), r.Height);
+        float left = crop.GetLeft(), right = crop.GetRight();
+        float pageWidth = Math.Max(r.Width, right - left);
+        float width = Math.Clamp(MathF.Ceiling(r.Width / Grid) * Grid, r.Width, pageWidth);
+        // min(r.X, right - width) slides the box left just enough to fit; clamping to [left, r.X]
+        // keeps it on the page while guaranteeing the original stays fully covered.
+        float x = Math.Clamp(Math.Min(r.X, right - width), left, r.X);
+        return new RectRegion(r.Page, x, r.Y, width, r.Height);
     }
 }

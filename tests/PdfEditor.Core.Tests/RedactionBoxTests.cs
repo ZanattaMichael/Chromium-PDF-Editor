@@ -48,6 +48,22 @@ public class RedactionBoxTests
     }
 
     [Fact]
+    public void Expand_Quantize_NearTheRightEdge_StillCoversTheOriginal()
+    {
+        // A box near the right margin: rounding up must never shrink it below the original (which
+        // used to leave the marked text exposed) — it slides left instead.
+        byte[] pdf = TestPdfs.WithText(("x", 72, 700, 12));
+        var region = new RectRegion(1, 550, 700, 30, 12); // right edge at 580; page is 595 wide
+
+        var r = Assert.Single(RedactionBox.Expand(pdf, new[] { region },
+            RedactionBox.LengthObfuscation.Quantize));
+
+        Assert.True(r.X <= region.X, "the box must still cover the original's left edge");
+        Assert.True(r.X + r.Width >= region.X + region.Width, "the box must still cover the original's right edge");
+        Assert.True(r.X + r.Width <= PageWidth + 0.5f, "the box must stay on the page");
+    }
+
+    [Fact]
     public void Expand_Quantize_DifferentLengths_CollapseToTheSameBucket()
     {
         byte[] pdf = TestPdfs.WithText(("x", 72, 700, 12));

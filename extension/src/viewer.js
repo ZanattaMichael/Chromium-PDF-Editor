@@ -2805,7 +2805,18 @@ async function openFromBytes(bytes, name, kind) {
     if (fileKind === 'image' || fileKind === 'docx') {
       activity.add('info', 'importing', `${name} (${fileKind})`);
       setStatus(`Importing ${fileKind === 'image' ? 'image' : 'document'}…`, true);
-      const res = await host.call('import', { data: bytesToBase64(bytes), kind: fileKind });
+      let res;
+      try {
+        res = await host.call('import', { data: bytesToBase64(bytes), kind: fileKind });
+      } catch (e) {
+        // A native host installed before image support lacks this action; say so plainly rather
+        // than surfacing a bare "unknown action".
+        if (/unknown action/i.test(e?.message ?? '')) {
+          throw new Error('Opening images needs an updated native host. Please reinstall the '
+            + 'PDF Editor native host (it was installed before image support was added), then retry.');
+        }
+        throw e;
+      }
       bytes = base64ToBytes(res.pdf);
       workingName = name.replace(/\.[^.]+$/, '') + '.pdf';
     }

@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "PDF Editor",
   "version": "2.0.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArK1fIDsukhIoTqFOKiZr6Beg2PtYsnlFkqcxMd31yjMkE7KIwFj8/tc2HoBUICzCbE4YI53TTyq//Fx1beLafT0oRL3LJSN7aMkdutz4mnkOCxVVrP8Og2tZJgp9uLH1OADxzOzhun/5Vj1PvTmDwKIwTjJ6qSN93xOpgzSS5yqiWJbpHthYpsxay5kSiOy4C6qxPKYp/u0s0pVhTjuUUjcgmrAWp/xo5Eov6vLsaonfVJVgcApdaUrBXQ3+uUnQrxR9AdVxcCZ7FL0Am9J/iJ0poha2mss2tarpbn+jZ3GQWwE52a2pNg6MjYElXczApal5b6IL/pqaICG+GQP5lQIDAQAB",
   "description": "Edit text, redact, merge, sign, and password-protect PDFs directly in your browser. Powered by a local native host.",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -12,7 +13,9 @@
     "contextMenus",
     "tabs"
   ],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "src/background.js",
     "type": "module"
@@ -32,8 +35,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["src/content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/content.js"
+      ],
       "run_at": "document_idle"
     }
   ],

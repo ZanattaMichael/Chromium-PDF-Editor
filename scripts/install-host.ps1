@@ -14,7 +14,7 @@
 #   .\scripts\install-host.ps1 -ExtensionId <id> [-HostDir dir] [-FromSource]
 #                              [-Configuration Release] [-Repo owner/name] [-Tag vX.Y.Z]
 param(
-    [Parameter(Mandatory = $true)][string]$ExtensionId,
+    [string]$ExtensionId = "",
     [string]$HostDir = "",
     [switch]$FromSource,
     [string]$Configuration = "Release",
@@ -23,6 +23,17 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# The published extension has a pinned ID (manifest "key"), so -ExtensionId is optional: fall back
+# to $env:CHROME_EXTENSION_ID, then to the committed/bundled extension-id.txt next to this script.
+if (-not $ExtensionId) { $ExtensionId = $env:CHROME_EXTENSION_ID }
+if (-not $ExtensionId) {
+    $idFile = Join-Path $PSScriptRoot "extension-id.txt"
+    if (Test-Path $idFile) { $ExtensionId = (Get-Content $idFile -Raw).Trim() }
+}
+if (-not $ExtensionId) {
+    throw "No extension ID. Pass -ExtensionId <id>, set CHROME_EXTENSION_ID, or provide extension-id.txt."
+}
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $publishDir = Join-Path $env:LOCALAPPDATA "PdfEditorHost"
 $hostName = "com.pdfeditor.host"

@@ -50,6 +50,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# The published extension has a pinned ID (manifest "key"), so the argument is optional: fall back
+# to $CHROME_EXTENSION_ID, then to the committed/bundled extension-id.txt next to this script.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -z "$EXTENSION_ID" ]]; then
+  EXTENSION_ID="${CHROME_EXTENSION_ID:-}"
+fi
+if [[ -z "$EXTENSION_ID" && -f "$SCRIPT_DIR/extension-id.txt" ]]; then
+  EXTENSION_ID="$(tr -d '[:space:]' < "$SCRIPT_DIR/extension-id.txt")"
+fi
 if [[ -z "$EXTENSION_ID" ]]; then
   usage
   exit 1

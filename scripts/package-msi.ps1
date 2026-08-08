@@ -32,6 +32,9 @@ Write-Host "Publishing native host (win-x64, self-contained)..."
 dotnet publish (Join-Path $repoRoot "src\PdfEditor.NativeHost") `
     --configuration Release --runtime win-x64 --self-contained true `
     -p:PublishSingleFile=false --output $hostDir --nologo -v q
+# $ErrorActionPreference = "Stop" does not catch a native tool's non-zero exit, so check it
+# explicitly -- otherwise the script sails past a failed publish and reports a build it never made.
+if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE." }
 
 # Render the native-messaging manifest with a relative exe path and the pinned allowed origin.
 $template = Get-Content (Join-Path $PSScriptRoot "com.pdfeditor.host.json.template") -Raw
@@ -47,6 +50,7 @@ Write-Host "Building $msiPath ..."
 wix build (Join-Path $repoRoot "installer\windows\PdfEditorHost.wxs") `
     -d "Version=$version" -d "HostDir=$hostDir" -d "ManifestJson=$manifestJson" `
     -o $msiPath
+if ($LASTEXITCODE -ne 0) { throw "wix build failed with exit code $LASTEXITCODE." }
 
 Write-Host "Built: $msiPath"
 Write-Host "Extension ID pinned: $extensionId"

@@ -115,6 +115,66 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  package-linux-installers-dry-run:
+    # Proves the Linux host installers (scripts/package-deb.sh / package-rpm.sh / package-arch.sh)
+    # still build. release-candidate.yml is the only workflow that builds them for real and it runs
+    # solely on push to main, so without this job a broken packaging script would only surface after
+    # merge on the RC run. Builds all three (.deb / .rpm / .pkg.tar.zst) on every push/PR.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "8.0.x"
+      - name: Install Linux packaging tooling (rpm + Arch package format)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rpm libarchive-tools zstd
+      - name: Build the Linux host installers (.deb / .rpm / Arch .pkg.tar.zst)
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+        run: |
+          ./scripts/package-deb.sh dist
+          ./scripts/package-rpm.sh dist
+          ./scripts/package-arch.sh dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pdf-editor-host-linux-installers-dry-run
+          path: |
+            dist/pdf-editor-host_*.deb
+            dist/pdf-editor-host-*.rpm
+            dist/pdf-editor-host-*.pkg.tar.zst
+          if-no-files-found: error
+          retention-days: 7
+
+  package-msi-dry-run:
+    # Proves the Windows MSI build (installer/windows/PdfEditorHost.wxs + scripts/package-msi.ps1)
+    # still compiles. An MSI can only be built on Windows and release-candidate.yml -- the only
+    # workflow that builds it for real -- runs solely on push to main, so without this job a broken
+    # .wxs (bad GUID, schema error, WiX version gotcha) would only surface *after* merge, on the RC
+    # run. This runs the same script on every push/PR so those errors are caught at review time.
+    # WiX is pinned to v5: v6+ require accepting the OSMF EULA, which can't be done non-interactively.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "8.0.x"
+      - name: Install the WiX toolset
+        run: dotnet tool install --global wix --version 5.0.2
+      - name: Build the MSI
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+        run: ./scripts/package-msi.ps1 -OutputDir dist
+        shell: pwsh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pdf-editor-host-msi-dry-run
+          path: dist/*.msi
+          if-no-files-found: error
+          retention-days: 7
+
   test-bundles:
     # Builds the all-in-one bundle (browser extension + self-contained native host +
     # install scripts) for every desktop platform and uploads each as a downloadable

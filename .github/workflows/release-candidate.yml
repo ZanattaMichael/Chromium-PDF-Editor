@@ -110,7 +110,10 @@ jobs:
         shell: bash
 
       - name: Install the WiX toolset
-        run: dotnet tool install --global wix
+        # Pin to WiX v5: v6+ require accepting the Open Source Maintenance Fee (OSMF) EULA,
+        # which cannot be done non-interactively and fails the build with WIX7015. v5 is the
+        # last release that builds freely without it, and reads our v4-schema .wxs unchanged.
+        run: dotnet tool install --global wix --version 5.0.2
 
       - name: Build the Windows MSI
         env:

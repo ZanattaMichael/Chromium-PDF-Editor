@@ -36,13 +36,12 @@ on:
   push:
     branches: ["main"]
 
-permissions:
-  contents: write
-
 jobs:
   # Compute the RC version once so every downstream build stamps the same number.
   version:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # only reads git tag history
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       final_tag: ${{ steps.version.outputs.final_tag }}
@@ -82,6 +81,8 @@ jobs:
   build-msi:
     needs: version
     runs-on: windows-latest
+    permissions:
+      contents: read # checks out, builds, and uploads an artifact only
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -127,6 +128,8 @@ jobs:
   release-candidate:
     needs: [version, build-msi]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # pushes the RC tag and creates/publishes the prerelease
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:

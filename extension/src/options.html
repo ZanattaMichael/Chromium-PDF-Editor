@@ -45,6 +45,7 @@
     <span id="host-status">checking…</span>
     <button id="test">Re-test</button>
   </p>
+  <pre id="host-diagnostics"></pre>
   <p>If the host is not connected:</p>
   <pre>
 # Linux / macOS
@@ -52,6 +53,12 @@
 
 # Windows (PowerShell)
 .\scripts\install-host.ps1 -ExtensionId &lt;your-extension-id&gt;</pre>
+  <p>
+    The OS installer packages (<code>.deb</code>, <code>.rpm</code>, Arch <code>.pkg.tar.zst</code>,
+    and the Windows <code>.msi</code>) register the host system-wide for Chrome, Chromium, Edge,
+    Brave, Vivaldi, and Opera automatically. You can also confirm the host runs on its own with
+    <code>PdfEditor.NativeHost --diagnostics</code>.
+  </p>
   <p>
     Your extension ID is shown at <code>chrome://extensions</code> with Developer mode on.
     Full instructions are in the repository README.

@@ -46,6 +46,7 @@ public static class MessageProcessor
     private static object Dispatch(string action, JsonObject p) => action switch
     {
         "ping" => new { pong = true, version = typeof(MessageProcessor).Assembly.GetName().Version?.ToString() },
+        "diagnostics" => HostDiagnostics.Collect(),
         "info" => Info(p),
         "render" => Render(p),
         "redact" => Redact(p),

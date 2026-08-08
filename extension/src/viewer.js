@@ -6,6 +6,7 @@ import { runFormScript } from './formScript.js';
 import { ActivityLog, formatTime } from './activity-log.js';
 import { displayToPage, pageToDisplay } from './geometry.js';
 import { formatBuildInfo, loadBuildMeta } from './build-info.js';
+import { hostDiagnosticsLines } from './host-diagnostics.js';
 
 const host = new HostClient();
 
@@ -315,10 +316,22 @@ async function logEnvironment() {
   activity.add('info', 'browser', browserSummary(), { diagnostic: true });
   activity.add('info', 'platform', navigator.platform || 'unknown', { diagnostic: true });
   try {
-    const pong = await host.call('ping');
-    activity.add('info', 'native host version', pong?.version ?? 'unknown', { diagnostic: true });
+    // Prefer the host's full self-report; fall back to ping's version on an older host.
+    let logged = false;
+    try {
+      for (const line of hostDiagnosticsLines(await host.call('diagnostics'))) {
+        activity.add('info', 'native host', line, { diagnostic: true });
+        logged = true;
+      }
+    } catch {
+      // Host predates the 'diagnostics' action; fall through to ping below.
+    }
+    if (!logged) {
+      const pong = await host.call('ping');
+      activity.add('info', 'native host version', pong?.version ?? 'unknown', { diagnostic: true });
+    }
   } catch {
-    // A failed ping is already logged by the host.call wrapper; nothing to add.
+    // A failed call is already logged by the host.call wrapper; nothing to add.
   }
 }
 

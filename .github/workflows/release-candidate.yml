@@ -172,10 +172,20 @@ jobs:
             ./scripts/package-bundle.sh "$rid" dist
           done
 
-      - name: Package the Linux host installer (.deb)
+      - name: Install Linux packaging tooling (rpm + Arch package format)
+        # rpmbuild builds the .rpm; bsdtar (libarchive-tools) + zstd assemble the Arch
+        # .pkg.tar.zst by hand -- all run fine on Ubuntu, so no RedHat/Arch host is needed.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rpm libarchive-tools zstd
+
+      - name: Package the Linux host installers (.deb / .rpm / Arch .pkg.tar.zst)
+        # Debian/Ubuntu (.deb), RedHat family — Fedora/RHEL/openSUSE (.rpm), and Arch
+        # (.pkg.tar.zst). Same self-contained host + pinned native-messaging manifest in each.
         env:
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
-        run: ./scripts/package-deb.sh dist
+        run: |
+          ./scripts/package-deb.sh dist
+          ./scripts/package-rpm.sh dist
+          ./scripts/package-arch.sh dist
 
       - name: Download the Windows MSI artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -205,6 +215,8 @@ jobs:
             dist/pdf-editor-extension-*.zip
             dist/pdf-editor-bundle-*.zip
             dist/pdf-editor-host_*.deb
+            dist/pdf-editor-host-*.rpm
+            dist/pdf-editor-host-*.pkg.tar.zst
             dist/*.msi
           body: |
             Release candidate built from ${{ github.sha }}.
@@ -217,6 +229,10 @@ jobs:
             - `pdf-editor-host_<version>_amd64.deb` — a Debian/Ubuntu package that installs the
               native host under `/opt/pdf-editor-host` and registers it with Chrome/Chromium
               system-wide (`sudo apt install ./pdf-editor-host_<version>_amd64.deb`).
+            - `pdf-editor-host-<version>-1.x86_64.rpm` — the same for the RedHat family
+              (Fedora/RHEL/CentOS/openSUSE): `sudo dnf install ./pdf-editor-host-<version>-1.x86_64.rpm`.
+            - `pdf-editor-host-<version>-1-x86_64.pkg.tar.zst` — the same for Arch Linux:
+              `sudo pacman -U ./pdf-editor-host-<version>-1-x86_64.pkg.tar.zst`.
             - `pdf-editor-host-<version>-x64.msi` — a Windows installer that installs the native
               host under Program Files and registers it for Chrome/Chromium/Edge/Brave.
             - `pdf-editor-extension-v<version>.zip` — the extension on its own (Chrome Web

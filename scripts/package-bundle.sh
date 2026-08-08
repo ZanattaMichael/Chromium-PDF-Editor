@@ -44,6 +44,7 @@ mkdir -p "$BUNDLE/scripts"
 cp "$REPO_ROOT/scripts/install-host.sh" \
    "$REPO_ROOT/scripts/install-host.ps1" \
    "$REPO_ROOT/scripts/com.pdfeditor.host.json.template" \
+   "$REPO_ROOT/scripts/extension-id.txt" \
    "$BUNDLE/scripts/"
 
 # 4) Short install guide.

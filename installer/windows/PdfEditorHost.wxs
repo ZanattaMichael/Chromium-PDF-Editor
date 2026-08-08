@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX v4 source for the PDF Editor native-messaging host MSI (Windows).
+
+  Built by scripts/package-msi.ps1 with the WiX toolset (`wix build`) on a Windows runner — it is
+  NOT built in the Linux dev/CI box. It installs the self-contained host under Program Files, ships
+  the native-messaging manifest next to the exe (its "path" is relative to the manifest, which
+  Chrome allows on Windows), and registers the host for the common Chromium-based browsers via
+  HKLM registry values pointing at that manifest. Uninstall removes all of it.
+
+  Build-time variables (passed with -d):
+    Version       e.g. 2.0.0        (MSI ProductVersion)
+    HostDir       published win-x64 self-contained host folder (harvested)
+    ManifestJson  path to the rendered com.pdfeditor.host.json (allowed_origins pinned)
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="PDF Editor Native Host"
+           Manufacturer="PDF Editor"
+           Version="$(var.Version)"
+           UpgradeCode="60F946AD-ED00-472A-B522-5E0EA8E02B9B"
+           Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of the PDF Editor native host is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="PDF Editor Host" />
+    </StandardDirectory>
+
+    <!-- All published host files (runtime + native libs), auto-harvested from the publish folder. -->
+    <ComponentGroup Id="HostFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.HostDir)\**" />
+    </ComponentGroup>
+
+    <!-- The native-messaging manifest + the registry pointers that register it with each browser. -->
+    <Component Id="NativeMessagingRegistration" Directory="INSTALLFOLDER" Guid="*">
+      <File Id="HostManifestJson" Source="$(var.ManifestJson)" Name="com.pdfeditor.host.json" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Google\Chrome\NativeMessagingHosts\com.pdfeditor.host"
+                     Type="string" Value="[INSTALLFOLDER]com.pdfeditor.host.json" KeyPath="yes" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Chromium\NativeMessagingHosts\com.pdfeditor.host"
+                     Type="string" Value="[INSTALLFOLDER]com.pdfeditor.host.json" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Microsoft\Edge\NativeMessagingHosts\com.pdfeditor.host"
+                     Type="string" Value="[INSTALLFOLDER]com.pdfeditor.host.json" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.pdfeditor.host"
+                     Type="string" Value="[INSTALLFOLDER]com.pdfeditor.host.json" />
+    </Component>
+
+    <Feature Id="Main" Title="PDF Editor Native Host" Level="1">
+      <ComponentGroupRef Id="HostFiles" />
+      <ComponentRef Id="NativeMessagingRegistration" />
+    </Feature>
+  </Package>
+</Wix>

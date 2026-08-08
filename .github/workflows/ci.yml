@@ -5,6 +5,11 @@ on:
     branches: ["**"]
   pull_request:
 
+# All jobs only build, test, and upload artifacts -- none write repository contents, so the
+# token is held to read-only. (Artifact upload uses the Actions API, not `contents`.)
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

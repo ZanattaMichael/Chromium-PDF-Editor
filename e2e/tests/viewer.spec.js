@@ -2806,7 +2806,9 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     // Enabling it records an environment snapshot as tagged diagnostic entries.
     await expect(log.locator('.console-entry.diag', { hasText: 'extension version' })).toHaveCount(1);
     await expect(log.locator('.console-entry.diag', { hasText: 'browser' })).toHaveCount(1);
-    await expect(log.locator('.console-entry.diag', { hasText: 'native host version' })).toHaveCount(1);
+    // #114: the host now answers the `diagnostics` action, so its version is reported as a
+    // "native host — Host version: <v>" row (richer than the legacy ping-only fallback).
+    await expect(log.locator('.console-entry.diag', { hasText: 'Host version' })).toHaveCount(1);
 
     // A subsequent host round-trip now carries transfer sizes and is tagged diagnostic.
     await page.click('#btn-zoom-in');

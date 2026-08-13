@@ -15,6 +15,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/linux-manifest-dirs.sh
+source "$REPO_ROOT/scripts/linux-manifest-dirs.sh"
 OUTPUT_DIR="${1:-$REPO_ROOT/dist}"
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
@@ -51,14 +53,17 @@ dotnet publish "$REPO_ROOT/src/PdfEditor.NativeHost" \
 chmod 0755 "$BUILDROOT$INSTALL_DIR/$EXE"
 
 # Native-messaging manifest, pinned to the extension ID and pointing at the installed binary.
-# Chrome reads /etc/opt/chrome/... ; Chromium reads /etc/chromium/... -- register both.
 render_manifest() {
   sed -e "s|__HOST_PATH__|$INSTALL_DIR/$EXE|" -e "s|__EXTENSION_ID__|$EXTENSION_ID|" \
     "$REPO_ROOT/scripts/com.pdfeditor.host.json.template"
 }
-for dir in "etc/opt/chrome/native-messaging-hosts" "etc/chromium/native-messaging-hosts"; do
+# Register for every common Chromium-based browser (see linux-manifest-dirs.sh). Each %config
+# line for the spec's %files section is accumulated here so `dnf remove` reclaims them all.
+CONFIG_FILES=""
+for dir in "${LINUX_MANIFEST_DIRS[@]}"; do
   mkdir -p "$BUILDROOT/$dir"
   render_manifest > "$BUILDROOT/$dir/$HOST_NAME.json"
+  CONFIG_FILES+="%config /$dir/$HOST_NAME.json"$'\n'
 done
 
 # RPM spec. %install copies the pre-staged buildroot into rpmbuild's own buildroot; there is
@@ -83,8 +88,7 @@ cp -a %{_sourcedir}/buildroot/. %{buildroot}/
 
 %files
 $INSTALL_DIR
-%config /etc/opt/chrome/native-messaging-hosts/$HOST_NAME.json
-%config /etc/chromium/native-messaging-hosts/$HOST_NAME.json
+$CONFIG_FILES
 
 %changelog
 * $(LC_ALL=C date '+%a %b %d %Y') PDF Editor <noreply@users.noreply.github.com> - $RPM_VERSION-1

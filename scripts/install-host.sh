@@ -196,14 +196,20 @@ case "$(uname -s)" in
       "$HOME/Library/Application Support/Chromium/NativeMessagingHosts"
       "$HOME/Library/Application Support/Microsoft Edge/NativeMessagingHosts"
       "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts"
+      "$HOME/Library/Application Support/Vivaldi/NativeMessagingHosts"
+      "$HOME/Library/Application Support/com.operasoftware.Opera/NativeMessagingHosts"
     )
     ;;
   *)
+    # Per-user manifest dirs for the common Chromium-based browsers. Registering all of them is
+    # harmless (each browser reads only its own) and means the host works whichever one is used.
     TARGETS=(
       "$HOME/.config/google-chrome/NativeMessagingHosts"
       "$HOME/.config/chromium/NativeMessagingHosts"
       "$HOME/.config/microsoft-edge/NativeMessagingHosts"
       "$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts"
+      "$HOME/.config/vivaldi/NativeMessagingHosts"
+      "$HOME/.config/opera/NativeMessagingHosts"
     )
     ;;
 esac

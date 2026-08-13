@@ -1,7 +1,9 @@
 import { HostClient } from './host-client.js';
+import { hostDiagnosticsLines } from './host-diagnostics.js';
 
 const autoOpen = document.getElementById('auto-open');
 const status = document.getElementById('host-status');
+const diag = document.getElementById('host-diagnostics');
 
 {
   const value = await chrome.storage.sync.get({ autoOpen: true });
@@ -15,10 +17,17 @@ autoOpen.addEventListener('change', () => {
 async function test() {
   status.textContent = 'checking…';
   status.className = '';
+  diag.textContent = '';
   try {
-    const result = await new HostClient().call('ping');
+    const client = new HostClient();
+    const result = await client.call('ping');
     status.textContent = `✓ connected (host v${result.version ?? '?'})`;
     status.className = 'ok';
+    // Pull the richer host self-report too. Tolerate an older host that predates the action.
+    try {
+      const lines = hostDiagnosticsLines(await client.call('diagnostics'));
+      diag.textContent = lines.join('\n');
+    } catch { /* host has no 'diagnostics' action — the ping status is enough */ }
   } catch (e) {
     status.textContent = `✗ ${e.message}`;
     status.className = 'bad';

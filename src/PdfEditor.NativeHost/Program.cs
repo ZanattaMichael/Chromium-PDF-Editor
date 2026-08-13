@@ -1,5 +1,11 @@
 using PdfEditor.NativeHost;
 
+// `PdfEditor.NativeHost --diagnostics` (or --version/--selftest) prints an environment snapshot
+// and exits, so a user can confirm the host runs without involving the browser. A real browser
+// launch passes the extension origin as the first arg, so this never intercepts a host session.
+var cliExit = HostDiagnostics.TryRunCli(args, Console.Out);
+if (cliExit.HasValue) return cliExit.Value;
+
 // Chrome launches this host and speaks the native messaging protocol over stdio.
 // Anything written to stdout must be a framed message, so diagnostics go to stderr.
 var stdin = Console.OpenStandardInput();

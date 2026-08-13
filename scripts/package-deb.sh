@@ -10,6 +10,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/linux-manifest-dirs.sh
+source "$REPO_ROOT/scripts/linux-manifest-dirs.sh"
 OUTPUT_DIR="${1:-$REPO_ROOT/dist}"
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
@@ -41,12 +43,14 @@ dotnet publish "$REPO_ROOT/src/PdfEditor.NativeHost" \
 chmod 0755 "$DEBROOT$INSTALL_DIR/$EXE"
 
 # Native-messaging manifest, pinned to the extension ID and pointing at the installed binary.
-# Chrome reads /etc/opt/chrome/... ; Chromium reads /etc/chromium/... — register both.
 render_manifest() {
   sed -e "s|__HOST_PATH__|$INSTALL_DIR/$EXE|" -e "s|__EXTENSION_ID__|$EXTENSION_ID|" \
     "$REPO_ROOT/scripts/com.pdfeditor.host.json.template"
 }
-for dir in "etc/opt/chrome/native-messaging-hosts" "etc/chromium/native-messaging-hosts"; do
+# System-wide manifest dirs for the common Chromium-based browsers. Each browser reads only its
+# own dir and ignores the rest, so shipping to all of them is safe and means the host works no
+# matter which browser is installed. (Firefox uses a different manifest schema — omitted.)
+for dir in "${LINUX_MANIFEST_DIRS[@]}"; do
   mkdir -p "$DEBROOT/$dir"
   render_manifest > "$DEBROOT/$dir/$HOST_NAME.json"
 done

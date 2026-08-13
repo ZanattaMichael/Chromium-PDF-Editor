@@ -199,6 +199,25 @@ jobs:
           name: pdf-editor-host-msi
           path: dist
 
+      # Scan every downloadable artifact with VirusTotal and fail before publishing if anything is
+      # flagged (#111). Runs here — after all artifacts (bundles, .deb/.rpm/Arch, .msi) are in dist/
+      # and before the tag/release steps — so a detection blocks the release. Skips with a notice if
+      # the VT_API_KEY secret isn't set, so forks/PRs without the secret aren't hard-failed.
+      - name: Scan release artifacts with VirusTotal
+        env:
+          VT_API_KEY: ${{ secrets.VT_API_KEY }}
+          # Fail only on genuine detections; the committed allowlist absorbs known heuristic FPs.
+          VT_MALICIOUS_THRESHOLD: "0"
+        run: |
+          shopt -s nullglob
+          python3 scripts/scan-virustotal.py \
+            dist/pdf-editor-bundle-*.zip \
+            dist/pdf-editor-host_*.deb \
+            dist/pdf-editor-host-*.rpm \
+            dist/pdf-editor-host-*.pkg.tar.zst \
+            dist/*.msi \
+            dist/pdf-editor-extension-*.zip
+
       - name: Create and push the release candidate tag
         run: |
           git tag "${{ needs.version.outputs.tag }}"

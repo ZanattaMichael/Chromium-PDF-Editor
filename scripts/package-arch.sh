@@ -15,6 +15,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/linux-manifest-dirs.sh
+source "$REPO_ROOT/scripts/linux-manifest-dirs.sh"
 OUTPUT_DIR="${1:-$REPO_ROOT/dist}"
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
@@ -51,14 +53,17 @@ dotnet publish "$REPO_ROOT/src/PdfEditor.NativeHost" \
 chmod 0755 "$PKGDIR$INSTALL_DIR/$EXE"
 
 # Native-messaging manifest, pinned to the extension ID and pointing at the installed binary.
-# Chrome reads /etc/opt/chrome/... ; Chromium reads /etc/chromium/... -- register both.
 render_manifest() {
   sed -e "s|__HOST_PATH__|$INSTALL_DIR/$EXE|" -e "s|__EXTENSION_ID__|$EXTENSION_ID|" \
     "$REPO_ROOT/scripts/com.pdfeditor.host.json.template"
 }
-for dir in "etc/opt/chrome/native-messaging-hosts" "etc/chromium/native-messaging-hosts"; do
+# Register for every common Chromium-based browser (see linux-manifest-dirs.sh). Each manifest is
+# marked as a pacman backup file (accumulated in BACKUP_LINES) so an upgrade won't clobber edits.
+BACKUP_LINES=""
+for dir in "${LINUX_MANIFEST_DIRS[@]}"; do
   mkdir -p "$PKGDIR/$dir"
   render_manifest > "$PKGDIR/$dir/$HOST_NAME.json"
+  BACKUP_LINES+="backup = $dir/$HOST_NAME.json"$'\n'
 done
 
 # .PKGINFO -- package metadata pacman reads. size is the installed byte total.
@@ -77,11 +82,8 @@ arch = x86_64
 license = MIT
 EOF
 
-# Mark the two manifests as pacman backup/config files so an upgrade doesn't clobber local edits.
-{
-  echo "backup = etc/opt/chrome/native-messaging-hosts/$HOST_NAME.json"
-  echo "backup = etc/chromium/native-messaging-hosts/$HOST_NAME.json"
-} >> "$PKGDIR/.PKGINFO"
+# Mark every registered manifest as a pacman backup file so an upgrade doesn't clobber local edits.
+printf '%s' "$BACKUP_LINES" >> "$PKGDIR/.PKGINFO"
 
 # .MTREE -- a gzip-compressed mtree manifest of every packaged file (makepkg's exact options),
 # listing .PKGINFO and the payload tree but not .MTREE itself.

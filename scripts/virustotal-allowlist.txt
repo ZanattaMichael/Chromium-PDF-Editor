@@ -1,0 +1,15 @@
+# VirusTotal engine allowlist for the release binary scan (#111).
+#
+# One antivirus engine name (exactly as VirusTotal reports it) per line. A `malicious` or
+# `suspicious` verdict from an engine listed here is IGNORED when deciding whether to fail the
+# build. This exists so a single flaky heuristic engine can't block every release — unsigned,
+# self-contained .NET binaries routinely trip heuristic/ML engines with false positives.
+#
+# Keep this list SHORT and REVIEWED: only add an engine after confirming (via its VT report /
+# vendor) that the detection on our artifacts is a generic-heuristic false positive, and add a
+# comment saying why + when. Any engine NOT listed here still fails the build on a detection.
+#
+# Format: the exact engine name, e.g.
+#   SecureAge        # generic ML/heuristic FP on unsigned self-contained .NET single-file, 2026-08
+#
+# (Empty by default — add entries only with justification.)

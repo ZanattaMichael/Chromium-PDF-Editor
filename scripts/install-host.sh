@@ -206,6 +206,7 @@ case "$(uname -s)" in
     TARGETS=(
       "$HOME/.config/google-chrome/NativeMessagingHosts"
       "$HOME/.config/chromium/NativeMessagingHosts"
+      "$HOME/.config/chromium-browser/NativeMessagingHosts"  # older Ubuntu/Debian chromium-browser package
       "$HOME/.config/microsoft-edge/NativeMessagingHosts"
       "$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts"
       "$HOME/.config/vivaldi/NativeMessagingHosts"

@@ -49,6 +49,14 @@
                      Type="string" Value="[INSTALLFOLDER]com.pdfeditor.host.json" />
       <RegistryValue Root="HKLM" Key="SOFTWARE\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.pdfeditor.host"
                      Type="string" Value="[INSTALLFOLDER]com.pdfeditor.host.json" />
+      <!-- Vivaldi and Opera, to match the coverage the Linux packages and install-host.sh give
+           (see scripts/linux-manifest-dirs.sh). Each browser reads only its own key, so a key an
+           installed browser never consults is simply inert — writing all of them is harmless and
+           means the host connects no matter which of these is installed. -->
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Vivaldi\NativeMessagingHosts\com.pdfeditor.host"
+                     Type="string" Value="[INSTALLFOLDER]com.pdfeditor.host.json" />
+      <RegistryValue Root="HKLM" Key="SOFTWARE\Opera Software\NativeMessagingHosts\com.pdfeditor.host"
+                     Type="string" Value="[INSTALLFOLDER]com.pdfeditor.host.json" />
     </Component>
 
     <Feature Id="Main" Title="PDF Editor Native Host" Level="1">

@@ -29,20 +29,28 @@ async function test() {
     status.className = 'ok';
     // Pull the richer host self-report too. Tolerate an older host that predates the action.
     try {
-      const lines = hostDiagnosticsLines(await client.call('diagnostics'));
-      diag.textContent = lines.join('\n');
-      // Offer a one-click copy only when there's actually a self-report to copy.
-      copyDiag.hidden = lines.length === 0;
+      diag.textContent = hostDiagnosticsLines(await client.call('diagnostics')).join('\n');
     } catch { /* host has no 'diagnostics' action — the ping status is enough */ }
   } catch (e) {
     status.textContent = `✗ ${e.message}`;
     status.className = 'bad';
+  } finally {
+    // Always offer the copy once the check has run — the status line is worth copying into a bug
+    // report even when the host is disconnected (that's exactly when diagnostics matter most).
+    copyDiag.hidden = false;
   }
 }
 
-// Copies the connection status + host self-report so it can be pasted into a bug report.
+// Copies the environment + connection status + host self-report so it can be pasted into a bug
+// report. Includes the extension version and browser even when the host is disconnected.
 copyDiag.addEventListener('click', async () => {
-  const text = `${status.textContent}\n${diag.textContent}`.trim();
+  const { version } = chrome.runtime.getManifest();
+  const text = [
+    `Extension: v${version}`,
+    `Browser: ${navigator.userAgent}`,
+    `Host: ${status.textContent}`,
+    diag.textContent,
+  ].join('\n').trim();
   try {
     await navigator.clipboard.writeText(text);
     copyDiagStatus.textContent = '✓ copied';

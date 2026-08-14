@@ -268,6 +268,43 @@ script — everything in one download. Unzip it and follow the included `INSTALL
    `.\scripts\install-host.ps1 -ExtensionId <extension-id>` (Windows).
 3. Restart the browser.
 
+### System-wide: the OS installer packages (`.deb` / `.rpm` / Arch / `.msi`)
+
+Every [release](../../releases) also attaches native-host installer packages that put the
+self-contained host under `/opt/pdf-editor-host` (Linux) or *Program Files* (Windows) and
+register it **system-wide** for Chrome, Chromium, Edge, Brave, Vivaldi, and Opera. They only
+install the **native host** — you still get the extension from the Chrome Web Store.
+
+```bash
+sudo apt install ./pdf-editor-host_<version>_amd64.deb          # Debian / Ubuntu
+sudo dnf install ./pdf-editor-host-<version>-1.x86_64.rpm       # Fedora / RHEL / openSUSE
+sudo pacman -U ./pdf-editor-host-<version>-1-x86_64.pkg.tar.zst # Arch
+# Windows: double-click the .msi, or  msiexec /i pdf-editor-host-<version>-x64.msi
+```
+
+> [!IMPORTANT]
+> These packages pin the host's `allowed_origins` to the **published Chrome Web Store
+> extension ID** (`ikbkielkpaloojhibinmcfbeekhkdblc`). They work only for the extension
+> installed **from the Web Store**, which has that exact ID.
+>
+> A **developer-mode / unpacked** extension — including one loaded to test the dry-run
+> packages built by CI — gets a *different*, machine-specific ID, so the pinned origin will
+> not match and the host connection is refused ("Specified native messaging host not found"
+> or a rejected connection). Two ways to fix it:
+>
+> 1. **Re-register per-user** (no rebuild): after installing the package, run the user-level
+>    installer with your unpacked extension's ID. It writes a per-user manifest that takes
+>    precedence over the package's system-wide one:
+>    ```bash
+>    ./scripts/install-host.sh <your-extension-id>            # Linux / macOS
+>    .\scripts\install-host.ps1 -ExtensionId <your-extension-id>  # Windows (PowerShell)
+>    ```
+> 2. **Rebuild the package** pinned to your ID:
+>    `CHROME_EXTENSION_ID=<your-extension-id> ./scripts/package-deb.sh` (or
+>    `package-rpm.sh` / `package-arch.sh` / `package-msi.ps1`).
+>
+> Find your unpacked extension's ID at `chrome://extensions` with *Developer mode* on.
+
 ### From a source checkout
 
 1. **Generate the icons** (one-time, standard-library Python only — already done if

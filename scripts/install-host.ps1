@@ -120,11 +120,18 @@ $manifest = $template.Replace("__HOST_PATH__", $hostPath.Replace("\", "\\")).Rep
 $manifestPath = Join-Path $publishDir "$hostName.json"
 $manifest | Set-Content -Path $manifestPath -Encoding utf8
 
+# Per-user (HKCU) manifest keys for the common Chromium-based browsers. HKCU takes precedence
+# over the machine-wide HKLM keys the MSI writes, so running this after the MSI re-points the
+# host at a different extension ID (e.g. a developer-mode / unpacked build). Kept in sync with
+# the MSI's browser set (installer/windows/PdfEditorHost.wxs): Chrome, Chromium, Edge, Brave,
+# Vivaldi, Opera. Each browser reads only its own key, so extra keys are inert/harmless.
 $registryRoots = @(
     "HKCU:\Software\Google\Chrome\NativeMessagingHosts",
     "HKCU:\Software\Chromium\NativeMessagingHosts",
     "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts",
-    "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts"
+    "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts",
+    "HKCU:\Software\Vivaldi\NativeMessagingHosts",
+    "HKCU:\Software\Opera Software\NativeMessagingHosts"
 )
 foreach ($root in $registryRoots) {
     $key = Join-Path $root $hostName

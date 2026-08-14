@@ -143,6 +143,28 @@ jobs:
           ./scripts/package-deb.sh dist
           ./scripts/package-rpm.sh dist
           ./scripts/package-arch.sh dist
+      - name: Note how to use these dry-run packages
+        # These artifacts pin the host to whichever extension ID the build used (the
+        # CHROME_EXTENSION_ID secret, else the committed scripts/extension-id.txt = the published
+        # Web Store ID). Anyone downloading them to test against a developer-mode/unpacked extension
+        # (a different ID) must re-register — spell that out in the job summary so it isn't a mystery.
+        run: |
+          pinned="${CHROME_EXTENSION_ID:-$(tr -d '[:space:]' < scripts/extension-id.txt)}"
+          {
+            echo "## Linux host installers (dry run)"
+            echo "These \`.deb\`/\`.rpm\`/\`.pkg.tar.zst\` packages register the native host for the"
+            echo "extension ID **\`$pinned\`** only."
+            echo ""
+            echo "To use them with a **developer-mode / unpacked** extension (which has a different"
+            echo "ID), after installing the package run:"
+            echo '```bash'
+            echo "./scripts/install-host.sh <your-extension-id>"
+            echo '```'
+            echo "It writes a per-user manifest that overrides the package's. See the README's"
+            echo "\"System-wide: the OS installer packages\" section for details."
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pdf-editor-host-linux-installers-dry-run
@@ -173,6 +195,30 @@ jobs:
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
         run: ./scripts/package-msi.ps1 -OutputDir dist
         shell: pwsh
+      - name: Note how to use this dry-run package
+        # Same caveat as the Linux dry-run job: the MSI pins the host to one extension ID, so a
+        # developer-mode/unpacked extension (different ID) must re-register per-user afterward.
+        shell: pwsh
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+        run: |
+          $pinned = $env:CHROME_EXTENSION_ID
+          if (-not $pinned) { $pinned = (Get-Content scripts/extension-id.txt -Raw).Trim() }
+          # Single-quoted lines so backticks/backslashes are literal markdown; only the ID line
+          # interpolates, via string concatenation, to avoid PowerShell backtick-escape surprises.
+          $lines = @(
+            '## Windows MSI (dry run)',
+            'This `.msi` registers the native host for the extension ID **`' + $pinned + '`** only.',
+            '',
+            'To use it with a **developer-mode / unpacked** extension (a different ID), after',
+            'installing the MSI run:',
+            '```powershell',
+            '.\scripts\install-host.ps1 -ExtensionId <your-extension-id>',
+            '```',
+            "It writes per-user (HKCU) keys that override the MSI's machine-wide ones. See the",
+            'README''s "System-wide: the OS installer packages" section for details.'
+          )
+          $lines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pdf-editor-host-msi-dry-run

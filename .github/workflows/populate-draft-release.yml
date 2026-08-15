@@ -1,0 +1,196 @@
+name: Populate draft release
+
+# Builds the latest binaries from `main` and attaches them to a DRAFT GitHub Release, so a human
+# can create an empty draft (e.g. tag v2.0.1), populate it here, review, and then publish it. This
+# is the manual companion to release-candidate.yml (which auto-builds a prerelease on every push to
+# main): use this to stage a promotable release with fresh binaries.
+#
+# Trigger:
+#   - workflow_dispatch (the reliable path): create the draft release first, then run this with the
+#     draft's tag. GitHub is inconsistent about firing `release` events for drafts
+#     (https://github.com/orgs/community/discussions/7118), so manual dispatch is the supported way.
+#   - release: created (best-effort): if GitHub does fire it for a newly-saved draft, this runs
+#     automatically; the `if:` guards restrict it to drafts.
+#
+# It builds from `main` (not the release's target commit) by design — "the latest binaries from
+# main". Assets are uploaded to the existing draft with `gh release upload --clobber`, which finds
+# the draft by tag; a draft is mutable, so re-running replaces the assets. (Publishing the release
+# freezes them under the repo's immutable-releases setting.)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag of the draft release to populate (e.g. v2.0.1)"
+        required: true
+      ref:
+        description: "Git ref to build from"
+        required: false
+        default: main
+  release:
+    types: [created]
+
+jobs:
+  # Only proceed for a manual dispatch, or a `release: created` event that is actually a draft.
+  # Also compute the manifest/package version from the tag once, for both build jobs.
+  setup:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.release.draft == true }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # only reads workflow/event context
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      ref: ${{ steps.v.outputs.ref }}
+      manifest_version: ${{ steps.v.outputs.manifest_version }}
+    steps:
+      - name: Resolve tag, ref and version
+        id: v
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_REF: ${{ github.event.inputs.ref }}
+        run: |
+          tag="${EVENT_TAG:-$INPUT_TAG}"
+          ref="${INPUT_REF:-main}"
+          if [[ -z "$tag" ]]; then echo "::error::No release tag to populate."; exit 1; fi
+          # vX.Y.Z -> X.Y.Z ; vX.Y.Z-<build> -> X.Y.Z.<build> (Chrome allows up to 4 parts).
+          v="${tag#v}"
+          if [[ "$v" == *-* ]]; then manifest_version="${v%%-*}.${v#*-}"; else manifest_version="$v"; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "manifest_version=$manifest_version" >> "$GITHUB_OUTPUT"
+          echo "Populating draft '$tag' from ref '$ref' (version $manifest_version)"
+
+  # The MSI can only be built on Windows (WiX); hand it back as an artifact.
+  build-msi:
+    needs: setup
+    runs-on: windows-latest
+    permissions:
+      contents: read # checks out and builds; hands the MSI back as an artifact
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.setup.outputs.ref }}
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
+        with:
+          python-version: "3.x"
+
+      - name: Stamp manifest.json with the release version
+        run: |
+          python3 - "${{ needs.setup.outputs.manifest_version }}" <<'EOF'
+          import json, sys
+          path = "extension/manifest.json"
+          with open(path) as f: manifest = json.load(f)
+          manifest["version"] = sys.argv[1]
+          with open(path, "w") as f: json.dump(manifest, f, indent=2); f.write("\n")
+          EOF
+        shell: bash
+
+      - name: Install the WiX toolset
+        # Pin to WiX v5: v6+ require accepting the OSMF EULA non-interactively (fails with WIX7015).
+        run: dotnet tool install --global wix --version 5.0.2
+
+      - name: Build the Windows MSI
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+        run: ./scripts/package-msi.ps1 -OutputDir dist
+        shell: pwsh
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: draft-msi
+          path: dist/*.msi
+          if-no-files-found: error
+
+  # Build the extension zip, per-platform bundles, and Linux installers; pull in the MSI; scan; and
+  # upload everything to the draft release.
+  attach:
+    needs: [setup, build-msi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # uploads the built assets to the draft release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.setup.outputs.ref }}
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
+        with:
+          python-version: "3.x"
+
+      - name: Stamp manifest.json with the release version
+        run: |
+          python3 - "${{ needs.setup.outputs.manifest_version }}" <<'EOF'
+          import json, sys
+          path = "extension/manifest.json"
+          with open(path) as f: manifest = json.load(f)
+          manifest["version"] = sys.argv[1]
+          with open(path, "w") as f: json.dump(manifest, f, indent=2); f.write("\n")
+          EOF
+
+      - name: Package extension
+        run: ./scripts/package-extension.sh dist
+
+      - name: Package all-in-one bundles (extension + native host, per platform)
+        run: |
+          for rid in win-x64 linux-x64 osx-x64 osx-arm64; do
+            ./scripts/package-bundle.sh "$rid" dist
+          done
+
+      - name: Install Linux packaging tooling (rpm + Arch package format)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rpm libarchive-tools zstd
+
+      - name: Package the Linux host installers (.deb / .rpm / Arch .pkg.tar.zst)
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+        run: |
+          ./scripts/package-deb.sh dist
+          ./scripts/package-rpm.sh dist
+          ./scripts/package-arch.sh dist
+
+      - name: Download the Windows MSI artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: draft-msi
+          path: dist
+
+      - name: Scan release artifacts with VirusTotal
+        # Same gate the release pipeline uses (#111): fail before attaching if anything is flagged.
+        # Skips with a notice when VT_API_KEY isn't set.
+        env:
+          VT_API_KEY: ${{ secrets.VT_API_KEY }}
+          VT_MALICIOUS_THRESHOLD: "0"
+        run: |
+          shopt -s nullglob
+          python3 scripts/scan-virustotal.py \
+            dist/pdf-editor-bundle-*.zip \
+            dist/pdf-editor-host_*.deb \
+            dist/pdf-editor-host-*.rpm \
+            dist/pdf-editor-host-*.pkg.tar.zst \
+            dist/*.msi \
+            dist/pdf-editor-extension-*.zip
+
+      - name: Upload the binaries to the draft release
+        # `gh release upload` finds the draft by its tag; --clobber lets re-runs replace assets.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.setup.outputs.tag }}
+        run: |
+          shopt -s nullglob
+          files=(
+            dist/pdf-editor-extension-*.zip
+            dist/pdf-editor-bundle-*.zip
+            dist/pdf-editor-host_*.deb
+            dist/pdf-editor-host-*.rpm
+            dist/pdf-editor-host-*.pkg.tar.zst
+            dist/*.msi
+          )
+          if [[ ${#files[@]} -eq 0 ]]; then echo "::error::No artifacts were built."; exit 1; fi
+          echo "Uploading ${#files[@]} asset(s) to draft '$TAG':"
+          printf '  %s\n' "${files[@]}"
+          gh release upload "$TAG" "${files[@]}" --clobber

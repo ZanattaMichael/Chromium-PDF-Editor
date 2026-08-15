@@ -4,6 +4,8 @@ import { hostDiagnosticsLines } from './host-diagnostics.js';
 const autoOpen = document.getElementById('auto-open');
 const status = document.getElementById('host-status');
 const diag = document.getElementById('host-diagnostics');
+const copyDiag = document.getElementById('copy-diag');
+const copyDiagStatus = document.getElementById('copy-diag-status');
 
 {
   const value = await chrome.storage.sync.get({ autoOpen: true });
@@ -18,6 +20,8 @@ async function test() {
   status.textContent = 'checking…';
   status.className = '';
   diag.textContent = '';
+  copyDiag.hidden = true;
+  copyDiagStatus.textContent = '';
   try {
     const client = new HostClient();
     const result = await client.call('ping');
@@ -25,14 +29,38 @@ async function test() {
     status.className = 'ok';
     // Pull the richer host self-report too. Tolerate an older host that predates the action.
     try {
-      const lines = hostDiagnosticsLines(await client.call('diagnostics'));
-      diag.textContent = lines.join('\n');
+      diag.textContent = hostDiagnosticsLines(await client.call('diagnostics')).join('\n');
     } catch { /* host has no 'diagnostics' action — the ping status is enough */ }
   } catch (e) {
     status.textContent = `✗ ${e.message}`;
     status.className = 'bad';
+  } finally {
+    // Always offer the copy once the check has run — the status line is worth copying into a bug
+    // report even when the host is disconnected (that's exactly when diagnostics matter most).
+    copyDiag.hidden = false;
   }
 }
+
+// Copies the environment + connection status + host self-report so it can be pasted into a bug
+// report. Includes the extension version and browser even when the host is disconnected.
+copyDiag.addEventListener('click', async () => {
+  const { version } = chrome.runtime.getManifest();
+  const text = [
+    `Extension: v${version}`,
+    `Browser: ${navigator.userAgent}`,
+    `Host: ${status.textContent}`,
+    diag.textContent,
+  ].join('\n').trim();
+  try {
+    await navigator.clipboard.writeText(text);
+    copyDiagStatus.textContent = '✓ copied';
+    copyDiagStatus.className = 'ok';
+  } catch {
+    copyDiagStatus.textContent = '✗ copy failed';
+    copyDiagStatus.className = 'bad';
+  }
+  setTimeout(() => { copyDiagStatus.textContent = ''; }, 2500);
+});
 
 document.getElementById('test').addEventListener('click', test);
 await test();

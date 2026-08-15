@@ -124,6 +124,21 @@ jobs:
             ./scripts/package-bundle.sh "$rid" dist
           done
 
+      # Scan the promotion's downloadable artifacts with VirusTotal before anything is attached or
+      # deployed (#111) — the same gate release-candidate.yml applies to the RC, so a real release
+      # (which deploys to the Chrome Web Store) is verified too, not just the candidate. Runs in the
+      # `package` job that the store-deploy job depends on, so a detection fails packaging and the
+      # deploy never runs. Skips with a notice if VT_API_KEY isn't set (mirrors the store-creds skip).
+      - name: Scan release artifacts with VirusTotal
+        env:
+          VT_API_KEY: ${{ secrets.VT_API_KEY }}
+          VT_MALICIOUS_THRESHOLD: "0"
+        run: |
+          shopt -s nullglob
+          python3 scripts/scan-virustotal.py \
+            dist/pdf-editor-extension-*.zip \
+            dist/pdf-editor-bundle-*.zip
+
       # Best-effort. This workflow reacts to a release a human has already *published*, and this
       # repository has immutable releases enabled, so its assets are frozen the moment it exists —
       # softprops can neither overwrite nor add to them ("Cannot delete asset from an immutable

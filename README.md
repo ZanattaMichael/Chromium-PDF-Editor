@@ -158,6 +158,47 @@ npx playwright install chromium   # once
 npx playwright test               # 10 scenarios
 ```
 
+Alongside the functional scenarios it covers the three states the extension can be in before it
+can do any work at all, because each is rendered by different code in a different context (the
+viewer's empty state, the options page, and the service worker's toolbar badge):
+
+- `tests/host-missing.spec.js` — launches with **no** host registered anywhere and checks the
+  pages say, in as many words, that the native host is not installed, and give the command to
+  install it. It refuses to run if a host package is installed system-wide, which would quietly
+  turn "no host" into a connected one and pass without testing anything.
+- `tests/host-version.spec.js` — checks that a host of the wrong version is flagged rather than
+  reported as a healthy connection. The real host answers every message; only the version the
+  page compares itself against is overridden, so the probe, the comparison and the rendering are
+  all the production ones.
+
+#### Package-install tests
+
+The suites above register the host themselves, into a throwaway browser profile. That proves the
+extension and the host talk to each other and says nothing about whether *installing the package*
+gives you a working editor — which is a real failure this project shipped: a `.deb` that installed
+cleanly, put the host somewhere sensible, and was then never found by the browser.
+
+So there is a second suite, with its own config, that installs the real package with `dpkg` and
+drives the extension against whatever it left behind — no profile-local manifest, no locally built
+host:
+
+```bash
+cd e2e
+npx playwright test --config playwright.package.config.js
+```
+
+It builds the `.deb` (or reuses one via `PDF_EDITOR_DEB=/path/to.deb`), installs it, runs the
+tests, and purges the package again afterwards, pass or fail. Installing needs root, so it uses
+`sudo` when you are not already root, and it refuses to run over an existing install rather than
+removing a host you use. It works because the extension's manifest `key` pins its ID to the
+published Web Store one even when loaded unpacked — the same ID the package writes into
+`allowed_origins`.
+
+CI runs it as the `package-install-e2e` job. The `.deb` is the only one of the three Linux
+packages an Ubuntu runner can install; the `.rpm` and Arch packages are checked structurally
+instead, by `scripts/verify-linux-package.sh`, which reads the same manifest, path and permission
+invariants out of each archive.
+
 ### Performance guards
 
 A separate test project (`tests/PdfEditor.Perf.Tests`) puts time budgets on the core
@@ -179,7 +220,8 @@ outside the coverage-gated projects so timing runs never affect the coverage num
 
 Every push and PR runs `.github/workflows/ci.yml`'s jobs: `test` (build + full
 .NET suite with the 90% coverage gate), `perf` (the performance guards above),
-`e2e` (the Playwright suite, headless), and `package-dry-run` (actually runs
+`e2e` (the Playwright suite, headless), `package-install-e2e` (builds the `.deb`, installs it,
+and drives the extension against the packaged host), and `package-dry-run` (actually runs
 `scripts/package-extension.sh` and uploads the resulting zip). That last job exists because the release pipeline below
 (`release-candidate.yml`, `release-extension.yml`) only triggers on merges to `main` or
 published Releases — without a PR-time dry run, a regression in the packaging script

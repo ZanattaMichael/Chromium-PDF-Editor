@@ -103,6 +103,25 @@ def fetch_issues(base_url: str, project_key: str, token: str,
         page += 1
 
 
+
+def summarize(issues: list[dict[str, Any]]) -> None:
+    """Print one line per issue, so the findings are readable in the job log.
+
+    Everything downstream of this script publishes to somewhere else -- SonarQube Cloud's
+    dashboard, or GitHub's Security tab -- and both need permissions the person reading a failed
+    build may not have. The log is the one place everyone can see, so the findings go there too.
+    """
+    for issue in issues:
+        component = str(issue.get("component") or "")
+        # Component keys are "<project-key>:<path>"; only the path is useful here.
+        _, _, path = component.rpartition(":")
+        line = issue.get("line")
+        where = f"{path or component}:{line}" if line else (path or component)
+        rule = issue.get("rule") or "?"
+        message = " ".join(str(issue.get("message") or "").split())
+        print(f"  {where}  [{rule}] {message}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report-task", type=Path, default=DEFAULT_REPORT_TASK)
@@ -132,6 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     safe_path(args.output).write_text(
         json.dumps({"issues": issues}, indent=2), encoding="utf-8")
     print(f"Fetched {len(issues)} unresolved issue(s) -> {args.output}", file=sys.stderr)
+    summarize(issues)
 
     # Hand the project key on so the converter can strip it off component keys.
     if step_output := os.environ.get("GITHUB_OUTPUT"):

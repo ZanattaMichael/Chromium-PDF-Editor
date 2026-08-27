@@ -108,6 +108,28 @@ test('Windows advice only names paths an MSI install actually has', () => {
   assert.match(forbidden, /PDF Editor Host\\register-host\.ps1" -ExtensionId abcdefghijklmnopabcdefghijklmnop/);
 });
 
+// Windows client editions default to a Restricted execution policy, under which running a .ps1
+// at all is refused before its first line executes. Any command we hand a user that runs one must
+// therefore go through powershell.exe with an explicit policy, or it fails for most of them. This
+// sweeps every state x platform rather than the handful of cases spelled out above, so a new step
+// added later cannot quietly reintroduce a bare invocation.
+test('every PowerShell command sets an execution policy', () => {
+  const platforms = ['windows', 'macos', 'linux', 'chromeos', 'android', 'unknown'];
+  for (const state of Object.values(HOST_STATE)) {
+    for (const platform of platforms) {
+      const guide = hostInstallGuide({ state, platform, extensionId: DEV_EXTENSION_ID });
+      for (const step of guide.steps) {
+        for (const line of (step.code ?? '').split('\n')) {
+          if (!line.includes('.ps1')) continue;
+          assert.match(
+            line, /powershell -NoProfile -ExecutionPolicy Bypass -File/,
+            `${state}/${platform}: a .ps1 is invoked without an execution-policy bypass: ${line}`);
+        }
+      }
+    }
+  }
+});
+
 test('a crashed host is pointed at --diagnostics and the missing runtime libraries', () => {
   const text = hostInstallGuideLines(
     hostInstallGuide({ state: HOST_STATE.CRASHED, platform: 'linux' })).join('\n');

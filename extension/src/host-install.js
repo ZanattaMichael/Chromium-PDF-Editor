@@ -77,7 +77,9 @@ export function hostStateSummary(state) {
 // --------------------------------------------------------------------- steps
 
 // Per-platform "install it from scratch" steps. Keyed by the platform names detectPlatform returns.
-function installSteps(platform) {
+// Exported because host-version.js reuses them: replacing an out-of-date host is the same download
+// and the same command as installing one, and a second copy of these would drift from this one.
+export function installSteps(platform) {
   if (platform === 'windows') {
     return [
       {
@@ -133,7 +135,13 @@ function installSteps(platform) {
   }
   return [{
     text: 'Download the bundle for your platform from the latest release and run the installer '
-      + 'script inside it (install-host.sh on Linux/macOS, install-host.ps1 on Windows).',
+      + 'script inside it:',
+    // The Windows line goes through powershell.exe with an explicit policy for the same reason
+    // reRegisterStep does: a default-configured client machine refuses to run a .ps1 outright.
+    code: './scripts/install-host.sh <extension-id>'
+      + '                                  # Linux / macOS\n'
+      + 'powershell -NoProfile -ExecutionPolicy Bypass -File '
+      + String.raw`.\scripts\install-host.ps1 -ExtensionId <extension-id>   # Windows`,
   }];
 }
 

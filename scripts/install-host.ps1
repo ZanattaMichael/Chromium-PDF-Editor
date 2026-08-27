@@ -124,4 +124,8 @@ if (-not (Test-Path $register)) {
     throw "$register is missing -- this script needs it to register the host."
 }
 
+# Called with & rather than through a fresh `powershell -ExecutionPolicy Bypass -File`: the policy
+# is a per-process setting, so whatever allowed *this* script to start already covers the nested
+# one, and a child process would drop $ErrorActionPreference -- a failed registration would then
+# exit 0 and look like success.
 & $register -HostPath $hostPath -ExtensionId $ExtensionId

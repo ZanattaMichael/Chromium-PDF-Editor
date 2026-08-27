@@ -64,7 +64,9 @@ is required.
    *Load unpacked*, and select the \`extension/\` folder. Note the extension ID it shows.
 2. **Register the native host** (auto-detects the bundled \`host/\`):
    - Linux / macOS: \`./scripts/install-host.sh <extension-id>\`
-   - Windows (PowerShell): \`.\\scripts\\install-host.ps1 -ExtensionId <extension-id>\`
+   - Windows (PowerShell): \`powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\install-host.ps1 -ExtensionId <extension-id>\`
+     (the explicit policy flag is needed because Windows client machines default to a
+     \`Restricted\` execution policy, which refuses to run the shipped script)
 3. **Restart your browser.** The extension's options page shows the host connection status.
 EOF
 

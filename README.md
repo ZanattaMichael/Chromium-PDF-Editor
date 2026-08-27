@@ -265,7 +265,8 @@ script — everything in one download. Unzip it and follow the included `INSTALL
    folder. Note the extension ID.
 2. Register the host (auto-detects the bundled `host/`):
    `./scripts/install-host.sh <extension-id>` (Linux/macOS) or
-   `.\scripts\install-host.ps1 -ExtensionId <extension-id>` (Windows).
+   `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-host.ps1 -ExtensionId <extension-id>`
+   (Windows — see [why the policy flag](#why-these-commands-set-an-execution-policy)).
 3. Restart the browser.
 
 ### System-wide: the OS installer packages (`.deb` / `.rpm` / Arch / `.msi`)
@@ -309,8 +310,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File $reg -List        # show wha
 powershell -NoProfile -ExecutionPolicy Bypass -File $reg -Uninstall   # drop the per-user values
 ```
 
-(The explicit `-ExecutionPolicy Bypass` is there because Windows client machines default to a
-`Restricted` policy, under which running the shipped script directly is refused.)
+##### Why these commands set an execution policy
+
+Every PowerShell command in this README launches the script through
+`powershell -NoProfile -ExecutionPolicy Bypass -File <script>` rather than invoking it directly as
+`.\register-host.ps1` or `& "...\register-host.ps1"`. Windows *client* editions ship with the
+execution policy set to `Restricted`, which refuses to run **any** `.ps1` file — so the direct form
+fails for most users with `cannot be loaded because running scripts is disabled on this system`,
+before a single line of the script executes. `-NoProfile` additionally keeps a user's profile
+script from changing what the registration sees.
+
+The flag only relaxes the policy for that one child process; it does not change the machine's
+setting. If your organisation enforces the policy through Group Policy, `-ExecutionPolicy Bypass`
+is ignored by design — ask an administrator, or run the equivalent registry commands by hand with
+`register-host.ps1 -List` as the reference for what they should contain.
 
 Unlike Linux, there are no per-channel registry keys to worry about: the key a Chromium build reads
 on Windows is a compile-time constant with no channel in it, so Chrome Beta, Dev and Canary all read
@@ -371,7 +384,8 @@ a missing runtime library is reported at install time rather than discovered in 
 >    powershell -NoProfile -ExecutionPolicy Bypass -File `
 >      "$env:ProgramFiles\PDF Editor Host\register-host.ps1" -ExtensionId <your-extension-id>
 >    # Windows, from a checkout or an unzipped bundle:
->    .\scripts\install-host.ps1 -ExtensionId <your-extension-id>
+>    powershell -NoProfile -ExecutionPolicy Bypass -File `
+>      .\scripts\install-host.ps1 -ExtensionId <your-extension-id>
 >    ```
 > 2. **Rebuild the package** pinned to your ID:
 >    `CHROME_EXTENSION_ID=<your-extension-id> ./scripts/package-deb.sh` (or
@@ -396,7 +410,8 @@ a missing runtime library is reported at install time rather than discovered in 
    ./scripts/install-host.sh <extension-id>
 
    # Windows (PowerShell)
-   .\scripts\install-host.ps1 -ExtensionId <extension-id>
+   powershell -NoProfile -ExecutionPolicy Bypass -File `
+     .\scripts\install-host.ps1 -ExtensionId <extension-id>
    ```
 
    By default this **downloads the prebuilt bundle** from the latest [release](../../releases)

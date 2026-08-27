@@ -34,8 +34,10 @@ $expectedKeys = @(
 $expectedFiles = @("PdfEditor.NativeHost.exe", $manifestName, "register-host.ps1", "extension-id.txt")
 
 $script:failures = 0
-function Add-Failure($message) { Write-Host "  FAIL: $message"; $script:failures++ }
-function Add-Pass($message) { Write-Host "  ok:   $message" }
+# Named with the Show- verb rather than Add-/Write-: both write to the host for a human reading the
+# build log and return nothing, so a caller must not be able to pipe or capture them as data.
+function Show-Failure($message) { Write-Host "  FAIL: $message"; $script:failures++ }
+function Show-Pass($message) { Write-Host "  ok:   $message" }
 
 # --------------------------------------------------------- Windows Installer API
 #
@@ -72,9 +74,9 @@ $database = $installer.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $n
 
 $versionRows = Invoke-MsiQuery $database "SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = 'ProductVersion'"
 if ($versionRows.Count -ne 1) {
-    Add-Failure "the MSI has no ProductVersion property"
+    Show-Failure "the MSI has no ProductVersion property"
 } else {
-    Add-Pass "ProductVersion is $($versionRows[0][0])"
+    Show-Pass "ProductVersion is $($versionRows[0][0])"
 }
 
 # ----------------------------------------------------------------------- files
@@ -87,9 +89,9 @@ foreach ($row in $fileRows) { $fileNames += ($row[0] -split '\|')[-1] }
 
 foreach ($expected in $expectedFiles) {
     if ($fileNames -contains $expected) {
-        Add-Pass "ships $expected"
+        Show-Pass "ships $expected"
     } else {
-        Add-Failure "$expected is not in the package"
+        Show-Failure "$expected is not in the package"
     }
 }
 
@@ -101,18 +103,18 @@ foreach ($row in $registryRows) { $byKey[$row[1]] = $row }
 
 foreach ($key in $expectedKeys) {
     if (-not $byKey.ContainsKey($key)) {
-        Add-Failure "no registry value for HKLM\$key -- that browser will never find the host"
+        Show-Failure "no registry value for HKLM\$key -- that browser will never find the host"
         continue
     }
     $row = $byKey[$key]
     # Root 2 is HKLM. A per-user (HKCU, root 1) value here would be written for whichever account
     # happened to run the installer, which for an elevated MSI is rarely the user's own.
     if ($row[0] -ne "2") {
-        Add-Failure "$key is registered under root $($row[0]), expected 2 (HKLM)"
+        Show-Failure "$key is registered under root $($row[0]), expected 2 (HKLM)"
     } elseif ($row[2] -ne $manifestValue) {
-        Add-Failure "$key points at '$($row[2])', expected '$manifestValue'"
+        Show-Failure "$key points at '$($row[2])', expected '$manifestValue'"
     } else {
-        Add-Pass "HKLM\$key -> $manifestValue"
+        Show-Pass "HKLM\$key -> $manifestValue"
     }
 }
 
@@ -149,33 +151,33 @@ if ($extracted) {
     $manifestFile = Get-ChildItem -Path $extractDir -Filter $manifestName -Recurse -File -ErrorAction SilentlyContinue |
         Select-Object -First 1
     if (-not $manifestFile) {
-        Add-Failure "the extracted payload has no $manifestName"
+        Show-Failure "the extracted payload has no $manifestName"
     } else {
         $manifest = Get-Content $manifestFile.FullName -Raw | ConvertFrom-Json
         if ($manifest.name -ne $hostName) {
-            Add-Failure "$manifestName declares name '$($manifest.name)', expected '$hostName'"
+            Show-Failure "$manifestName declares name '$($manifest.name)', expected '$hostName'"
         } else {
-            Add-Pass "$manifestName declares $hostName"
+            Show-Pass "$manifestName declares $hostName"
         }
-        if ($manifest.type -ne "stdio") { Add-Failure "$manifestName type is '$($manifest.type)', expected 'stdio'" }
+        if ($manifest.type -ne "stdio") { Show-Failure "$manifestName type is '$($manifest.type)', expected 'stdio'" }
 
         # On Windows the host path may be relative to the manifest, which is what the MSI uses so
         # the pair can live anywhere under Program Files. Either way it must resolve to a file the
         # package actually ships.
         $hostFile = Join-Path $manifestFile.DirectoryName $manifest.path
         if (Test-Path $hostFile) {
-            Add-Pass "$manifestName points at $($manifest.path), which is in the package"
+            Show-Pass "$manifestName points at $($manifest.path), which is in the package"
         } else {
-            Add-Failure "$manifestName points at '$($manifest.path)', which the package does not ship"
+            Show-Failure "$manifestName points at '$($manifest.path)', which the package does not ship"
         }
 
         $origins = @($manifest.allowed_origins)
         if ($origins.Count -ne 1 -or $origins[0] -notmatch '^chrome-extension://[a-p]{32}/$') {
-            Add-Failure "$manifestName allowed_origins is '$($origins -join ', ')', expected a single chrome-extension://<id>/ origin"
+            Show-Failure "$manifestName allowed_origins is '$($origins -join ', ')', expected a single chrome-extension://<id>/ origin"
         } else {
-            Add-Pass "$manifestName allows $($origins[0])"
+            Show-Pass "$manifestName allows $($origins[0])"
             if ($ExpectedExtensionId -and $origins[0] -ne "chrome-extension://$ExpectedExtensionId/") {
-                Add-Failure "$manifestName pins a different extension ID than the expected $ExpectedExtensionId"
+                Show-Failure "$manifestName pins a different extension ID than the expected $ExpectedExtensionId"
             }
         }
     }
@@ -183,9 +185,9 @@ if ($extracted) {
     $registerScript = Get-ChildItem -Path $extractDir -Filter "register-host.ps1" -Recurse -File -ErrorAction SilentlyContinue |
         Select-Object -First 1
     if ($registerScript) {
-        Add-Pass "ships register-host.ps1 next to the host, so an MSI install can re-register per-user"
+        Show-Pass "ships register-host.ps1 next to the host, so an MSI install can re-register per-user"
     } else {
-        Add-Failure "the extracted payload has no register-host.ps1"
+        Show-Failure "the extracted payload has no register-host.ps1"
     }
 }
 

@@ -8,6 +8,10 @@ import {
   hostInstallGuide, hostInstallGuideLines, hostStateSummary,
 } from '../src/host-install.js';
 
+// A stand-in for the ID an unpacked, developer-mode extension gets: 32 characters from a-p,
+// and deliberately not the pinned Web Store one the OS packages register.
+const DEV_EXTENSION_ID = 'abcdefghijklmnopabcdefghijklmnop';
+
 // The exact strings Chromium produces. Getting these wrong means the user is shown the wrong fix,
 // which is worse than showing none, so they are pinned here verbatim.
 test('Chromium’s "not found" message means the host was never registered', () => {
@@ -74,7 +78,7 @@ test('a missing host on Linux is told how to install and how to reach a snap/fla
 
 test('a forbidden host is told to re-register for this extension ID, not to reinstall', () => {
   const guide = hostInstallGuide({
-    state: HOST_STATE.FORBIDDEN, platform: 'linux', extensionId: 'abcdefghijklmnopabcdefghijklmnop',
+    state: HOST_STATE.FORBIDDEN, platform: 'linux', extensionId: DEV_EXTENSION_ID,
   });
   const text = hostInstallGuideLines(guide).join('\n');
   assert.match(text, /pdf-editor-host-register --extension-id abcdefghijklmnopabcdefghijklmnop/);
@@ -93,13 +97,13 @@ test('Windows advice only names paths an MSI install actually has', () => {
   // them to a file that is not on their machine.
   for (const state of [HOST_STATE.FORBIDDEN, HOST_STATE.CRASHED, HOST_STATE.MISSING]) {
     const text = hostInstallGuideLines(
-      hostInstallGuide({ state, platform: 'windows', extensionId: 'abcdefghijklmnopabcdefghijklmnop' }),
+      hostInstallGuide({ state, platform: 'windows', extensionId: DEV_EXTENSION_ID }),
     ).join('\n');
     assert.doesNotMatch(text, /scripts\\install-host\.ps1/);
   }
 
   const forbidden = hostInstallGuideLines(hostInstallGuide({
-    state: HOST_STATE.FORBIDDEN, platform: 'windows', extensionId: 'abcdefghijklmnopabcdefghijklmnop',
+    state: HOST_STATE.FORBIDDEN, platform: 'windows', extensionId: DEV_EXTENSION_ID,
   })).join('\n');
   assert.match(forbidden, /PDF Editor Host\\register-host\.ps1" -ExtensionId abcdefghijklmnopabcdefghijklmnop/);
 });

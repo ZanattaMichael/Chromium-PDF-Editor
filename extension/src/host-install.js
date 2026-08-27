@@ -137,6 +137,10 @@ function installSteps(platform) {
   }];
 }
 
+// Every platform's re-registration advice opens with the same sentence; kept in one place so the
+// three variants cannot drift apart, and so only the platform-specific half is spelled out below.
+const RE_REGISTER_LEAD = 'Re-register the host for your user against this extension’s ID. A per-user ';
+
 // The command that re-registers the host for the current user against a specific extension ID.
 function reRegisterStep(platform, extensionId) {
   if (platform === 'windows') {
@@ -144,7 +148,7 @@ function reRegisterStep(platform, extensionId) {
     // only ever run the installer can actually run. Pointing at scripts\install-host.ps1 instead
     // would name a path they do not have: that file ships only in a checkout or a release bundle.
     return {
-      text: 'Re-register the host for your user against this extension’s ID. A per-user '
+      text: RE_REGISTER_LEAD
         + 'registration takes precedence over the machine-wide one the installer wrote '
         + '(in PowerShell):',
       // Launched through powershell.exe with an explicit policy: Windows client machines default
@@ -155,13 +159,13 @@ function reRegisterStep(platform, extensionId) {
   }
   if (platform === 'linux') {
     return {
-      text: 'Re-register the host for your user against this extension’s ID. A per-user '
+      text: RE_REGISTER_LEAD
         + 'manifest takes precedence over the system-wide one:',
       code: `pdf-editor-host-register --extension-id ${extensionId}`,
     };
   }
   return {
-    text: 'Re-register the host for your user against this extension’s ID. A per-user '
+    text: RE_REGISTER_LEAD
       + 'manifest takes precedence over the system-wide one:',
     code: `./scripts/install-host.sh ${extensionId}`,
   };

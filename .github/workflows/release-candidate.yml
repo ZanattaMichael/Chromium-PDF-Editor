@@ -121,6 +121,18 @@ jobs:
         run: ./scripts/package-msi.ps1 -OutputDir dist
         shell: pwsh
 
+      - name: Verify the MSI registers the native messaging host
+        # Same reasoning as the Linux verify step below: a broken registration is silent until
+        # someone installs the package, so it is checked before the MSI is published.
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+        shell: pwsh
+        run: |
+          $id = $env:CHROME_EXTENSION_ID
+          if (-not $id) { $id = (Get-Content scripts/extension-id.txt -Raw).Trim() }
+          $msi = (Get-ChildItem dist/*.msi | Select-Object -First 1).FullName
+          ./scripts/verify-msi.ps1 $msi -ExpectedExtensionId $id
+
       - name: Upload the MSI artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

@@ -1,5 +1,6 @@
 # Installs the PDF Editor native messaging host and registers it with Chromium-based
-# browsers (Chrome, Chromium, Edge, Brave) on Windows.
+# browsers (Chrome, Chromium, Edge, Brave, Vivaldi, Opera) on Windows. Registration itself is
+# delegated to register-host.ps1, which the MSI also installs next to the host.
 #
 # How the host binary is obtained, in priority order:
 #   1. -HostDir <dir>   use an already-extracted self-contained host (e.g. the host\ folder
@@ -36,7 +37,6 @@ if (-not $ExtensionId) {
 }
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $publishDir = Join-Path $env:LOCALAPPDATA "PdfEditorHost"
-$hostName = "com.pdfeditor.host"
 $defaultRepo = "ZanattaMichael/Chromium-PDF-Editor"
 
 # owner/name to download from: explicit -Repo, else inferred from origin's URL, else default.
@@ -115,30 +115,13 @@ if ($HostDir) {
     $hostPath = Install-FromDir (Join-Path $extract "host")
 }
 
-$template = Get-Content (Join-Path $repoRoot "scripts/com.pdfeditor.host.json.template") -Raw
-$manifest = $template.Replace("__HOST_PATH__", $hostPath.Replace("\", "\\")).Replace("__EXTENSION_ID__", $ExtensionId)
-$manifestPath = Join-Path $publishDir "$hostName.json"
-$manifest | Set-Content -Path $manifestPath -Encoding utf8
-
-# Per-user (HKCU) manifest keys for the common Chromium-based browsers. HKCU takes precedence
-# over the machine-wide HKLM keys the MSI writes, so running this after the MSI re-points the
-# host at a different extension ID (e.g. a developer-mode / unpacked build). Kept in sync with
-# the MSI's browser set (installer/windows/PdfEditorHost.wxs): Chrome, Chromium, Edge, Brave,
-# Vivaldi, Opera. Each browser reads only its own key, so extra keys are inert/harmless.
-$registryRoots = @(
-    "HKCU:\Software\Google\Chrome\NativeMessagingHosts",
-    "HKCU:\Software\Chromium\NativeMessagingHosts",
-    "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts",
-    "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts",
-    "HKCU:\Software\Vivaldi\NativeMessagingHosts",
-    "HKCU:\Software\Opera Software\NativeMessagingHosts"
-)
-foreach ($root in $registryRoots) {
-    $key = Join-Path $root $hostName
-    New-Item -Path $key -Force | Out-Null
-    Set-ItemProperty -Path $key -Name "(Default)" -Value $manifestPath
-    Write-Host "Registered: $key"
+# Registration is shared with register-host.ps1 -- the same script the MSI installs next to the
+# host as "Program Files\PDF Editor Host\register-host.ps1". Keeping one implementation means a
+# browser key added for the MSI is picked up here too, instead of the two lists drifting apart.
+# It writes the per-user manifest, the HKCU keys, and runs the host once as a self-test.
+$register = Join-Path $PSScriptRoot "register-host.ps1"
+if (-not (Test-Path $register)) {
+    throw "$register is missing -- this script needs it to register the host."
 }
 
-Write-Host ""
-Write-Host "Done. Restart your browser, then re-test from the extension's options page."
+& $register -HostPath $hostPath -ExtensionId $ExtensionId

@@ -84,7 +84,24 @@ test('a forbidden host is told to re-register for this extension ID, not to rein
 test('a forbidden host with no known ID still yields a runnable-looking command', () => {
   const text = hostInstallGuideLines(
     hostInstallGuide({ state: HOST_STATE.FORBIDDEN, platform: 'windows' })).join('\n');
-  assert.match(text, /install-host\.ps1 -ExtensionId <your-extension-id>/);
+  assert.match(text, /register-host\.ps1" -ExtensionId <your-extension-id>/);
+});
+
+test('Windows advice only names paths an MSI install actually has', () => {
+  // register-host.ps1 is shipped next to the host by the MSI; scripts\install-host.ps1 exists only
+  // in a checkout or an unzipped bundle, so pointing someone who ran the installer at it sends
+  // them to a file that is not on their machine.
+  for (const state of [HOST_STATE.FORBIDDEN, HOST_STATE.CRASHED, HOST_STATE.MISSING]) {
+    const text = hostInstallGuideLines(
+      hostInstallGuide({ state, platform: 'windows', extensionId: 'abcdefghijklmnopabcdefghijklmnop' }),
+    ).join('\n');
+    assert.doesNotMatch(text, /scripts\\install-host\.ps1/);
+  }
+
+  const forbidden = hostInstallGuideLines(hostInstallGuide({
+    state: HOST_STATE.FORBIDDEN, platform: 'windows', extensionId: 'abcdefghijklmnopabcdefghijklmnop',
+  })).join('\n');
+  assert.match(forbidden, /PDF Editor Host\\register-host\.ps1" -ExtensionId abcdefghijklmnopabcdefghijklmnop/);
 });
 
 test('a crashed host is pointed at --diagnostics and the missing runtime libraries', () => {

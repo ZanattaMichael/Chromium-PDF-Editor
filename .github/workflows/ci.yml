@@ -204,6 +204,20 @@ jobs:
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
         run: ./scripts/package-msi.ps1 -OutputDir dist
         shell: pwsh
+      - name: Verify the MSI registers the native messaging host
+        # The Windows half of the check the Linux packages get from verify-linux-package.sh. A
+        # broken registration is invisible until someone installs the MSI and tries it -- the
+        # browser says "Specified native messaging host not found" whether the registry value is
+        # missing, points at a manifest the package never shipped, or the manifest pins a different
+        # extension. This reads the MSI's own tables and checks each of those.
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+        shell: pwsh
+        run: |
+          $id = $env:CHROME_EXTENSION_ID
+          if (-not $id) { $id = (Get-Content scripts/extension-id.txt -Raw).Trim() }
+          $msi = (Get-ChildItem dist/*.msi | Select-Object -First 1).FullName
+          ./scripts/verify-msi.ps1 $msi -ExpectedExtensionId $id
       - name: Note how to use this dry-run package
         # Same caveat as the Linux dry-run job: the MSI pins the host to one extension ID, so a
         # developer-mode/unpacked extension (different ID) must re-register per-user afterward.
@@ -220,11 +234,15 @@ jobs:
             'This `.msi` registers the native host for the extension ID **`' + $pinned + '`** only.',
             '',
             'To use it with a **developer-mode / unpacked** extension (a different ID), after',
-            'installing the MSI run:',
+            'installing the MSI run the helper it puts next to the host:',
             '```powershell',
-            '.\scripts\install-host.ps1 -ExtensionId <your-extension-id>',
+            'powershell -NoProfile -ExecutionPolicy Bypass -File `',
+            '  "$env:ProgramFiles\PDF Editor Host\register-host.ps1" -ExtensionId <your-extension-id>',
             '```',
-            "It writes per-user (HKCU) keys that override the MSI's machine-wide ones. See the",
+            'From a checkout, `.\scripts\install-host.ps1 -ExtensionId <your-extension-id>` does the',
+            'same thing (and installs the host first).',
+            '',
+            "Either writes per-user (HKCU) keys that override the MSI's machine-wide ones. See the",
             'README''s "System-wide: the OS installer packages" section for details.'
           )
           $lines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

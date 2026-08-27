@@ -7,7 +7,8 @@
 # Layout inside pdf-editor-bundle-<rid>.zip:
 #   extension/   the MV3 extension (manifest.json at its root)
 #   host/        the self-contained native host for <rid> (runtime + native libs bundled)
-#   scripts/     install-host.sh / register-host.sh / install-host.ps1 / the manifest template
+#   scripts/     install-host.sh / register-host.sh / install-host.ps1 / register-host.ps1 /
+#                the manifest template
 #   INSTALL.md   three-step setup
 #
 # Usage: ./scripts/package-bundle.sh <runtime-id> [output-dir]
@@ -41,11 +42,12 @@ dotnet publish "$REPO_ROOT/src/PdfEditor.NativeHost" \
 
 # 3) Install scripts + native-messaging manifest template.
 mkdir -p "$BUNDLE/scripts"
-# register-host.sh does the actual per-user registration for install-host.sh, so the bundle is
-# broken without it.
+# register-host.sh / register-host.ps1 do the actual per-user registration for install-host.sh and
+# install-host.ps1, so the bundle is broken without them.
 cp "$REPO_ROOT/scripts/install-host.sh" \
    "$REPO_ROOT/scripts/register-host.sh" \
    "$REPO_ROOT/scripts/install-host.ps1" \
+   "$REPO_ROOT/scripts/register-host.ps1" \
    "$REPO_ROOT/scripts/com.pdfeditor.host.json.template" \
    "$REPO_ROOT/scripts/extension-id.txt" \
    "$BUNDLE/scripts/"

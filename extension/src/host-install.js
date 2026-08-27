@@ -85,6 +85,11 @@ function installSteps(platform) {
           + '(or install it from a terminal).',
         code: 'msiexec /i pdf-editor-host-<version>-x64.msi',
       },
+      {
+        text: 'Check the install worked — this prints the host’s version and environment '
+          + '(in PowerShell):',
+        code: String.raw`& "$env:ProgramFiles\PDF Editor Host\PdfEditor.NativeHost.exe" --diagnostics`,
+      },
       { text: 'Close every window of this browser and start it again.' },
     ];
   }
@@ -135,9 +140,17 @@ function installSteps(platform) {
 // The command that re-registers the host for the current user against a specific extension ID.
 function reRegisterStep(platform, extensionId) {
   if (platform === 'windows') {
+    // The MSI installs register-host.ps1 next to the host, so this is a command someone who has
+    // only ever run the installer can actually run. Pointing at scripts\install-host.ps1 instead
+    // would name a path they do not have: that file ships only in a checkout or a release bundle.
     return {
-      text: 'Re-register the host for your user against this extension’s ID:',
-      code: String.raw`.\scripts\install-host.ps1 -ExtensionId ${extensionId}`,
+      text: 'Re-register the host for your user against this extension’s ID. A per-user '
+        + 'registration takes precedence over the machine-wide one the installer wrote '
+        + '(in PowerShell):',
+      // Launched through powershell.exe with an explicit policy: Windows client machines default
+      // to a Restricted execution policy, under which invoking the shipped .ps1 directly fails.
+      code: 'powershell -NoProfile -ExecutionPolicy Bypass -File '
+        + String.raw`"$env:ProgramFiles\PDF Editor Host\register-host.ps1" -ExtensionId ${extensionId}`,
     };
   }
   if (platform === 'linux') {
@@ -158,8 +171,8 @@ function reRegisterStep(platform, extensionId) {
 function diagnoseStep(platform) {
   if (platform === 'windows') {
     return {
-      text: 'Run the host yourself to see why it fails:',
-      code: String.raw`"%ProgramFiles%\PDF Editor Host\PdfEditor.NativeHost.exe" --diagnostics`,
+      text: 'Run the host yourself to see why it fails (in PowerShell):',
+      code: String.raw`& "$env:ProgramFiles\PDF Editor Host\PdfEditor.NativeHost.exe" --diagnostics`,
     };
   }
   if (platform === 'linux') {

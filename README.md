@@ -283,12 +283,38 @@ sudo pacman -U ./pdf-editor-host-<version>-1-x86_64.pkg.tar.zst # Arch
 # Windows: double-click the .msi, or  msiexec /i pdf-editor-host-<version>-x64.msi
 ```
 
-On Linux the package also puts the host on your `PATH`, so you can check it independently of any
-browser — this is the first thing to try if the extension says the host is unavailable:
+Both packages also give you a way to check the host independently of any browser — this is the
+first thing to try if the extension says the host is unavailable. On Linux the package puts the
+host on your `PATH`; on Windows it lands next to the installed files:
 
 ```bash
-pdf-editor-host --diagnostics     # prints version, runtime, OS and whether OCR is available
+pdf-editor-host --diagnostics     # Linux: prints version, runtime, OS and whether OCR is available
 ```
+
+```powershell
+& "$env:ProgramFiles\PDF Editor Host\PdfEditor.NativeHost.exe" --diagnostics   # Windows
+```
+
+#### Re-registering per-user (Windows)
+
+The MSI writes machine-wide (`HKLM`) registry values pinned to the Web Store extension ID. It also
+installs `register-host.ps1` beside the host, which writes per-user (`HKCU`) values instead —
+Chromium reads `HKCU` first, so this overrides the MSI's registration without disturbing it. That
+is what you need for a developer-mode extension, whose ID is different:
+
+```powershell
+$reg = "$env:ProgramFiles\PDF Editor Host\register-host.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File $reg -ExtensionId <your-extension-id>
+powershell -NoProfile -ExecutionPolicy Bypass -File $reg -List        # show what it would write
+powershell -NoProfile -ExecutionPolicy Bypass -File $reg -Uninstall   # drop the per-user values
+```
+
+(The explicit `-ExecutionPolicy Bypass` is there because Windows client machines default to a
+`Restricted` policy, under which running the shipped script directly is refused.)
+
+Unlike Linux, there are no per-channel registry keys to worry about: the key a Chromium build reads
+on Windows is a compile-time constant with no channel in it, so Chrome Beta, Dev and Canary all read
+the same `SOFTWARE\Google\Chrome\NativeMessagingHosts` key that stable does.
 
 #### Snap and flatpak browsers
 
@@ -317,7 +343,7 @@ same for all of them:
 | What the options page says | What it means | Fix |
 | --- | --- | --- |
 | not installed for this browser | no manifest in any directory this browser reads | install the package for your distro; for a snap/flatpak browser run `pdf-editor-host-register` |
-| does not allow this extension | a host is registered, but its `allowed_origins` names a different extension ID | `pdf-editor-host-register --extension-id <your-extension-id>` |
+| does not allow this extension | a host is registered, but its `allowed_origins` names a different extension ID | `pdf-editor-host-register --extension-id <your-extension-id>` (Linux) or `register-host.ps1 -ExtensionId <your-extension-id>` (Windows) |
 | installed but did not start | the host was launched and exited immediately | run `pdf-editor-host --diagnostics`; a self-contained .NET build needs the system ICU and OpenSSL libraries (`sudo apt install libicu-dev libssl3`) |
 
 Installing the `.deb`/`.rpm`/Arch package runs the same self-test and prints the same warning, so
@@ -339,7 +365,13 @@ a missing runtime library is reported at install time rather than discovered in 
 >    ```bash
 >    pdf-editor-host-register --extension-id <your-extension-id>   # Linux, from the package
 >    ./scripts/install-host.sh <your-extension-id>                 # Linux / macOS, from a checkout
->    .\scripts\install-host.ps1 -ExtensionId <your-extension-id>    # Windows (PowerShell)
+>    ```
+>    ```powershell
+>    # Windows, from the MSI:
+>    powershell -NoProfile -ExecutionPolicy Bypass -File `
+>      "$env:ProgramFiles\PDF Editor Host\register-host.ps1" -ExtensionId <your-extension-id>
+>    # Windows, from a checkout or an unzipped bundle:
+>    .\scripts\install-host.ps1 -ExtensionId <your-extension-id>
 >    ```
 > 2. **Rebuild the package** pinned to your ID:
 >    `CHROME_EXTENSION_ID=<your-extension-id> ./scripts/package-deb.sh` (or
@@ -368,8 +400,8 @@ a missing runtime library is reported at install time rather than discovered in 
    ```
 
    By default this **downloads the prebuilt bundle** from the latest [release](../../releases)
-   and registers the self-contained host it contains for Chrome, Chromium, Edge, and Brave —
-   no .NET SDK needed. Contributors can add `--from-source` (bash) / `-FromSource` (PowerShell)
+   and registers the self-contained host it contains for Chrome, Chromium, Edge, Brave, Vivaldi
+   and Opera — no .NET SDK needed. Contributors can add `--from-source` (bash) / `-FromSource` (PowerShell)
    to build the host locally with `dotnet publish`, or `--host-dir`/`-HostDir` to point at an
    already-extracted host.
 4. Restart the browser. The extension's options page shows the host connection status.

@@ -32,9 +32,9 @@ export const HOST_STATE = {
 // because the same module is cheap to keep portable, and matching is substring-based so a browser
 // that decorates the message ("... Error: ...") still classifies.
 const PATTERNS = [
-  [HOST_STATE.MISSING, /not found|not registered|no such native application|not installed/i],
-  [HOST_STATE.FORBIDDEN, /forbidden|not allowed|access to the specified native messaging host/i],
-  [HOST_STATE.CRASHED, /has exited|failed to start|error when communicating|not responding|terminated/i],
+  { state: HOST_STATE.MISSING, pattern: /not found|not registered|no such native application|not installed/i },
+  { state: HOST_STATE.FORBIDDEN, pattern: /forbidden|not allowed|access to the specified native messaging host/i },
+  { state: HOST_STATE.CRASHED, pattern: /has exited|failed to start|error when communicating|not responding|terminated/i },
 ];
 
 /**
@@ -44,7 +44,7 @@ const PATTERNS = [
  */
 export function classifyHostError(message) {
   if (typeof message !== 'string' || message.trim() === '') return HOST_STATE.UNKNOWN;
-  for (const [state, pattern] of PATTERNS) {
+  for (const { state, pattern } of PATTERNS) {
     if (pattern.test(message)) return state;
   }
   return HOST_STATE.UNKNOWN;
@@ -137,7 +137,7 @@ function reRegisterStep(platform, extensionId) {
   if (platform === 'windows') {
     return {
       text: 'Re-register the host for your user against this extension’s ID:',
-      code: `.\\scripts\\install-host.ps1 -ExtensionId ${extensionId}`,
+      code: String.raw`.\scripts\install-host.ps1 -ExtensionId ${extensionId}`,
     };
   }
   if (platform === 'linux') {
@@ -159,7 +159,7 @@ function diagnoseStep(platform) {
   if (platform === 'windows') {
     return {
       text: 'Run the host yourself to see why it fails:',
-      code: '"%ProgramFiles%\\PDF Editor Host\\PdfEditor.NativeHost.exe" --diagnostics',
+      code: String.raw`"%ProgramFiles%\PDF Editor Host\PdfEditor.NativeHost.exe" --diagnostics`,
     };
   }
   if (platform === 'linux') {

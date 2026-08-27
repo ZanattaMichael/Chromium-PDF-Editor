@@ -64,7 +64,9 @@
        allowed / installed but crashed) instead of listing every possibility. Built as DOM nodes,
        never interpolated HTML — see scripts/check-innerhtml.mjs (#74). -->
   <section id="host-help" hidden aria-live="polite">
-    <h3 id="host-help-headline"></h3>
+    <!-- The heading carries a generic fallback so it is never announced empty; renderHelp() replaces
+         it with the diagnosis for the actual failure before the section is unhidden. -->
+    <h3 id="host-help-headline">Native host setup</h3>
     <p id="host-help-detail"></p>
     <ol id="host-help-steps"></ol>
     <p id="host-help-error" class="muted" hidden></p>

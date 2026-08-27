@@ -110,26 +110,32 @@ fi
 TARGETS=()          # directories to write the manifest into
 NOTES=()            # extra advice to print at the end (flatpak filesystem overrides, etc.)
 
+# add_plain <browser-config-dir>
 add_plain() {
-  TARGETS+=("$CONFIG_DIR/$1/NativeMessagingHosts")
+  local browser_dir="$1"
+  TARGETS+=("$CONFIG_DIR/$browser_dir/NativeMessagingHosts")
 }
 
 # add_snap <snap-name> <browser-config-dir>
 add_snap() {
-  local root="$HOME/snap/$1/current"
+  local snap_name="$1"
+  local browser_dir="$2"
+  local root="$HOME/snap/$snap_name/current"
   [[ -d "$root" ]] || return 0
-  TARGETS+=("$root/.config/$2/NativeMessagingHosts")
-  NOTES+=("snap '$1' detected. Strictly confined snaps may still refuse to launch a host that lives outside the sandbox; if the connection is still refused, install the .deb build of the browser (or use the flatpak) instead.")
+  TARGETS+=("$root/.config/$browser_dir/NativeMessagingHosts")
+  NOTES+=("snap '$snap_name' detected. Strictly confined snaps may still refuse to launch a host that lives outside the sandbox; if the connection is still refused, install the .deb build of the browser (or use the flatpak) instead.")
 }
 
 # add_flatpak <app-id> <browser-config-dir>
 add_flatpak() {
-  local root="$HOME/.var/app/$1"
+  local app_id="$1"
+  local browser_dir="$2"
+  local root="$HOME/.var/app/$app_id"
   [[ -d "$root" ]] || return 0
-  TARGETS+=("$root/config/$2/NativeMessagingHosts")
+  TARGETS+=("$root/config/$browser_dir/NativeMessagingHosts")
   # A flatpak browser cannot see /usr or /opt on the host unless it is granted access.
-  NOTES+=("flatpak '$1' detected. Grant it access to the host binary once with:
-    flatpak override --user --filesystem=/opt/pdf-editor-host:ro --filesystem=/usr/bin/pdf-editor-host:ro $1")
+  NOTES+=("flatpak '$app_id' detected. Grant it access to the host binary once with:
+    flatpak override --user --filesystem=/opt/pdf-editor-host:ro --filesystem=/usr/bin/pdf-editor-host:ro $app_id")
 }
 
 # The per-browser directory name differs between the two platforms (Linux uses the packaged name,

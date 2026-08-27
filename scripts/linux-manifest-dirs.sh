@@ -4,14 +4,46 @@
 # the manifest to all of them is safe and means the host connects no matter which browser is
 # installed. Paths are relative (no leading slash) so each packager can prefix its build root.
 #
+# The directory a Chromium build reads is baked in at compile time (chrome/common/chrome_paths.cc):
+# branded Chrome uses /etc/opt/<product>, unbranded Chromium uses /etc/<product>, and every channel
+# is a separate product ("chrome-beta", "chrome-unstable", "edge-dev", ...). Missing a channel's
+# directory is the single most common reason a system-wide host installs cleanly and is then never
+# seen by the browser, so all of them are covered here. A manifest in a directory whose browser is
+# not installed is an inert 259-byte file.
+#
 # Firefox is intentionally omitted: it uses a different manifest schema (allowed_extensions with an
 # add-on ID, not allowed_origins with a chrome-extension:// origin) and a different location.
+#
+# Not covered here, because no system-wide directory can reach them: snap- and flatpak-packaged
+# browsers, which are sandboxed away from /etc and /opt. Those are handled per-user by
+# scripts/register-host.sh (shipped by the packages as /usr/bin/pdf-editor-host-register).
 LINUX_MANIFEST_DIRS=(
-  "etc/opt/chrome/native-messaging-hosts"        # Google Chrome (Brave also reads this path)
-  "etc/chromium/native-messaging-hosts"          # Chromium (distro packages) and Vivaldi (legacy)
-  "etc/chromium-browser/native-messaging-hosts"  # older Ubuntu/Debian chromium-browser package
-  "etc/opt/edge/native-messaging-hosts"          # Microsoft Edge
-  "etc/opt/brave/native-messaging-hosts"         # Brave (current builds use their own path)
-  "etc/opt/vivaldi/native-messaging-hosts"       # Vivaldi
-  "etc/opt/opera/native-messaging-hosts"         # Opera
+  # --- Google Chrome (branded): /etc/opt/<product>, one product per channel.
+  "etc/opt/chrome/native-messaging-hosts"           # Chrome stable
+  "etc/opt/chrome-beta/native-messaging-hosts"      # Chrome Beta
+  "etc/opt/chrome-unstable/native-messaging-hosts"  # Chrome Dev ("unstable" is the packaged name)
+
+  # --- Chromium (unbranded): /etc/<product>.
+  "etc/chromium/native-messaging-hosts"             # Chromium (Debian/Fedora/Arch packages)
+  "etc/chromium-browser/native-messaging-hosts"     # older Ubuntu/Debian chromium-browser package
+
+  # --- Microsoft Edge.
+  "etc/opt/edge/native-messaging-hosts"             # Edge stable
+  "etc/opt/edge-beta/native-messaging-hosts"        # Edge Beta
+  "etc/opt/edge-dev/native-messaging-hosts"         # Edge Dev
+
+  # --- Brave. Current builds read /etc/opt/brave; some older/derived builds read /etc/brave.
+  "etc/opt/brave/native-messaging-hosts"            # Brave stable
+  "etc/opt/brave-beta/native-messaging-hosts"       # Brave Beta
+  "etc/opt/brave-nightly/native-messaging-hosts"    # Brave Nightly
+  "etc/brave/native-messaging-hosts"                # Brave (alternate unbranded-style path)
+
+  # --- Vivaldi.
+  "etc/opt/vivaldi/native-messaging-hosts"          # Vivaldi stable
+  "etc/vivaldi/native-messaging-hosts"              # Vivaldi (alternate unbranded-style path)
+
+  # --- Opera.
+  "etc/opt/opera/native-messaging-hosts"            # Opera stable
+  "etc/opt/opera-beta/native-messaging-hosts"       # Opera Beta
+  "etc/opt/opera-developer/native-messaging-hosts"  # Opera Developer
 )

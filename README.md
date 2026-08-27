@@ -272,8 +272,9 @@ script — everything in one download. Unzip it and follow the included `INSTALL
 
 Every [release](../../releases) also attaches native-host installer packages that put the
 self-contained host under `/opt/pdf-editor-host` (Linux) or *Program Files* (Windows) and
-register it **system-wide** for Chrome, Chromium, Edge, Brave, Vivaldi, and Opera. They only
-install the **native host** — you still get the extension from the Chrome Web Store.
+register it **system-wide** for Chrome, Chromium, Edge, Brave, Vivaldi, and Opera — including
+their beta and dev channels. They only install the **native host** — you still get the extension
+from the Chrome Web Store.
 
 ```bash
 sudo apt install ./pdf-editor-host_<version>_amd64.deb          # Debian / Ubuntu
@@ -281,6 +282,46 @@ sudo dnf install ./pdf-editor-host-<version>-1.x86_64.rpm       # Fedora / RHEL 
 sudo pacman -U ./pdf-editor-host-<version>-1-x86_64.pkg.tar.zst # Arch
 # Windows: double-click the .msi, or  msiexec /i pdf-editor-host-<version>-x64.msi
 ```
+
+On Linux the package also puts the host on your `PATH`, so you can check it independently of any
+browser — this is the first thing to try if the extension says the host is unavailable:
+
+```bash
+pdf-editor-host --diagnostics     # prints version, runtime, OS and whether OCR is available
+```
+
+#### Snap and flatpak browsers
+
+A snap- or flatpak-packaged browser runs sandboxed and **cannot see `/etc`**, so the system-wide
+registration never reaches it. The packages ship a helper that registers the host inside your own
+user (and sandbox) configuration instead:
+
+```bash
+pdf-editor-host-register          # registers for every browser this user has, snap/flatpak included
+pdf-editor-host-register --list   # show where it would write, without writing
+```
+
+For a flatpak browser you also have to let it reach the host binary, once:
+
+```bash
+flatpak override --user --filesystem=/opt/pdf-editor-host:ro \
+                        --filesystem=/usr/bin/pdf-editor-host:ro com.google.Chrome
+```
+
+#### If the host still isn't picked up
+
+The extension's options page tells you *which* of the three things went wrong and what to do
+about it, because the browser's own message (`Specified native messaging host not found.`) is the
+same for all of them:
+
+| What the options page says | What it means | Fix |
+| --- | --- | --- |
+| not installed for this browser | no manifest in any directory this browser reads | install the package for your distro; for a snap/flatpak browser run `pdf-editor-host-register` |
+| does not allow this extension | a host is registered, but its `allowed_origins` names a different extension ID | `pdf-editor-host-register --extension-id <your-extension-id>` |
+| installed but did not start | the host was launched and exited immediately | run `pdf-editor-host --diagnostics`; a self-contained .NET build needs the system ICU and OpenSSL libraries (`sudo apt install libicu-dev libssl3`) |
+
+Installing the `.deb`/`.rpm`/Arch package runs the same self-test and prints the same warning, so
+a missing runtime library is reported at install time rather than discovered in the browser.
 
 > [!IMPORTANT]
 > These packages pin the host's `allowed_origins` to the **published Chrome Web Store
@@ -292,12 +333,13 @@ sudo pacman -U ./pdf-editor-host-<version>-1-x86_64.pkg.tar.zst # Arch
 > not match and the host connection is refused ("Specified native messaging host not found"
 > or a rejected connection). Two ways to fix it:
 >
-> 1. **Re-register per-user** (no rebuild): after installing the package, run the user-level
->    installer with your unpacked extension's ID. It writes a per-user manifest that takes
->    precedence over the package's system-wide one:
+> 1. **Re-register per-user** (no rebuild): after installing the package, register the host
+>    against your unpacked extension's ID. A per-user manifest takes precedence over the
+>    package's system-wide one:
 >    ```bash
->    ./scripts/install-host.sh <your-extension-id>            # Linux / macOS
->    .\scripts\install-host.ps1 -ExtensionId <your-extension-id>  # Windows (PowerShell)
+>    pdf-editor-host-register --extension-id <your-extension-id>   # Linux, from the package
+>    ./scripts/install-host.sh <your-extension-id>                 # Linux / macOS, from a checkout
+>    .\scripts\install-host.ps1 -ExtensionId <your-extension-id>    # Windows (PowerShell)
 >    ```
 > 2. **Rebuild the package** pinned to your ID:
 >    `CHROME_EXTENSION_ID=<your-extension-id> ./scripts/package-deb.sh` (or

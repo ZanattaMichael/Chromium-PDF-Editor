@@ -186,40 +186,14 @@ else
   install_from_dir "$TMP/bundle/host"
 fi
 
-MANIFEST_JSON=$(sed -e "s|__HOST_PATH__|$HOST_PATH|" -e "s|__EXTENSION_ID__|$EXTENSION_ID|" \
-  "$REPO_ROOT/scripts/com.pdfeditor.host.json.template")
+# Registration is shared with scripts/register-host.sh — the same script the OS packages install as
+# /usr/bin/pdf-editor-host-register. Keeping one implementation means a browser directory added for
+# the packages (a new channel, a snap or flatpak layout) is picked up here too, instead of the two
+# lists drifting apart.
+REGISTER="$SCRIPT_DIR/register-host.sh"
+if [[ ! -x "$REGISTER" ]]; then
+  echo "error: $REGISTER is missing — this script needs it to register the host" >&2
+  exit 1
+fi
 
-case "$(uname -s)" in
-  Darwin)
-    TARGETS=(
-      "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
-      "$HOME/Library/Application Support/Chromium/NativeMessagingHosts"
-      "$HOME/Library/Application Support/Microsoft Edge/NativeMessagingHosts"
-      "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts"
-      "$HOME/Library/Application Support/Vivaldi/NativeMessagingHosts"
-      "$HOME/Library/Application Support/com.operasoftware.Opera/NativeMessagingHosts"
-    )
-    ;;
-  *)
-    # Per-user manifest dirs for the common Chromium-based browsers. Registering all of them is
-    # harmless (each browser reads only its own) and means the host works whichever one is used.
-    TARGETS=(
-      "$HOME/.config/google-chrome/NativeMessagingHosts"
-      "$HOME/.config/chromium/NativeMessagingHosts"
-      "$HOME/.config/chromium-browser/NativeMessagingHosts"  # older Ubuntu/Debian chromium-browser package
-      "$HOME/.config/microsoft-edge/NativeMessagingHosts"
-      "$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts"
-      "$HOME/.config/vivaldi/NativeMessagingHosts"
-      "$HOME/.config/opera/NativeMessagingHosts"
-    )
-    ;;
-esac
-
-for dir in "${TARGETS[@]}"; do
-  mkdir -p "$dir"
-  printf '%s\n' "$MANIFEST_JSON" > "$dir/$HOST_NAME.json"
-  echo "Registered: $dir/$HOST_NAME.json"
-done
-
-echo
-echo "Done. Restart your browser, then re-test from the extension's options page."
+"$REGISTER" --host-path "$HOST_PATH" --extension-id "$EXTENSION_ID"

@@ -33,6 +33,15 @@ jobs:
         # A dedicated step as well as a node --test case, so the failure message points straight
         # at the offending file:line rather than at an assertion.
         run: node scripts/check-innerhtml.mjs
+      - name: Linux packaging tooling
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rpm libarchive-tools zstd
+      - name: Linux package registration guard
+        # Builds the .deb/.rpm/Arch packages against a stub host payload and checks that each one
+        # registers the native messaging host where browsers actually look. A broken registration
+        # is invisible until someone installs the package -- the browser just says "Specified
+        # native messaging host not found" -- so it is worth catching on every push rather than
+        # at release time. The stub keeps this to a couple of seconds and needs no .NET SDK.
+        run: ./scripts/test-package-scripts.sh
       - name: Build
         run: dotnet build --configuration Release
       - name: Test with coverage (gated at 90% line coverage)

@@ -103,6 +103,12 @@ node --test "extension/test/**/*.test.mjs"
 node scripts/check-innerhtml.mjs   # also run as one of the tests above
 ```
 
+If you touch how the extension reports a missing native host, `extension/src/host-install.js` is
+deliberately DOM-free so the diagnosis and the instructions it produces can be asserted directly
+(`extension/test/host-install.test.mjs`), and `extension/test/host-client.test.mjs` drives
+`probeHost` against a stubbed `chrome.runtime` to cover the failure paths that are otherwise only
+reproducible by breaking an install by hand.
+
 ### Never assign interpolated `innerHTML` in `extension/src/`
 
 The viewer renders text that comes straight out of the document being edited — form
@@ -169,6 +175,34 @@ manually testing an unpacked build or sanity-checking a release before tagging:
 ```bash
 ./scripts/package-extension.sh
 ```
+
+### The Linux host packages
+
+`package-deb.sh`, `package-rpm.sh` and `package-arch.sh` all install the same self-contained host
+under `/opt/pdf-editor-host`, symlink it to `/usr/bin/pdf-editor-host`, and drop the
+native-messaging manifest into every directory listed in `scripts/linux-manifest-dirs.sh`. The
+manifest points at the `/usr/bin` symlink rather than at `/opt`, because a sandboxed browser is
+far more likely to be allowed to execute it there.
+
+Getting any of that wrong is invisible until someone installs the package: the browser reports
+`Specified native messaging host not found.` whether the manifest is missing, in a directory that
+browser does not read, or naming a path the package does not ship. Two guards keep that honest:
+
+```bash
+./scripts/test-package-scripts.sh                 # builds all three with a stub host, then verifies
+./scripts/verify-linux-package.sh dist/*.deb      # verify a real package you already built
+```
+
+`test-package-scripts.sh` runs in CI on every push. It needs no .NET SDK — it puts a `dotnet` stub
+on `PATH` so `dotnet publish` writes a few placeholder files — so it takes seconds rather than the
+two minutes a self-contained publish costs. Install its tooling with
+`sudo apt-get install -y rpm libarchive-tools zstd`.
+
+**Adding a browser directory**: add it to `scripts/linux-manifest-dirs.sh` only. All three
+packagers and the verifier read that list, so they cannot drift apart. Per-user directories
+(including the snap and flatpak layouts, which `/etc` cannot reach) live in
+`scripts/register-host.sh`, which the packages install as `/usr/bin/pdf-editor-host-register` and
+which `install-host.sh` delegates to.
 
 Every merge to `main` automatically builds a release candidate (a `vX.Y.Z-<build>` tag
 and prerelease); promoting one to a real, Chrome Web Store-published release is a manual

@@ -356,8 +356,12 @@ same for all of them:
 | What the options page says | What it means | Fix |
 | --- | --- | --- |
 | not installed for this browser | no manifest in any directory this browser reads | install the package for your distro; for a snap/flatpak browser run `pdf-editor-host-register` |
-| does not allow this extension | a host is registered, but its `allowed_origins` names a different extension ID | `pdf-editor-host-register --extension-id <your-extension-id>` (Linux) or `register-host.ps1 -ExtensionId <your-extension-id>` (Windows) |
+| does not allow this extension | a host is registered, but its `allowed_origins` names a different extension ID | `pdf-editor-host-register --extension-id <your-extension-id>` (Linux) or `register-host.ps1 -ExtensionId <your-extension-id>` (Windows, via the `powershell -ExecutionPolicy Bypass -File` form below) |
 | installed but did not start | the host was launched and exited immediately | run `pdf-editor-host --diagnostics`; a self-contained .NET build needs the system ICU and OpenSSL libraries (`sudo apt install libicu-dev libssl3`) |
+| connected, but the host is v*x* and this extension is v*y* | the host connects fine but is from a different release, so anything added since it was built fails or silently does nothing | install the package matching the extension's version (the guidance panel gives the command); if the *extension* is the older half, update it at `chrome://extensions` |
+
+The version check compares major and minor only. A patch or build difference is not flagged — a
+banner in front of everyone one hotfix behind is a banner people learn to ignore.
 
 Installing the `.deb`/`.rpm`/Arch package runs the same self-test and prints the same warning, so
 a missing runtime library is reported at install time rather than discovered in the browser.

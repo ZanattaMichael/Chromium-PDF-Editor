@@ -4,6 +4,7 @@
 
 import { probeHost } from './host-client.js';
 import { HOST_STATE, hostStateSummary } from './host-install.js';
+import { checkHostVersion, versionStateSummary } from './host-version.js';
 
 const VIEWER = chrome.runtime.getURL('src/viewer.html');
 
@@ -77,22 +78,44 @@ chrome.runtime.onInstalled.addListener((details) => {
 // icon, which is the only always-visible surface an MV3 extension has.
 
 const BADGE_MISSING = '!';
+// A host that answered but is the wrong version gets its own badge rather than the missing one:
+// the two need different fixes, and telling someone to install a host they already have sends them
+// looking in the wrong place. Distinct text, not just a distinct colour — the badge has to say
+// something different to a user who cannot tell red from amber.
+const BADGE_STALE = 'v!';
 
 async function checkHost({ openOptionsIfMissing = false } = {}) {
   const probe = await probeHost();
-  const ok = probe.state === HOST_STATE.CONNECTED;
+  const connected = probe.state === HOST_STATE.CONNECTED;
+  const version = connected
+    ? checkHostVersion(probe.version, chrome.runtime.getManifest().version)
+    : null;
+  // Connected but mismatched is not success: the host answers `ping` and then fails, or silently
+  // does nothing, on any action added since it was built.
+  const ok = connected && version.ok;
 
-  await chrome.action.setBadgeText({ text: ok ? '' : BADGE_MISSING });
-  if (!ok) {
-    await chrome.action.setBadgeBackgroundColor({ color: '#b3261e' });
+  let badge = '';
+  let colour = '';
+  let title = 'Open PDF Editor';
+  if (!connected) {
+    badge = BADGE_MISSING;
+    colour = '#b3261e';
+    title = `PDF Editor — ${hostStateSummary(probe.state)} Click for instructions.`;
+  } else if (!ok) {
+    badge = BADGE_STALE;
+    colour = '#8a6100';
+    title = `PDF Editor — ${versionStateSummary(version.state)} `
+      + `Host v${probe.version}, extension v${chrome.runtime.getManifest().version}. `
+      + 'Click for instructions.';
   }
-  await chrome.action.setTitle({
-    title: ok
-      ? 'Open PDF Editor'
-      : `PDF Editor — ${hostStateSummary(probe.state)} Click for instructions.`,
-  });
 
-  if (!ok && openOptionsIfMissing) chrome.runtime.openOptionsPage();
+  await chrome.action.setBadgeText({ text: badge });
+  if (badge) await chrome.action.setBadgeBackgroundColor({ color: colour });
+  await chrome.action.setTitle({ title });
+
+  // Only a missing host opens the options page by itself. A version mismatch is worth a badge but
+  // not a stolen tab on install: the extension still works for everything the old host supports.
+  if (!connected && openOptionsIfMissing) chrome.runtime.openOptionsPage();
   return probe;
 }
 

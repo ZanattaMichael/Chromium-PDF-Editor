@@ -3,6 +3,7 @@ import { hostDiagnosticsLines } from './host-diagnostics.js';
 import {
   HOST_STATE, detectPlatform, hostInstallGuide, hostInstallGuideLines,
 } from './host-install.js';
+import { hostVersionGuide, hostVersionGuideLines } from './host-version.js';
 
 const autoOpen = document.getElementById('auto-open');
 const status = document.getElementById('host-status');
@@ -14,6 +15,10 @@ const help = document.getElementById('host-help');
 // The guide currently on screen (null when connected), so "Copy diagnostics" carries the same
 // advice the user is looking at into whatever bug report they paste it into.
 let currentGuide = null;
+// A connected-but-mismatched host produces guidance of its own. Tracked separately from
+// currentGuide because the two are mutually exclusive on screen but not interchangeable in a bug
+// report: "which version is installed" is worth pasting even when the connection itself is fine.
+let currentVersionGuide = null;
 
 {
   const value = await chrome.storage.sync.get({ autoOpen: true });
@@ -88,9 +93,23 @@ async function test() {
   const probe = await probeHost(client);
 
   if (probe.state === HOST_STATE.CONNECTED) {
-    status.textContent = `✓ connected (host v${probe.version ?? '?'})`;
-    status.className = 'ok';
-    renderHelp(null);
+    // Connecting is necessary but not sufficient: a host from the previous release answers `ping`
+    // perfectly well and then does nothing useful for any action added since. Say so here, where
+    // the user is already looking, rather than letting them find out feature by feature.
+    currentVersionGuide = hostVersionGuide({
+      hostVersion: probe.version,
+      extensionVersion: chrome.runtime.getManifest().version,
+      platform: detectPlatform(navigator.userAgent),
+    });
+    if (currentVersionGuide) {
+      status.textContent = `⚠ connected, but the host is v${probe.version} and this extension is `
+        + `v${chrome.runtime.getManifest().version}`;
+      status.className = 'warn';
+    } else {
+      status.textContent = `✓ connected (host v${probe.version ?? '?'})`;
+      status.className = 'ok';
+    }
+    renderHelp(currentVersionGuide);
     // Pull the richer host self-report too. Tolerate an older host that predates the action.
     try {
       diag.textContent = hostDiagnosticsLines(await client.call('diagnostics')).join('\n');
@@ -101,6 +120,7 @@ async function test() {
     // a directory it was not written to, and the fixes differ.
     status.textContent = `✗ ${probe.error ?? 'could not reach the native host'}`;
     status.className = 'bad';
+    currentVersionGuide = null;
     renderHelp(hostInstallGuide({
       state: probe.state,
       platform: detectPlatform(navigator.userAgent),
@@ -127,6 +147,7 @@ copyDiag.addEventListener('click', async () => {
     `Browser: ${navigator.userAgent}`,
     `Host: ${status.textContent}`,
     diag.textContent,
+    ...hostVersionGuideLines(currentVersionGuide),
     ...hostInstallGuideLines(currentGuide),
   ].join('\n').trim();
   try {

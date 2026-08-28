@@ -102,10 +102,11 @@ fi
 # wrong path to write into a flatpak's manifest. /opt is not reserved, so resolving the symlink
 # gives a path flatpak can be granted and the browser can actually launch.
 FLATPAK_RESERVED_PREFIXES=(/usr/ /etc/ /app/ /dev/ /proc/ /run/flatpak/ /run/host/)
+# flatpak_reserved <path> -- true when flatpak will not share <path> into a sandbox.
 flatpak_reserved() {
-  local prefix
+  local path="$1" prefix
   for prefix in "${FLATPAK_RESERVED_PREFIXES[@]}"; do
-    [[ "$1" == "$prefix"* ]] && return 0
+    [[ "$path" == "$prefix"* ]] && return 0
   done
   return 1
 }

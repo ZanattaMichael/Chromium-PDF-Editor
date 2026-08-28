@@ -131,8 +131,8 @@ export function hostVersionGuide({ hostVersion, extensionVersion, platform } = {
       + 'actions this host expects. Update it, then restart the browser.';
     guide.steps = [
       {
-        text: 'From the Chrome Web Store, open chrome://extensions, enable Developer mode and '
-          + 'press Update to pull the current version.',
+        text: 'Installed from the Chrome Web Store? Open chrome://extensions, enable Developer '
+          + 'mode and press Update to pull the current version.',
       },
       {
         text: 'Loaded unpacked? Pull the matching source and press the reload arrow on the '

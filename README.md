@@ -30,7 +30,6 @@ so your documents never leave your machine.
 | 💧 **Watermark** | Stamp text (e.g. *CONFIDENTIAL*) diagonally across every page, with colour, opacity and rotation. Baked into the page content, not a removable annotation or layer. |
 | 🔢 **Bates numbering** | Stamp sequential, zero-padded identifiers (e.g. `ACME000001`) into a page corner — prefix, start number, digit count, suffix and position all configurable. |
 | 🔎 **OCR** | Turn a scanned document into searchable, selectable text. Requires Tesseract — see [Optional external tools](#optional-external-tools). |
-| 🔒 **Password protection** | AES-256 encryption with user/owner passwords; open, edit, and decrypt protected files. |
 | 🖋 **Electronic signatures** | Draw a signature on a pad (or upload an image) and place it anywhere; or apply a cryptographic **digital signature** from a PKCS#12 certificate — the editor can also generate a self-signed certificate for you. Signature validity is verified and shown in the status bar. |
 
 ## Screenshots
@@ -111,7 +110,7 @@ Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```bash
 dotnet build            # build everything
-dotnet test             # run the .NET suite (98 tests: 56 + 27 unit, 15 integration)
+dotnet test             # the whole .NET suite (652 tests: 470 + 136 unit, 17 integration, 29 perf)
 ```
 
 - **`PdfEditor.Core.Tests`** — unit tests for the PDF engine (redaction, text editing,
@@ -155,7 +154,7 @@ save, and undo.
 cd e2e
 npm install
 npx playwright install chromium   # once
-npx playwright test               # 10 scenarios
+npx playwright test               # 138 tests
 ```
 
 Alongside the functional scenarios it covers the three states the extension can be in before it
@@ -326,9 +325,9 @@ sudo pacman -U ./pdf-editor-host-<version>-1-x86_64.pkg.tar.zst # Arch
 # Windows: double-click the .msi, or  msiexec /i pdf-editor-host-<version>-x64.msi
 ```
 
-Both packages also give you a way to check the host independently of any browser — this is the
-first thing to try if the extension says the host is unavailable. On Linux the package puts the
-host on your `PATH`; on Windows it lands next to the installed files:
+Each of these packages also gives you a way to check the host independently of any browser — this
+is the first thing to try if the extension says the host is unavailable. On Linux the package puts
+the host on your `PATH`; on Windows it lands next to the installed files:
 
 ```bash
 pdf-editor-host --diagnostics     # Linux: prints version, runtime, OS and whether OCR is available

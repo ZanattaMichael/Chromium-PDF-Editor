@@ -83,7 +83,7 @@ scripts/                           bootstrap, packaging, coverage, host-install 
 
 ```bash
 dotnet build                # build everything
-dotnet test                 # run all 98 .NET tests (unit + integration)
+dotnet test                 # run all 652 .NET tests (unit, integration and perf)
 ```
 
 - `PdfEditor.Core.Tests` — unit tests for the PDF engine itself.

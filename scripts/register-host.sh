@@ -89,6 +89,35 @@ if [[ -z "$HOST_PATH" && "$MODE" == "install" ]]; then
   exit 1
 fi
 
+# ------------------------------------------------------- the flatpak host path
+#
+# Flatpak reserves a set of paths -- /usr, /etc, /app, /dev, /proc and its own /run entries -- and
+# refuses to bind-mount anything inside them: `flatpak override --filesystem=/usr/bin/pdf-editor-host`
+# fails outright with `Path "/usr" is reserved by Flatpak`, and even --filesystem=host puts the host
+# system's /usr under /run/host/usr rather than at /usr. A flatpak browser therefore does not have
+# /usr/bin/pdf-editor-host at all: /usr inside the sandbox is the runtime's own.
+#
+# So the symlink the OS packages install -- the right path to hand every other browser, because a
+# sandboxed browser is more likely to be permitted to exec /usr/bin than /opt -- is exactly the
+# wrong path to write into a flatpak's manifest. /opt is not reserved, so resolving the symlink
+# gives a path flatpak can be granted and the browser can actually launch.
+FLATPAK_RESERVED_PREFIXES=(/usr/ /etc/ /app/ /dev/ /proc/ /run/flatpak/ /run/host/)
+flatpak_reserved() {
+  local prefix
+  for prefix in "${FLATPAK_RESERVED_PREFIXES[@]}"; do
+    [[ "$1" == "$prefix"* ]] && return 0
+  done
+  return 1
+}
+
+FLATPAK_HOST_PATH="$HOST_PATH"
+if [[ -n "$HOST_PATH" ]] && flatpak_reserved "$HOST_PATH"; then
+  resolved="$(readlink -f "$HOST_PATH" 2>/dev/null || true)"
+  if [[ -n "$resolved" ]] && ! flatpak_reserved "$resolved"; then
+    FLATPAK_HOST_PATH="$resolved"
+  fi
+fi
+
 # -------------------------------------------------------------------- targets
 #
 # Per-user manifest directories, in three families:
@@ -108,12 +137,14 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
 fi
 
 TARGETS=()          # directories to write the manifest into
+TARGET_PATHS=()     # the host path each of those manifests names, index for index
 NOTES=()            # extra advice to print at the end (flatpak filesystem overrides, etc.)
 
 # add_plain <browser-config-dir>
 add_plain() {
   local browser_dir="$1"
   TARGETS+=("$CONFIG_DIR/$browser_dir/NativeMessagingHosts")
+  TARGET_PATHS+=("$HOST_PATH")
 }
 
 # add_snap <snap-name> <browser-config-dir>
@@ -123,6 +154,7 @@ add_snap() {
   local root="$HOME/snap/$snap_name/current"
   [[ -d "$root" ]] || return 0
   TARGETS+=("$root/.config/$browser_dir/NativeMessagingHosts")
+  TARGET_PATHS+=("$HOST_PATH")
   NOTES+=("snap '$snap_name' detected. Strictly confined snaps may still refuse to launch a host that lives outside the sandbox; if the connection is still refused, install the .deb build of the browser (or use the flatpak) instead.")
 }
 
@@ -133,9 +165,15 @@ add_flatpak() {
   local root="$HOME/.var/app/$app_id"
   [[ -d "$root" ]] || return 0
   TARGETS+=("$root/config/$browser_dir/NativeMessagingHosts")
-  # A flatpak browser cannot see /usr or /opt on the host unless it is granted access.
-  NOTES+=("flatpak '$app_id' detected. Grant it access to the host binary once with:
-    flatpak override --user --filesystem=/opt/pdf-editor-host:ro --filesystem=/usr/bin/pdf-editor-host:ro $app_id")
+  TARGET_PATHS+=("$FLATPAK_HOST_PATH")
+  # A flatpak browser cannot see the host filesystem unless it is granted access -- and only for a
+  # path flatpak is willing to bind-mount, which rules out everything under /usr (see above).
+  if flatpak_reserved "$FLATPAK_HOST_PATH"; then
+    NOTES+=("flatpak '$app_id' detected, but the only host path found ($FLATPAK_HOST_PATH) is in a directory flatpak reserves and will not share into the sandbox. Install the .deb/.rpm/Arch package, which puts the host under /opt, or pass --host-path with a copy outside /usr and /etc.")
+  else
+    NOTES+=("flatpak '$app_id' detected. Grant it access to the host binary once with:
+    flatpak override --user --filesystem=$(dirname "$FLATPAK_HOST_PATH"):ro $app_id")
+  fi
 }
 
 # The per-browser directory name differs between the two platforms (Linux uses the packaged name,
@@ -179,8 +217,16 @@ add_flatpak com.opera.Opera opera
 if [[ "$MODE" == "list" ]]; then
   echo "Extension ID: $EXTENSION_ID"
   echo "Host path:    ${HOST_PATH:-<not found>}"
+  if [[ -n "$HOST_PATH" && "$FLATPAK_HOST_PATH" != "$HOST_PATH" ]]; then
+    echo "  (flatpak:   $FLATPAK_HOST_PATH -- flatpak will not share $HOST_PATH into a sandbox)"
+  fi
   echo "Manifests:"
-  for dir in "${TARGETS[@]}"; do echo "  $dir/$HOST_NAME.json"; done
+  # Printed with the path each one names, because they are not all the same: a flatpak browser
+  # gets the resolved path, and a manifest naming a path that browser cannot exec is the failure
+  # this whole script exists to avoid.
+  for i in "${!TARGETS[@]}"; do
+    echo "  ${TARGETS[$i]}/$HOST_NAME.json -> ${TARGET_PATHS[$i]:-<not found>}"
+  done
   exit 0
 fi
 
@@ -199,24 +245,33 @@ if [[ "$MODE" == "uninstall" ]]; then
   exit 0
 fi
 
-read -r -d '' MANIFEST <<MANIFEST_JSON || true
+# The manifest is rendered per target rather than once, because the "path" is not the same for
+# every one: see the flatpak note above.
+manifest_for() {
+  cat <<MANIFEST_JSON
 {
   "name": "$HOST_NAME",
   "description": "PDF Editor native messaging host (C#/.NET)",
-  "path": "$HOST_PATH",
+  "path": "$1",
   "type": "stdio",
   "allowed_origins": [
     "chrome-extension://$EXTENSION_ID/"
   ]
 }
 MANIFEST_JSON
+}
 
 written=0
-for dir in "${TARGETS[@]}"; do
+for i in "${!TARGETS[@]}"; do
+  dir="${TARGETS[$i]}"
   mkdir -p "$dir"
-  printf '%s\n' "$MANIFEST" > "$dir/$HOST_NAME.json"
+  manifest_for "${TARGET_PATHS[$i]}" > "$dir/$HOST_NAME.json"
   chmod 0644 "$dir/$HOST_NAME.json"
-  echo "Registered: $dir/$HOST_NAME.json"
+  if [[ "${TARGET_PATHS[$i]}" == "$HOST_PATH" ]]; then
+    echo "Registered: $dir/$HOST_NAME.json"
+  else
+    echo "Registered: $dir/$HOST_NAME.json -> ${TARGET_PATHS[$i]}"
+  fi
   written=$((written + 1))
 done
 

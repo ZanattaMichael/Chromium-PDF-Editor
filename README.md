@@ -390,9 +390,16 @@ pdf-editor-host-register --list   # show where it would write, without writing
 For a flatpak browser you also have to let it reach the host binary, once:
 
 ```bash
-flatpak override --user --filesystem=/opt/pdf-editor-host:ro \
-                        --filesystem=/usr/bin/pdf-editor-host:ro com.google.Chrome
+flatpak override --user --filesystem=/opt/pdf-editor-host:ro com.google.Chrome
 ```
+
+Only `/opt` is granted, and the manifest `pdf-editor-host-register` writes for a flatpak browser
+names `/opt/pdf-editor-host/PdfEditor.NativeHost` rather than the `/usr/bin/pdf-editor-host`
+symlink every other browser gets. Flatpak reserves `/usr` (along with `/etc`, `/app`, `/dev` and
+`/proc`): the sandbox has its own, `flatpak override --filesystem=/usr/bin/pdf-editor-host` is
+refused with `Path "/usr" is reserved by Flatpak`, and even `--filesystem=host` puts the host
+system's `/usr` under `/run/host/usr`. A flatpak browser simply does not have
+`/usr/bin/pdf-editor-host` to launch.
 
 #### If the host still isn't picked up
 

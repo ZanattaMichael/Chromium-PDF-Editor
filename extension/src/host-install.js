@@ -218,7 +218,10 @@ function listManifestsStep(platform) {
   return {
     text: 'List every manifest for this host and the ID each one allows. The per-user copies are '
       + 'read in preference to the system-wide one, so the first hit is what the browser sees:',
-    code: 'find ~/.config ~/snap ~/.var/app ~/Library/Application\\ Support /etc /etc/opt \\\n'
+    // /etc alone, not "/etc /etc/opt": /etc/opt is inside /etc, and naming both makes find walk
+    // it twice and print every system-wide manifest twice — in a listing whose whole point is
+    // which manifest wins, a duplicate reads like a second, conflicting registration.
+    code: 'find ~/.config ~/snap ~/.var/app ~/Library/Application\\ Support /etc \\\n'
       + '     -name com.pdfeditor.host.json 2>/dev/null \\\n'
       + '  | while read -r f; do echo "== $f"; grep -o "chrome-extension://[a-p]*" "$f"; done',
   };

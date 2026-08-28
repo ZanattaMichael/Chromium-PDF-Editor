@@ -1,0 +1,36 @@
+using PdfSharp.Pdf;
+using Xunit;
+
+namespace PdfEditor.Backend.Portable.Tests;
+
+public class FormXObjectGuardTests
+{
+    [Fact]
+    public void Rejects_a_form_xobject_that_draws_itself()
+    {
+        PdfPage page = PdfFixtures.Load(PdfFixtures.SelfReferencingForm()).Pages[0];
+
+        // Left unchecked this is not a caught exception but a dead process: a content processor
+        // recurses into the form forever, and StackOverflowException cannot be handled on .NET.
+        var error = Assert.Throws<InvalidDataException>(() => FormXObjectGuard.EnsureFormXObjectsTerminate(page));
+        Assert.Contains("draws itself", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Accepts_a_page_with_no_xobjects()
+    {
+        PdfDocument document = PdfFixtures.Load(PdfFixtures.Balanced());
+
+        FormXObjectGuard.EnsureFormXObjectsTerminate(document.Pages[0]);
+        FormXObjectGuard.EnsureAllPagesTerminate(document);
+    }
+
+    [Fact]
+    public void Bounds_are_the_ones_PdfEditor_Core_already_ships()
+    {
+        // These are not free parameters: a portable backend that guarded less tightly than the
+        // iText one would be a regression dressed up as a port.
+        Assert.Equal(32, FormXObjectGuard.MaxFormNesting);
+        Assert.Equal(4096, FormXObjectGuard.MaxFormsInspected);
+    }
+}

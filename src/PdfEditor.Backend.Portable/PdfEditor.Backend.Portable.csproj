@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="PdfEditor.Backend.Portable.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The whole point of this project: both backends are permissively licensed, so a build that
+         uses only these two sheds iText's AGPL-or-commercial obligation.
+
+         OfficeIMO.Pdf (MIT) supplies the task-level facades — text, images, redaction, security,
+         signing. PdfSharp (MIT) supplies the low-level object model and content-stream operator
+         access that OfficeIMO deliberately keeps `internal`, which is what the guards in this
+         project are built on. See docs/backend-portability.md for why both are needed. -->
+    <PackageReference Include="OfficeIMO.Pdf" Version="3.2.5" />
+    <PackageReference Include="PdfSharp" Version="6.2.4" />
+  </ItemGroup>
+
+</Project>

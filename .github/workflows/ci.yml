@@ -33,6 +33,15 @@ jobs:
         # A dedicated step as well as a node --test case, so the failure message points straight
         # at the offending file:line rather than at an assertion.
         run: node scripts/check-innerhtml.mjs
+      - name: Linux packaging tooling
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rpm libarchive-tools zstd
+      - name: Linux package registration guard
+        # Builds the .deb/.rpm/Arch packages against a stub host payload and checks that each one
+        # registers the native messaging host where browsers actually look. A broken registration
+        # is invisible until someone installs the package -- the browser just says "Specified
+        # native messaging host not found" -- so it is worth catching on every push rather than
+        # at release time. The stub keeps this to a couple of seconds and needs no .NET SDK.
+        run: ./scripts/test-package-scripts.sh
       - name: Build
         run: dotnet build --configuration Release
       - name: Test with coverage (gated at 90% line coverage)
@@ -89,6 +98,59 @@ jobs:
         if: failure()
         with:
           name: playwright-report
+          path: e2e/playwright-report/
+
+  package-install-e2e:
+    # The one test that proves a user who installs the package ends up with a working editor.
+    #
+    # Every other e2e test registers the native host into a throwaway browser profile, which says
+    # nothing about the packaged registration -- and a package that installs cleanly and is then
+    # never found by the browser is exactly the bug this project shipped. So this job builds the
+    # real .deb, installs it with dpkg, and drives the extension against whatever the package left
+    # behind: no profile-local manifest, no locally built host.
+    #
+    # The .deb is the only one of the three Linux packages an Ubuntu runner can actually install;
+    # the .rpm and Arch packages are checked structurally instead, by verify-linux-package.sh in
+    # the `test` job, which reads the same manifest/path/permission invariants out of each archive.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - name: Install e2e dependencies
+        working-directory: e2e
+        run: npm ci --ignore-scripts
+      - name: Install Playwright Chromium
+        # Extensions need the full browser, not the headless shell. Playwright's Chromium is an
+        # unbranded build, so it reads /etc/chromium/native-messaging-hosts -- one of the
+        # directories the package registers the host in.
+        working-directory: e2e
+        run: npx --no-install playwright@1.61.1 install --with-deps chromium
+      - name: Build the .deb
+        # Built here rather than in the suite's global setup so a packaging failure is reported as
+        # a packaging failure. The suite picks it up via PDF_EDITOR_DEB.
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+        run: ./scripts/package-deb.sh dist
+      - name: Install the package and run the extension against it
+        working-directory: e2e
+        # The suite's global setup installs the .deb (via sudo) and purges it again afterwards,
+        # pass or fail.
+        run: |
+          deb="$(ls "$GITHUB_WORKSPACE"/dist/pdf-editor-host_*.deb)"
+          PDF_EDITOR_DEB="$deb" npx --no-install playwright@1.61.1 test \
+            --config playwright.package.config.js
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: playwright-report-package-install
           path: e2e/playwright-report/
 
   package-dry-run:
@@ -195,6 +257,20 @@ jobs:
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
         run: ./scripts/package-msi.ps1 -OutputDir dist
         shell: pwsh
+      - name: Verify the MSI registers the native messaging host
+        # The Windows half of the check the Linux packages get from verify-linux-package.sh. A
+        # broken registration is invisible until someone installs the MSI and tries it -- the
+        # browser says "Specified native messaging host not found" whether the registry value is
+        # missing, points at a manifest the package never shipped, or the manifest pins a different
+        # extension. This reads the MSI's own tables and checks each of those.
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+        shell: pwsh
+        run: |
+          $id = $env:CHROME_EXTENSION_ID
+          if (-not $id) { $id = (Get-Content scripts/extension-id.txt -Raw).Trim() }
+          $msi = (Get-ChildItem dist/*.msi | Select-Object -First 1).FullName
+          ./scripts/verify-msi.ps1 $msi -ExpectedExtensionId $id
       - name: Note how to use this dry-run package
         # Same caveat as the Linux dry-run job: the MSI pins the host to one extension ID, so a
         # developer-mode/unpacked extension (different ID) must re-register per-user afterward.
@@ -211,11 +287,19 @@ jobs:
             'This `.msi` registers the native host for the extension ID **`' + $pinned + '`** only.',
             '',
             'To use it with a **developer-mode / unpacked** extension (a different ID), after',
-            'installing the MSI run:',
+            'installing the MSI run the helper it puts next to the host:',
             '```powershell',
-            '.\scripts\install-host.ps1 -ExtensionId <your-extension-id>',
+            '# Two roots: an MSI built before the -arch x64 fix was a 32-bit package, which',
+            '# Windows Installer redirects to "C:\Program Files (x86)".',
+            '$hostDir = "$env:ProgramFiles\PDF Editor Host","${env:ProgramFiles(x86)}\PDF Editor Host" |',
+            '  Where-Object { Test-Path $_ } | Select-Object -First 1',
+            'powershell -NoProfile -ExecutionPolicy Bypass -File `',
+            '  "$hostDir\register-host.ps1" -ExtensionId <your-extension-id>',
             '```',
-            "It writes per-user (HKCU) keys that override the MSI's machine-wide ones. See the",
+            'From a checkout, `.\scripts\install-host.ps1 -ExtensionId <your-extension-id>` does the',
+            'same thing (and installs the host first).',
+            '',
+            "Either writes per-user (HKCU) keys that override the MSI's machine-wide ones. See the",
             'README''s "System-wide: the OS installer packages" section for details.'
           )
           $lines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

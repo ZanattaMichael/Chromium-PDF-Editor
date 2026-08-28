@@ -2,6 +2,10 @@
 // Document processing happens in the viewer page, which talks to the native
 // host directly.
 
+import { probeHost } from './host-client.js';
+import { HOST_STATE, hostStateSummary } from './host-install.js';
+import { checkHostVersion, versionStateSummary } from './host-version.js';
+
 const VIEWER = chrome.runtime.getURL('src/viewer.html');
 
 function viewerUrlFor(pdfUrl) {
@@ -48,7 +52,7 @@ chrome.action.onClicked.addListener((tab) => {
 
 // --- Context menus. -----------------------------------------------------------
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   chrome.contextMenus.create({
     id: 'open-link-in-editor',
     title: 'Open link in PDF Editor',
@@ -60,7 +64,64 @@ chrome.runtime.onInstalled.addListener(() => {
     title: 'Open this PDF in PDF Editor',
     contexts: ['page'],
   });
+  // On a fresh install, take the user straight to the instructions if the host is not there — the
+  // extension is inert without it, and finding that out by opening a PDF and watching it fail is a
+  // worse first experience than being told up front. Updates stay silent.
+  checkHost({ openOptionsIfMissing: details.reason === 'install' });
 });
+
+// --- Native host availability. -------------------------------------------------
+//
+// Everything this extension does happens in the native host, so "is it installed?" is worth
+// answering before the user opens a document rather than after. There is no way to ask the
+// filesystem, so the check is a real connection attempt; the answer becomes a badge on the toolbar
+// icon, which is the only always-visible surface an MV3 extension has.
+
+const BADGE_MISSING = '!';
+// A host that answered but is the wrong version gets its own badge rather than the missing one:
+// the two need different fixes, and telling someone to install a host they already have sends them
+// looking in the wrong place. Distinct text, not just a distinct colour — the badge has to say
+// something different to a user who cannot tell red from amber.
+const BADGE_STALE = 'v!';
+
+async function checkHost({ openOptionsIfMissing = false } = {}) {
+  const probe = await probeHost();
+  const connected = probe.state === HOST_STATE.CONNECTED;
+  const version = connected
+    ? checkHostVersion(probe.version, chrome.runtime.getManifest().version)
+    : null;
+  // Connected but mismatched is not success: the host answers `ping` and then fails, or silently
+  // does nothing, on any action added since it was built.
+  const ok = connected && version.ok;
+
+  let badge = '';
+  let colour = '';
+  let title = 'Open PDF Editor';
+  if (!connected) {
+    badge = BADGE_MISSING;
+    colour = '#b3261e';
+    title = `PDF Editor — ${hostStateSummary(probe.state)} Click for instructions.`;
+  } else if (!ok) {
+    badge = BADGE_STALE;
+    colour = '#8a6100';
+    title = `PDF Editor — ${versionStateSummary(version.state)} `
+      + `Host v${probe.version}, extension v${chrome.runtime.getManifest().version}. `
+      + 'Click for instructions.';
+  }
+
+  await chrome.action.setBadgeText({ text: badge });
+  if (badge) await chrome.action.setBadgeBackgroundColor({ color: colour });
+  await chrome.action.setTitle({ title });
+
+  // Only a missing host opens the options page by itself. A version mismatch is worth a badge but
+  // not a stolen tab on install: the extension still works for everything the old host supports.
+  if (!connected && openOptionsIfMissing) chrome.runtime.openOptionsPage();
+  return probe;
+}
+
+// Re-check when the browser starts: the usual fix is "install the host, then restart the browser",
+// and this is what clears the badge afterwards without the user having to hunt for a re-test.
+chrome.runtime.onStartup.addListener(() => { checkHost(); });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'open-link-in-editor' && info.linkUrl) {
@@ -71,12 +132,18 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-// --- Messages from the content script overlay. --------------------------------
+// --- Messages from the content script overlay and the extension's own pages. ---
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'open-in-editor') {
     chrome.tabs.create({ url: viewerUrlFor(message.url) });
     sendResponse({ ok: true });
+    return false;
+  }
+  // The options page re-tests on demand; let its result clear or restore the badge too.
+  if (message?.type === 'recheck-host') {
+    checkHost().then(sendResponse);
+    return true; // the response is async, so keep the channel open
   }
   return false;
 });

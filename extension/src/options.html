@@ -11,7 +11,19 @@
     pre { padding: 10px; overflow-x: auto; }
     .ok { color: #1b7f3b; }
     .bad { color: #b3261e; }
+    /* A version mismatch is neither: the host answered, so it is not a failure, but it is not the
+       clean "connected" green either. */
+    .warn { color: #8a6100; }
+    .muted { color: #666; }
     button { padding: 6px 12px; }
+    /* Install guidance, shown only when the host could not be reached. */
+    #host-help { border: 1px solid #e0c000; background: #fffbe6; border-radius: 6px;
+                 padding: 12px 16px; margin: 16px 0; }
+    #host-help h3 { margin: 0 0 6px; font-size: 15px; }
+    #host-help ol { margin: 12px 0 0; padding-left: 20px; }
+    #host-help li { margin-bottom: 12px; }
+    #host-help pre { margin: 6px 0 0; background: #fff; border: 1px solid #ecdfa8; }
+    .step-copy { padding: 2px 8px; font-size: 12px; margin-top: 4px; }
   </style>
 </head>
 <body>
@@ -50,22 +62,31 @@
     <button id="copy-diag" hidden>Copy diagnostics</button>
     <span id="copy-diag-status"></span>
   </p>
-  <p>If the host is not connected:</p>
-  <pre>
-# Linux / macOS
-./scripts/install-host.sh &lt;your-extension-id&gt;
+  <!-- Install guidance. Filled in by options.js once the connection has been probed, so the advice
+       matches the actual problem instead of listing every possibility: from host-install.js when
+       the host could not be reached (never installed / installed but not allowed / installed but
+       crashed), and from host-version.js when it answered but is from a different release. Built
+       as DOM nodes, never interpolated HTML — see scripts/check-innerhtml.mjs (#74). -->
+  <section id="host-help" hidden aria-live="polite">
+    <!-- The heading carries a generic fallback so it is never announced empty; renderHelp() replaces
+         it with the diagnosis for the actual failure before the section is unhidden. -->
+    <h3 id="host-help-headline">Native host setup</h3>
+    <p id="host-help-detail"></p>
+    <ol id="host-help-steps"></ol>
+    <p id="host-help-error" class="muted" hidden></p>
+    <p class="muted">
+      <a id="host-help-releases" href="https://github.com/ZanattaMichael/Chromium-PDF-Editor/releases/latest"
+         target="_blank" rel="noreferrer">Download the latest release</a>
+      — this extension's ID is <code id="host-help-id"></code>.
+    </p>
+  </section>
 
-# Windows (PowerShell)
-.\scripts\install-host.ps1 -ExtensionId &lt;your-extension-id&gt;</pre>
-  <p>
+  <p class="muted">
     The OS installer packages (<code>.deb</code>, <code>.rpm</code>, Arch <code>.pkg.tar.zst</code>,
     and the Windows <code>.msi</code>) register the host system-wide for Chrome, Chromium, Edge,
-    Brave, Vivaldi, and Opera automatically. You can also confirm the host runs on its own with
-    <code>PdfEditor.NativeHost --diagnostics</code>.
-  </p>
-  <p>
-    Your extension ID is shown at <code>chrome://extensions</code> with Developer mode on.
-    Full instructions are in the repository README.
+    Brave, Vivaldi, and Opera automatically. Snap and flatpak browsers are sandboxed away from the
+    system-wide registration and need <code>pdf-editor-host-register</code> as well. Full
+    instructions are in the repository README.
   </p>
 
   <script type="module" src="options.js"></script>

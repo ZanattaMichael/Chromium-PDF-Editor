@@ -1,12 +1,16 @@
 // PDF Editor viewer page. Talks straight to the native host; the working
 // document lives here as bytes and every edit round-trips through the host.
 
-import { HostClient, bytesToBase64, base64ToBytes } from './host-client.js';
+import { HostClient, probeHost, bytesToBase64, base64ToBytes } from './host-client.js';
 import { runFormScript } from './formScript.js';
 import { ActivityLog, formatTime } from './activity-log.js';
 import { displayToPage, pageToDisplay } from './geometry.js';
 import { formatBuildInfo, loadBuildMeta } from './build-info.js';
 import { hostDiagnosticsLines } from './host-diagnostics.js';
+import {
+  HOST_STATE, detectPlatform, hostInstallGuide, hostInstallGuideLines,
+} from './host-install.js';
+import { hostVersionGuide, hostVersionGuideLines } from './host-version.js';
 
 const host = new HostClient();
 
@@ -4473,19 +4477,87 @@ async function showAbout() {
   close.focus();
 }
 
+/**
+ * Paints one guide — a missing host or a mismatched one, both carry the same {headline, detail,
+ * steps} shape — into the empty state's host line: what is wrong, and the first step towards
+ * fixing it, with the full instructions one click away in the options page.
+ * Built from DOM nodes only; the browser's error string is untrusted text (#74).
+ */
+function renderHostGuide(statusEl, guide, buttonLabel) {
+  statusEl.replaceChildren();
+  const headline = document.createElement('strong');
+  headline.textContent = `⚠ ${guide.headline}`;
+  statusEl.appendChild(headline);
+  statusEl.appendChild(document.createElement('br'));
+  statusEl.appendChild(document.createTextNode(guide.detail));
+
+  const first = guide.steps[0];
+  if (first) {
+    statusEl.appendChild(document.createElement('br'));
+    statusEl.appendChild(document.createTextNode(first.text));
+    if (first.code) {
+      const pre = document.createElement('pre');
+      pre.className = 'host-help-code';
+      pre.textContent = first.code;
+      statusEl.appendChild(pre);
+    }
+  }
+
+  const openOptions = document.createElement('button');
+  openOptions.type = 'button';
+  openOptions.textContent = buttonLabel;
+  openOptions.addEventListener('click', () => chrome.runtime.openOptionsPage());
+  statusEl.appendChild(openOptions);
+}
+
+/**
+ * Fills the empty state's host line in. Without the host nothing in this page can do any work, so
+ * when it is unreachable this says which of the three things went wrong — never installed,
+ * installed but not allowed to talk to this extension, or installed but crashing — and when it is
+ * reachable but the wrong version, says that instead of a reassuring tick.
+ */
+async function reportHostStatus() {
+  const statusEl = $('host-status');
+  const probe = await probeHost(host);
+
+  if (probe.state === HOST_STATE.CONNECTED) {
+    // Connected is not the same as compatible. A host from the previous release answers `ping` and
+    // then fails, or silently no-ops, on any action added since it was built — so the user would
+    // see "✓ connected" here and a feature that does nothing there. Name the mismatch instead.
+    const versionGuide = hostVersionGuide({
+      hostVersion: probe.version,
+      extensionVersion: chrome.runtime.getManifest().version,
+      platform: detectPlatform(navigator.userAgent),
+    });
+    if (!versionGuide) {
+      statusEl.textContent = '✓ Native host connected.';
+      return;
+    }
+    for (const line of hostVersionGuideLines(versionGuide)) {
+      activity.add('warn', 'native host', line);
+    }
+    renderHostGuide(statusEl, versionGuide, 'Full update instructions…');
+    return;
+  }
+
+  const guide = hostInstallGuide({
+    state: probe.state,
+    platform: detectPlatform(navigator.userAgent),
+    extensionId: chrome.runtime.id,
+    error: probe.error,
+  });
+  // Everything the guide says also goes into the activity log, so a downloaded log is enough for
+  // someone else to see what the user was told.
+  for (const line of hostInstallGuideLines(guide)) activity.add('warn', 'native host', line);
+
+  renderHostGuide(statusEl, guide, 'Full install instructions…');
+}
+
 async function start() {
   wire();
   await restoreConsoleState();
   activity.add('info', 'viewer started');
-  try {
-    await host.call('ping');
-    $('host-status').textContent = '✓ Native host connected.';
-  } catch (e) {
-    const statusEl = $('host-status');
-    statusEl.textContent = `⚠ ${e.message}`;
-    statusEl.appendChild(document.createElement('br'));
-    statusEl.appendChild(document.createTextNode('Open the extension options for install instructions.'));
-  }
+  await reportHostStatus();
   const src = new URLSearchParams(location.search).get('src');
   if (src) await openFromUrl(src);
 }

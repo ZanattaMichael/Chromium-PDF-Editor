@@ -121,6 +121,18 @@ jobs:
         run: ./scripts/package-msi.ps1 -OutputDir dist
         shell: pwsh
 
+      - name: Verify the MSI registers the native messaging host
+        # Same reasoning as the Linux verify step below: a broken registration is silent until
+        # someone installs the package, so it is checked before the MSI is published.
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+        shell: pwsh
+        run: |
+          $id = $env:CHROME_EXTENSION_ID
+          if (-not $id) { $id = (Get-Content scripts/extension-id.txt -Raw).Trim() }
+          $msi = (Get-ChildItem dist/*.msi | Select-Object -First 1).FullName
+          ./scripts/verify-msi.ps1 $msi -ExpectedExtensionId $id
+
       - name: Upload the MSI artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -192,6 +204,20 @@ jobs:
           ./scripts/package-deb.sh dist
           ./scripts/package-rpm.sh dist
           ./scripts/package-arch.sh dist
+
+      - name: Verify the packages register the native messaging host
+        # Every way of getting this wrong looks the same from the browser -- "Specified native
+        # messaging host not found" -- so nothing about a broken registration shows up until
+        # someone installs the package and tries it. This unpacks each one and checks the manifest
+        # is in every directory a supported browser reads, is identical across them, pins the right
+        # extension ID, and points at an executable the package actually ships.
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+        run: |
+          ./scripts/verify-linux-package.sh \
+            dist/pdf-editor-host_*.deb \
+            dist/pdf-editor-host-*.rpm \
+            dist/pdf-editor-host-*.pkg.tar.zst
 
       - name: Download the Windows MSI artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0

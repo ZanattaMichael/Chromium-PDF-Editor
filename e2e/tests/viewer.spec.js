@@ -3574,8 +3574,13 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.click('#btn-open-empty');
     await (await chooser).setFiles(file);
     await expect(page.locator(pageImageSel(1))).toHaveAttribute('src', /data:image\/png/);
-    // Let the document's own initial scan through and settle.
-    await page.evaluate(() => window.__hostGate.release());
+    // Let the document's own initial scan through and settle. stopHolding() first, because
+    // release() only delivers what is *already* parked: the initial scan-urls is issued behind a
+    // list-link-hotspots round trip and a chrome.storage read, so it can still be in flight when
+    // page 1's image lands. Releasing alone loses that race on a slow runner — the scan is parked
+    // *after* the release, nothing ever delivers it, and #link-status stays on "Checking 1 link…"
+    // until this assertion times out. Clearing the held set first makes both orderings pass.
+    await page.evaluate(() => { window.__hostGate.stopHolding(); window.__hostGate.release(); });
     await expect(page.locator('#link-status')).toBeHidden({ timeout: 15000 });
 
     await ui(page, '#btn-links');

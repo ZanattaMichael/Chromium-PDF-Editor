@@ -5,4 +5,16 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <!-- The version the native host reports to the extension (over the `ping` action, and on
+         the command line via its version and diagnostics flags) and the one the extension checks
+         itself against. Without it every assembly here defaults to 1.0.0.0, so a host built from a
+         2.0.0 tree and shipped in a package *named* 2.0.0 told the browser it was 1.0.0.0.
+
+         extension/manifest.json is the single source of truth for the release version (the .deb,
+         .rpm, Arch and MSI packagers all read their version out of it), so this must be kept equal
+         to it. extension/test/version-sync.test.mjs fails if the two ever drift. -->
+    <Version>2.0.0</Version>
+  </PropertyGroup>
+
 </Project>

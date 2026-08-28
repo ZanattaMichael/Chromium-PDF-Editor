@@ -11,7 +11,7 @@ checklist for all of that.
 ## 0. Before you start — things to decide/fix
 
 - [ ] **Name.** `"PDF Editor"` in `extension/manifest.json` is very generic; the Web Store often
-      rejects generic/again-existing names. Pick a distinctive name (e.g. a brand word +
+      rejects generic/already-existing names. Pick a distinctive name (e.g. a brand word +
       "PDF Editor"). Update `manifest.json` `name` and the store listing to match.
 - [ ] **Privacy policy hosted.** Host `docs/PRIVACY.md` at a public URL (GitHub Pages works) and
       have that URL ready — it is **required** for this listing (broad host access).

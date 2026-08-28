@@ -418,6 +418,15 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
 
 #empty-state { align-self: center; text-align: center; max-width: 420px; }
 #empty-state h1 { font-weight: 600; }
+/* Native-host trouble in the empty state: wider than the rest of it, because the guidance carries
+   a shell command that must not wrap into nonsense. */
+#host-status:not(:empty) { max-width: 520px; margin-inline: auto; text-align: left; }
+#host-status .host-help-code {
+  white-space: pre; overflow-x: auto; margin: 6px 0;
+  padding: 8px 10px; border-radius: 4px;
+  background: var(--surface-2); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
 .muted { color: var(--muted); }
 
 /* ------------------------------------------------------------------ panel */

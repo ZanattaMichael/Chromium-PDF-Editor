@@ -30,7 +30,6 @@ so your documents never leave your machine.
 | 💧 **Watermark** | Stamp text (e.g. *CONFIDENTIAL*) diagonally across every page, with colour, opacity and rotation. Baked into the page content, not a removable annotation or layer. |
 | 🔢 **Bates numbering** | Stamp sequential, zero-padded identifiers (e.g. `ACME000001`) into a page corner — prefix, start number, digit count, suffix and position all configurable. |
 | 🔎 **OCR** | Turn a scanned document into searchable, selectable text. Requires Tesseract — see [Optional external tools](#optional-external-tools). |
-| 🔒 **Password protection** | AES-256 encryption with user/owner passwords; open, edit, and decrypt protected files. |
 | 🖋 **Electronic signatures** | Draw a signature on a pad (or upload an image) and place it anywhere; or apply a cryptographic **digital signature** from a PKCS#12 certificate — the editor can also generate a self-signed certificate for you. Signature validity is verified and shown in the status bar. |
 
 ## Screenshots
@@ -111,7 +110,7 @@ Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```bash
 dotnet build            # build everything
-dotnet test             # run the .NET suite (98 tests: 56 + 27 unit, 15 integration)
+dotnet test             # the whole .NET suite (652 tests: 470 + 136 unit, 17 integration, 29 perf)
 ```
 
 - **`PdfEditor.Core.Tests`** — unit tests for the PDF engine (redaction, text editing,
@@ -155,8 +154,49 @@ save, and undo.
 cd e2e
 npm install
 npx playwright install chromium   # once
-npx playwright test               # 10 scenarios
+npx playwright test               # 138 tests
 ```
+
+Alongside the functional scenarios it covers the three states the extension can be in before it
+can do any work at all, because each is rendered by different code in a different context (the
+viewer's empty state, the options page, and the service worker's toolbar badge):
+
+- `tests/host-missing.spec.js` — launches with **no** host registered anywhere and checks the
+  pages say, in as many words, that the native host is not installed, and give the command to
+  install it. It refuses to run if a host package is installed system-wide, which would quietly
+  turn "no host" into a connected one and pass without testing anything.
+- `tests/host-version.spec.js` — checks that a host of the wrong version is flagged rather than
+  reported as a healthy connection. The real host answers every message; only the version the
+  page compares itself against is overridden, so the probe, the comparison and the rendering are
+  all the production ones.
+
+#### Package-install tests
+
+The suites above register the host themselves, into a throwaway browser profile. That proves the
+extension and the host talk to each other and says nothing about whether *installing the package*
+gives you a working editor — which is a real failure this project shipped: a `.deb` that installed
+cleanly, put the host somewhere sensible, and was then never found by the browser.
+
+So there is a second suite, with its own config, that installs the real package with `dpkg` and
+drives the extension against whatever it left behind — no profile-local manifest, no locally built
+host:
+
+```bash
+cd e2e
+npx playwright test --config playwright.package.config.js
+```
+
+It builds the `.deb` (or reuses one via `PDF_EDITOR_DEB=/path/to.deb`), installs it, runs the
+tests, and purges the package again afterwards, pass or fail. Installing needs root, so it uses
+`sudo` when you are not already root, and it refuses to run over an existing install rather than
+removing a host you use. It works because the extension's manifest `key` pins its ID to the
+published Web Store one even when loaded unpacked — the same ID the package writes into
+`allowed_origins`.
+
+CI runs it as the `package-install-e2e` job. The `.deb` is the only one of the three Linux
+packages an Ubuntu runner can install; the `.rpm` and Arch packages are checked structurally
+instead, by `scripts/verify-linux-package.sh`, which reads the same manifest, path and permission
+invariants out of each archive.
 
 ### Performance guards
 
@@ -179,7 +219,8 @@ outside the coverage-gated projects so timing runs never affect the coverage num
 
 Every push and PR runs `.github/workflows/ci.yml`'s jobs: `test` (build + full
 .NET suite with the 90% coverage gate), `perf` (the performance guards above),
-`e2e` (the Playwright suite, headless), and `package-dry-run` (actually runs
+`e2e` (the Playwright suite, headless), `package-install-e2e` (builds the `.deb`, installs it,
+and drives the extension against the packaged host), and `package-dry-run` (actually runs
 `scripts/package-extension.sh` and uploads the resulting zip). That last job exists because the release pipeline below
 (`release-candidate.yml`, `release-extension.yml`) only triggers on merges to `main` or
 published Releases — without a PR-time dry run, a regression in the packaging script
@@ -265,15 +306,17 @@ script — everything in one download. Unzip it and follow the included `INSTALL
    folder. Note the extension ID.
 2. Register the host (auto-detects the bundled `host/`):
    `./scripts/install-host.sh <extension-id>` (Linux/macOS) or
-   `.\scripts\install-host.ps1 -ExtensionId <extension-id>` (Windows).
+   `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-host.ps1 -ExtensionId <extension-id>`
+   (Windows — see [why the policy flag](#why-these-commands-set-an-execution-policy)).
 3. Restart the browser.
 
 ### System-wide: the OS installer packages (`.deb` / `.rpm` / Arch / `.msi`)
 
 Every [release](../../releases) also attaches native-host installer packages that put the
 self-contained host under `/opt/pdf-editor-host` (Linux) or *Program Files* (Windows) and
-register it **system-wide** for Chrome, Chromium, Edge, Brave, Vivaldi, and Opera. They only
-install the **native host** — you still get the extension from the Chrome Web Store.
+register it **system-wide** for Chrome, Chromium, Edge, Brave, Vivaldi, and Opera — including
+their beta and dev channels. They only install the **native host** — you still get the extension
+from the Chrome Web Store.
 
 ```bash
 sudo apt install ./pdf-editor-host_<version>_amd64.deb          # Debian / Ubuntu
@@ -281,6 +324,103 @@ sudo dnf install ./pdf-editor-host-<version>-1.x86_64.rpm       # Fedora / RHEL 
 sudo pacman -U ./pdf-editor-host-<version>-1-x86_64.pkg.tar.zst # Arch
 # Windows: double-click the .msi, or  msiexec /i pdf-editor-host-<version>-x64.msi
 ```
+
+Each of these packages also gives you a way to check the host independently of any browser — this
+is the first thing to try if the extension says the host is unavailable. On Linux the package puts
+the host on your `PATH`; on Windows it lands next to the installed files:
+
+```bash
+pdf-editor-host --diagnostics     # Linux: prints version, runtime, OS and whether OCR is available
+```
+
+```powershell
+# Two roots, because both hold real installs: an MSI built before the `-arch x64` fix was a 32-bit
+# package, which Windows Installer redirects to "C:\Program Files (x86)".
+$hostDir = "$env:ProgramFiles\PDF Editor Host","${env:ProgramFiles(x86)}\PDF Editor Host" |
+  Where-Object { Test-Path $_ } | Select-Object -First 1
+& "$hostDir\PdfEditor.NativeHost.exe" --diagnostics   # Windows
+```
+
+#### Re-registering per-user (Windows)
+
+The MSI writes machine-wide (`HKLM`) registry values pinned to the Web Store extension ID. It also
+installs `register-host.ps1` beside the host, which writes per-user (`HKCU`) values instead —
+Chromium reads `HKCU` first, so this overrides the MSI's registration without disturbing it. That
+is what you need for a developer-mode extension, whose ID is different:
+
+```powershell
+$hostDir = "$env:ProgramFiles\PDF Editor Host","${env:ProgramFiles(x86)}\PDF Editor Host" |
+  Where-Object { Test-Path $_ } | Select-Object -First 1
+$reg = "$hostDir\register-host.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File $reg -ExtensionId <your-extension-id>
+powershell -NoProfile -ExecutionPolicy Bypass -File $reg -List        # show what it would write
+powershell -NoProfile -ExecutionPolicy Bypass -File $reg -Uninstall   # drop the per-user values
+```
+
+##### Why these commands set an execution policy
+
+Every PowerShell command in this README launches the script through
+`powershell -NoProfile -ExecutionPolicy Bypass -File <script>` rather than invoking it directly as
+`.\register-host.ps1` or `& "...\register-host.ps1"`. Windows *client* editions ship with the
+execution policy set to `Restricted`, which refuses to run **any** `.ps1` file — so the direct form
+fails for most users with `cannot be loaded because running scripts is disabled on this system`,
+before a single line of the script executes. `-NoProfile` additionally keeps a user's profile
+script from changing what the registration sees.
+
+The flag only relaxes the policy for that one child process; it does not change the machine's
+setting. If your organisation enforces the policy through Group Policy, `-ExecutionPolicy Bypass`
+is ignored by design — ask an administrator, or run the equivalent registry commands by hand with
+`register-host.ps1 -List` as the reference for what they should contain.
+
+Unlike Linux, there are no per-channel registry keys to worry about: the key a Chromium build reads
+on Windows is a compile-time constant with no channel in it, so Chrome Beta, Dev and Canary all read
+the same `SOFTWARE\Google\Chrome\NativeMessagingHosts` key that stable does.
+
+#### Snap and flatpak browsers
+
+A snap- or flatpak-packaged browser runs sandboxed and **cannot see `/etc`**, so the system-wide
+registration never reaches it. The packages ship a helper that registers the host inside your own
+user (and sandbox) configuration instead:
+
+```bash
+pdf-editor-host-register          # registers for every browser this user has, snap/flatpak included
+pdf-editor-host-register --list   # show where it would write, without writing
+```
+
+For a flatpak browser you also have to let it reach the host binary, once:
+
+```bash
+flatpak override --user --filesystem=/opt/pdf-editor-host:ro com.google.Chrome
+```
+
+Only `/opt` is granted, and the manifest `pdf-editor-host-register` writes for a flatpak browser
+names `/opt/pdf-editor-host/PdfEditor.NativeHost` rather than the `/usr/bin/pdf-editor-host`
+symlink every other browser gets. Flatpak reserves `/usr` (along with `/etc`, `/app`, `/dev` and
+`/proc`): the sandbox has its own, `flatpak override --filesystem=/usr/bin/pdf-editor-host` is
+refused with `Path "/usr" is reserved by Flatpak`, and even `--filesystem=host` puts the host
+system's `/usr` under `/run/host/usr`. A flatpak browser simply does not have
+`/usr/bin/pdf-editor-host` to launch.
+
+#### If the host still isn't picked up
+
+The extension's options page tells you *which* of the three things went wrong and what to do
+about it, because the browser's own message (`Specified native messaging host not found.`) is the
+same for all of them:
+
+| What the options page says | What it means | Fix |
+| --- | --- | --- |
+| not installed for this browser | no manifest in any directory this browser reads | install the package for your distro; for a snap/flatpak browser run `pdf-editor-host-register` |
+| does not allow this extension | a host is registered, but its `allowed_origins` names a different extension ID | `pdf-editor-host-register --extension-id <your-extension-id>` (Linux) or `register-host.ps1 -ExtensionId <your-extension-id>` (Windows, via the `powershell -ExecutionPolicy Bypass -File` form below) |
+| does not allow this extension, on the **published** build | a *stale per-user* manifest is being read instead of the package's — Chromium reads `~/.config/...` before `/etc`, so an earlier `install-host.sh <old-id>` keeps winning | `pdf-editor-host-register --uninstall` (Linux) or `register-host.ps1 -Uninstall` (Windows), then restart the browser |
+| on Windows the host is in `Program Files (x86)`, not `Program Files` | an MSI built before the `-arch x64` fix was a 32-bit package, so Windows Installer redirected it there and put its registry keys under `WOW6432Node` | nothing, unless you want to: the host works there, and every command above finds either root. To move it, uninstall from *Apps & features* and install an MSI built after that fix |
+| installed but did not start | the host was launched and exited immediately | run `pdf-editor-host --diagnostics`; a self-contained .NET build needs the system ICU and OpenSSL libraries (`sudo apt install libicu-dev libssl3`) |
+| connected, but the host is v*x* and this extension is v*y* | the host connects fine but is from a different release, so anything added since it was built fails or silently does nothing | install the package matching the extension's version (the guidance panel gives the command); if the *extension* is the older half, update it at `chrome://extensions` |
+
+The version check compares major and minor only. A patch or build difference is not flagged — a
+banner in front of everyone one hotfix behind is a banner people learn to ignore.
+
+Installing the `.deb`/`.rpm`/Arch package runs the same self-test and prints the same warning, so
+a missing runtime library is reported at install time rather than discovered in the browser.
 
 > [!IMPORTANT]
 > These packages pin the host's `allowed_origins` to the **published Chrome Web Store
@@ -292,12 +432,23 @@ sudo pacman -U ./pdf-editor-host-<version>-1-x86_64.pkg.tar.zst # Arch
 > not match and the host connection is refused ("Specified native messaging host not found"
 > or a rejected connection). Two ways to fix it:
 >
-> 1. **Re-register per-user** (no rebuild): after installing the package, run the user-level
->    installer with your unpacked extension's ID. It writes a per-user manifest that takes
->    precedence over the package's system-wide one:
+> 1. **Re-register per-user** (no rebuild): after installing the package, register the host
+>    against your unpacked extension's ID. A per-user manifest takes precedence over the
+>    package's system-wide one:
 >    ```bash
->    ./scripts/install-host.sh <your-extension-id>            # Linux / macOS
->    .\scripts\install-host.ps1 -ExtensionId <your-extension-id>  # Windows (PowerShell)
+>    pdf-editor-host-register --extension-id <your-extension-id>   # Linux, from the package
+>    ./scripts/install-host.sh <your-extension-id>                 # Linux / macOS, from a checkout
+>    ```
+>    ```powershell
+>    # Windows, from the MSI. Two roots, because an MSI built before the `-arch x64` fix
+>    # installs to "C:\Program Files (x86)".
+>    $hostDir = "$env:ProgramFiles\PDF Editor Host","${env:ProgramFiles(x86)}\PDF Editor Host" |
+>      Where-Object { Test-Path $_ } | Select-Object -First 1
+>    powershell -NoProfile -ExecutionPolicy Bypass -File `
+>      "$hostDir\register-host.ps1" -ExtensionId <your-extension-id>
+>    # Windows, from a checkout or an unzipped bundle:
+>    powershell -NoProfile -ExecutionPolicy Bypass -File `
+>      .\scripts\install-host.ps1 -ExtensionId <your-extension-id>
 >    ```
 > 2. **Rebuild the package** pinned to your ID:
 >    `CHROME_EXTENSION_ID=<your-extension-id> ./scripts/package-deb.sh` (or
@@ -322,12 +473,13 @@ sudo pacman -U ./pdf-editor-host-<version>-1-x86_64.pkg.tar.zst # Arch
    ./scripts/install-host.sh <extension-id>
 
    # Windows (PowerShell)
-   .\scripts\install-host.ps1 -ExtensionId <extension-id>
+   powershell -NoProfile -ExecutionPolicy Bypass -File `
+     .\scripts\install-host.ps1 -ExtensionId <extension-id>
    ```
 
    By default this **downloads the prebuilt bundle** from the latest [release](../../releases)
-   and registers the self-contained host it contains for Chrome, Chromium, Edge, and Brave —
-   no .NET SDK needed. Contributors can add `--from-source` (bash) / `-FromSource` (PowerShell)
+   and registers the self-contained host it contains for Chrome, Chromium, Edge, Brave, Vivaldi
+   and Opera — no .NET SDK needed. Contributors can add `--from-source` (bash) / `-FromSource` (PowerShell)
    to build the host locally with `dotnet publish`, or `--host-dir`/`-HostDir` to point at an
    already-extracted host.
 4. Restart the browser. The extension's options page shows the host connection status.

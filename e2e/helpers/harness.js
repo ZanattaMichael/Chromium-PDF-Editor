@@ -29,19 +29,97 @@ function buildPrerequisites() {
   ensureIcons();
 }
 
-// The system-wide manifest directories a Chromium build actually reads on Linux. Playwright ships
-// an unbranded Chromium, which reads /etc/chromium; /etc/opt/chrome is what a branded Chrome reads
-// and is listed so an installed package is detected whichever binary the run picked up. These are
-// two of the directories the .deb/.rpm/Arch packages write to (scripts/linux-manifest-dirs.sh).
-const SYSTEM_MANIFEST_DIRS = [
+const HOST_MANIFEST = 'com.pdfeditor.host.json';
+
+/**
+ * The browser this suite drives, as a path — the same one launchExtension() hands Playwright when
+ * it can, because the tests below need to inspect the binary and not just run it.
+ *
+ * Returns null when the browser is left to Playwright to resolve and none of its downloads can be
+ * found, which is not fatal: only the system-host checks need the path.
+ */
+function browserExecutablePath() {
+  const explicit = process.env.PDF_EDITOR_CHROMIUM;
+  if (explicit) return explicit;
+  // The container images this repo is developed in ship a browser here.
+  const preinstalled = '/opt/pw-browsers/chromium';
+  if (fs.existsSync(preinstalled)) return preinstalled;
+  // Playwright's own download. The directory inside differs between the Chromium builds it used
+  // to ship (chrome-linux/) and the Chrome for Testing builds it ships now (chrome-linux64/).
+  const cache = process.env.PLAYWRIGHT_BROWSERS_PATH
+    || path.join(os.homedir(), '.cache', 'ms-playwright');
+  if (!fs.existsSync(cache)) return null;
+  // Newest revision first: an image that has accumulated several keeps the one Playwright would
+  // resolve today. 'chromium_headless_shell-*' is excluded by the prefix — it ignores extensions.
+  const revisions = fs.readdirSync(cache)
+    .filter((d) => /^chromium-\d+$/.test(d))
+    .sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]));
+  for (const entry of revisions) {
+    for (const layout of ['chrome-linux64', 'chrome-linux']) {
+      const exe = path.join(cache, entry, layout, 'chrome');
+      if (fs.existsSync(exe)) return exe;
+    }
+  }
+  return null;
+}
+
+/**
+ * The system-wide manifest directory a particular browser binary reads, read out of the binary.
+ *
+ * It has to be discovered rather than assumed, because it is compiled in and differs per build
+ * (chrome/common/chrome_paths.cc): branded Chrome reads /etc/opt/chrome, Chrome for Testing —
+ * which is what Playwright downloads — reads /etc/opt/chrome_for_testing, and an unbranded
+ * Chromium reads /etc/chromium. Assuming the wrong one is invisible from the outside: the browser
+ * answers "Specified native messaging host not found", exactly as it would for a package that was
+ * never installed. That is precisely how this suite came to pass against a developer's Chromium
+ * and fail against CI's Chrome for Testing.
+ *
+ * Falls back to the directories the common browsers read if the binary cannot be scanned, so a
+ * platform where this trick does not work degrades to the old assumption rather than failing.
+ */
+const FALLBACK_MANIFEST_DIRS = [
   '/etc/chromium/native-messaging-hosts',
   '/etc/opt/chrome/native-messaging-hosts',
+  '/etc/opt/chrome_for_testing/native-messaging-hosts',
 ];
+
+const MANIFEST_DIR_PATTERN = /\/etc\/[A-Za-z0-9_./-]*native-messaging-hosts/g;
+
+// Scanning a few hundred MB takes a few seconds, and the answer cannot change while the tests run.
+const scannedDirs = new Map();
+
+function systemManifestDirs(executable = browserExecutablePath()) {
+  if (!executable || !fs.existsSync(executable)) return FALLBACK_MANIFEST_DIRS;
+  const cached = scannedDirs.get(executable);
+  if (cached) return cached;
+  // Read in chunks: the binary is a few hundred MB, and the string is a plain literal in it.
+  // Consecutive chunks overlap so a path split across a boundary is still matched.
+  const CHUNK = 8 << 20;
+  const OVERLAP = 256;
+  const found = new Set();
+  const fd = fs.openSync(executable, 'r');
+  try {
+    const buf = Buffer.alloc(CHUNK);
+    let carry = '';
+    for (;;) {
+      const read = fs.readSync(fd, buf, 0, CHUNK, null);
+      if (read <= 0) break;
+      const text = carry + buf.toString('latin1', 0, read);
+      for (const [match] of text.matchAll(MANIFEST_DIR_PATTERN)) found.add(match);
+      carry = text.slice(-OVERLAP);
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  const dirs = found.size > 0 ? [...found] : FALLBACK_MANIFEST_DIRS;
+  scannedDirs.set(executable, dirs);
+  return dirs;
+}
 
 /** Paths of any system-wide (package-installed) registrations of our host. */
 function systemHostManifests() {
-  return SYSTEM_MANIFEST_DIRS
-    .map((dir) => path.join(dir, 'com.pdfeditor.host.json'))
+  return [...new Set([...systemManifestDirs(), ...FALLBACK_MANIFEST_DIRS])]
+    .map((dir) => path.join(dir, HOST_MANIFEST))
     .filter((file) => fs.existsSync(file));
 }
 
@@ -65,18 +143,32 @@ function systemHostManifests() {
  *   turns the package suite into a test of nothing.
  */
 async function launchExtension({ host: hostSource = 'profile' } = {}) {
-  const systemManifests = systemHostManifests();
+  // Only the two host sources that depend on what is installed system-wide look; the default
+  // registers its own host into the profile and would just be paying for the scan.
+  const systemManifests = hostSource === 'profile' ? [] : systemHostManifests();
   if (hostSource === 'none' && systemManifests.length > 0) {
     throw new Error(
       'This suite needs a browser with no native host registered anywhere, but the host is '
       + `installed system-wide (${systemManifests.join(', ')}). Remove the package first:\n`
       + '    sudo dpkg -r pdf-editor-host');
   }
+  const browserDirs = hostSource === 'profile' ? FALLBACK_MANIFEST_DIRS : systemManifestDirs();
   if (hostSource === 'system' && systemManifests.length === 0) {
     throw new Error(
       'This suite tests the host as the OS package registers it, but no system-wide manifest is '
-      + `present (looked in ${SYSTEM_MANIFEST_DIRS.join(', ')}). Install the package first — the `
+      + `present (looked in ${browserDirs.join(', ')}). Install the package first — the `
       + 'package suite\'s global setup does this for you.');
+  }
+  // Being installed somewhere is not enough: it has to be installed where *this* browser looks.
+  // Without this the whole suite fails four tests deep with "native messaging host not found",
+  // which reads as a broken package rather than a browser the packages do not register for.
+  if (hostSource === 'system' && !browserDirs.some(
+    (dir) => fs.existsSync(path.join(dir, HOST_MANIFEST)))) {
+    throw new Error(
+      `The package is installed (${systemManifests.join(', ')}), but ${browserExecutablePath()} `
+      + `reads ${browserDirs.join(', ')}, where it did not register. Add that directory to `
+      + 'scripts/linux-manifest-dirs.sh if the browsers it belongs to should be supported, or '
+      + 'point PDF_EDITOR_CHROMIUM at a browser the packages do register for.');
   }
 
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf-editor-e2e-'));
@@ -127,6 +219,9 @@ async function launchExtension({ host: hostSource = 'profile' } = {}) {
     context,
     extensionId,
     userDataDir,
+    // Where this browser reads its system-wide registrations, so the package suite can assert
+    // against the manifest the browser will actually open rather than one it hopes it reads.
+    systemManifestDirs: browserDirs,
     // A getter, not the worker captured above: an MV3 service worker is torn down when it goes
     // idle and comes back as a *new* object, and evaluating on the dead one throws.
     get worker() { return context.serviceWorkers()[0] ?? worker; },
@@ -140,5 +235,6 @@ async function launchExtension({ host: hostSource = 'profile' } = {}) {
 }
 
 module.exports = {
-  buildPrerequisites, ensureIcons, launchExtension, systemHostManifests, REPO_ROOT,
+  browserExecutablePath, buildPrerequisites, ensureIcons, launchExtension, systemHostManifests,
+  systemManifestDirs, HOST_MANIFEST, REPO_ROOT,
 };

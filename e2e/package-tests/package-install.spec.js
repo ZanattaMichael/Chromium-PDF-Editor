@@ -21,10 +21,9 @@ const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { launchExtension, REPO_ROOT } = require('../helpers/harness');
+const { launchExtension, HOST_MANIFEST, REPO_ROOT } = require('../helpers/harness');
 const { buildPdf } = require('../helpers/pdf');
 
-const MANIFEST = '/etc/chromium/native-messaging-hosts/com.pdfeditor.host.json';
 const LAUNCH_PATH = '/usr/bin/pdf-editor-host';
 const INSTALL_DIR = '/opt/pdf-editor-host';
 
@@ -45,9 +44,21 @@ test.afterAll(async () => {
 test('the package pins the host to the ID the browser gives this extension', () => {
   // If these ever diverge, every assertion below fails with "host not found" and no hint as to
   // why, so it is worth naming the mismatch directly.
-  const manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
-  expect(manifest.allowed_origins).toContain(`chrome-extension://${ext.extensionId}/`);
-  expect(manifest.path).toBe(LAUNCH_PATH);
+  //
+  // Read from the directory *this* browser reads, not a directory the package happens to write:
+  // which one that is is compiled into the binary and differs between Chromium, Chrome and the
+  // Chrome for Testing build Playwright downloads (see systemManifestDirs in helpers/harness.js).
+  const manifests = ext.systemManifestDirs
+    .map((dir) => path.join(dir, HOST_MANIFEST))
+    .filter((file) => fs.existsSync(file));
+  expect(manifests, `the package registered nothing in ${ext.systemManifestDirs.join(', ')}`)
+    .not.toHaveLength(0);
+
+  for (const file of manifests) {
+    const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+    expect(manifest.allowed_origins, file).toContain(`chrome-extension://${ext.extensionId}/`);
+    expect(manifest.path, file).toBe(LAUNCH_PATH);
+  }
 });
 
 test('the extension connects to the packaged host and reports it as the packaged one', async () => {

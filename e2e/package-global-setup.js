@@ -9,10 +9,10 @@
 const { ensureIcons } = require('./helpers/harness');
 const { installDeb, removeDeb } = require('./helpers/deb-package');
 
-module.exports = async () => {
+module.exports = async function installPackageForSuite() {
   ensureIcons();
   installDeb();
   // Playwright calls the returned function after the last test, pass or fail, so a red run still
   // leaves the machine as it found it.
-  return () => { removeDeb(); };
+  return function removePackageAfterSuite() { removeDeb(); };
 };

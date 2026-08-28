@@ -40,7 +40,7 @@ export function parseVersion(raw) {
   const trimmed = raw.trim();
   if (trimmed === '') return null;
   const parts = trimmed.split('.');
-  const nums = parts.map((p) => (/^\d+$/.test(p) ? Number(p) : NaN));
+  const nums = parts.map((p) => (/^\d+$/.test(p) ? Number(p) : Number.NaN));
   if (nums.some(Number.isNaN)) return null;
   return nums;
 }

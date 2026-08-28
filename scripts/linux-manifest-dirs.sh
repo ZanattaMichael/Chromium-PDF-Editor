@@ -27,6 +27,13 @@ LINUX_MANIFEST_DIRS=(
   "etc/chromium/native-messaging-hosts"             # Chromium (Debian/Fedora/Arch packages)
   "etc/chromium-browser/native-messaging-hosts"     # older Ubuntu/Debian chromium-browser package
 
+  # --- Chrome for Testing: its own branding, and so its own product directory
+  # (GOOGLE_CHROME_FOR_TESTING_BRANDING in chrome_paths.cc). This is the build Playwright and
+  # Puppeteer download and drive, which makes it the browser most likely to be pointed at a
+  # freshly installed host on a developer machine -- including by this project's own
+  # package-install e2e suite, which caught the omission.
+  "etc/opt/chrome_for_testing/native-messaging-hosts"
+
   # --- Microsoft Edge.
   "etc/opt/edge/native-messaging-hosts"             # Edge stable
   "etc/opt/edge-beta/native-messaging-hosts"        # Edge Beta

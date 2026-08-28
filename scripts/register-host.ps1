@@ -71,12 +71,23 @@ if ($ExtensionId -cnotmatch '^[a-p]{32}$') {
 # ------------------------------------------------------------------- host path
 
 if (-not $HostPath) {
+    # Both Program Files roots, because both hold real installs. `wix build` defaults to -arch x86,
+    # and until scripts/package-msi.ps1 passed -arch x64 the MSI was a 32-bit package -- which
+    # Windows Installer redirects to "C:\Program Files (x86)". Anyone holding one of those MSIs has
+    # the host there, and they are exactly the people who need this script to find it.
+    #
+    # ${env:ProgramFiles(x86)} is how PowerShell names a variable whose name contains parentheses.
+    # It is unset on a 32-bit Windows, and equal to $env:ProgramFiles when a 32-bit PowerShell runs
+    # on a 64-bit one, so the list is filtered for empties and de-duplicated before use -- Join-Path
+    # throws on a null path, and $ErrorActionPreference is Stop.
+    $programFilesRoots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) |
+        Where-Object { $_ } | Select-Object -Unique
     $candidates = @(
         # This script installed beside the host by the MSI.
         (Join-Path $PSScriptRoot "PdfEditor.NativeHost.exe"),
         # This script running from a release bundle's scripts\ folder, host\ alongside it.
-        (Join-Path (Split-Path -Parent $PSScriptRoot) "host\PdfEditor.NativeHost.exe"),
-        (Join-Path $env:ProgramFiles "PDF Editor Host\PdfEditor.NativeHost.exe"),
+        (Join-Path (Split-Path -Parent $PSScriptRoot) "host\PdfEditor.NativeHost.exe")
+    ) + @($programFilesRoots | ForEach-Object { Join-Path $_ "PDF Editor Host\PdfEditor.NativeHost.exe" }) + @(
         (Join-Path $env:LOCALAPPDATA "PdfEditorHost\PdfEditor.NativeHost.exe")
     )
     foreach ($candidate in $candidates) {

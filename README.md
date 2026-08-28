@@ -334,7 +334,11 @@ pdf-editor-host --diagnostics     # Linux: prints version, runtime, OS and wheth
 ```
 
 ```powershell
-& "$env:ProgramFiles\PDF Editor Host\PdfEditor.NativeHost.exe" --diagnostics   # Windows
+# Two roots, because both hold real installs: an MSI built before the `-arch x64` fix was a 32-bit
+# package, which Windows Installer redirects to "C:\Program Files (x86)".
+$hostDir = "$env:ProgramFiles\PDF Editor Host","${env:ProgramFiles(x86)}\PDF Editor Host" |
+  Where-Object { Test-Path $_ } | Select-Object -First 1
+& "$hostDir\PdfEditor.NativeHost.exe" --diagnostics   # Windows
 ```
 
 #### Re-registering per-user (Windows)
@@ -345,7 +349,9 @@ Chromium reads `HKCU` first, so this overrides the MSI's registration without di
 is what you need for a developer-mode extension, whose ID is different:
 
 ```powershell
-$reg = "$env:ProgramFiles\PDF Editor Host\register-host.ps1"
+$hostDir = "$env:ProgramFiles\PDF Editor Host","${env:ProgramFiles(x86)}\PDF Editor Host" |
+  Where-Object { Test-Path $_ } | Select-Object -First 1
+$reg = "$hostDir\register-host.ps1"
 powershell -NoProfile -ExecutionPolicy Bypass -File $reg -ExtensionId <your-extension-id>
 powershell -NoProfile -ExecutionPolicy Bypass -File $reg -List        # show what it would write
 powershell -NoProfile -ExecutionPolicy Bypass -File $reg -Uninstall   # drop the per-user values
@@ -399,7 +405,7 @@ same for all of them:
 | not installed for this browser | no manifest in any directory this browser reads | install the package for your distro; for a snap/flatpak browser run `pdf-editor-host-register` |
 | does not allow this extension | a host is registered, but its `allowed_origins` names a different extension ID | `pdf-editor-host-register --extension-id <your-extension-id>` (Linux) or `register-host.ps1 -ExtensionId <your-extension-id>` (Windows, via the `powershell -ExecutionPolicy Bypass -File` form below) |
 | does not allow this extension, on the **published** build | a *stale per-user* manifest is being read instead of the package's — Chromium reads `~/.config/...` before `/etc`, so an earlier `install-host.sh <old-id>` keeps winning | `pdf-editor-host-register --uninstall` (Linux) or `register-host.ps1 -Uninstall` (Windows), then restart the browser |
-| on Windows, the paths below do not exist | an MSI built before the `-arch x64` fix was a 32-bit package, so Windows Installer redirected it to `C:\Program Files (x86)\PDF Editor Host` and put its registry keys under `WOW6432Node` | the host still works there; to move it to `C:\Program Files`, uninstall from *Apps & features* and install an MSI built after that fix |
+| on Windows the host is in `Program Files (x86)`, not `Program Files` | an MSI built before the `-arch x64` fix was a 32-bit package, so Windows Installer redirected it there and put its registry keys under `WOW6432Node` | nothing, unless you want to: the host works there, and every command above finds either root. To move it, uninstall from *Apps & features* and install an MSI built after that fix |
 | installed but did not start | the host was launched and exited immediately | run `pdf-editor-host --diagnostics`; a self-contained .NET build needs the system ICU and OpenSSL libraries (`sudo apt install libicu-dev libssl3`) |
 | connected, but the host is v*x* and this extension is v*y* | the host connects fine but is from a different release, so anything added since it was built fails or silently does nothing | install the package matching the extension's version (the guidance panel gives the command); if the *extension* is the older half, update it at `chrome://extensions` |
 
@@ -427,9 +433,12 @@ a missing runtime library is reported at install time rather than discovered in 
 >    ./scripts/install-host.sh <your-extension-id>                 # Linux / macOS, from a checkout
 >    ```
 >    ```powershell
->    # Windows, from the MSI:
+>    # Windows, from the MSI. Two roots, because an MSI built before the `-arch x64` fix
+>    # installs to "C:\Program Files (x86)".
+>    $hostDir = "$env:ProgramFiles\PDF Editor Host","${env:ProgramFiles(x86)}\PDF Editor Host" |
+>      Where-Object { Test-Path $_ } | Select-Object -First 1
 >    powershell -NoProfile -ExecutionPolicy Bypass -File `
->      "$env:ProgramFiles\PDF Editor Host\register-host.ps1" -ExtensionId <your-extension-id>
+>      "$hostDir\register-host.ps1" -ExtensionId <your-extension-id>
 >    # Windows, from a checkout or an unzipped bundle:
 >    powershell -NoProfile -ExecutionPolicy Bypass -File `
 >      .\scripts\install-host.ps1 -ExtensionId <your-extension-id>

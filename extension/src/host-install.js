@@ -31,6 +31,20 @@ export const HOST_STATE = {
 // Chrome/Chromium, Edge and Brave all use the Chromium strings; the Firefox wording is included
 // because the same module is cheap to keep portable, and matching is substring-based so a browser
 // that decorates the message ("... Error: ...") still classifies.
+// Resolves the host's install directory into $hostDir before any command uses it.
+//
+// Naming a single Program Files root is wrong on a real share of machines. `wix build` defaults to
+// -arch x86, and until scripts/package-msi.ps1 passed -arch x64 the MSI was a 32-bit package --
+// which Windows Installer redirects to "C:\\Program Files (x86)". Anyone who installed one of
+// those has the host there, and "$env:ProgramFiles\\PDF Editor Host" names a directory they do not
+// have. They are also precisely the people reading this guidance, so it has to find either.
+//
+// A plain JS string, not a template literal: ${env:ProgramFiles(x86)} is PowerShell's syntax for a
+// variable whose name contains parentheses, and inside a template literal the ${ would be read as
+// JS interpolation.
+const WINDOWS_HOST_DIR = '$hostDir = "$env:ProgramFiles\\PDF Editor Host",'
+  + '"${env:ProgramFiles(x86)}\\PDF Editor Host" | ?{ Test-Path $_ } | select -First 1\n';
+
 const PATTERNS = [
   { state: HOST_STATE.MISSING, pattern: /not found|not registered|no such native application|not installed/i },
   { state: HOST_STATE.FORBIDDEN, pattern: /forbidden|not allowed|access to the specified native messaging host/i },
@@ -90,7 +104,8 @@ export function installSteps(platform) {
       {
         text: 'Check the install worked — this prints the host’s version and environment '
           + '(in PowerShell):',
-        code: String.raw`& "$env:ProgramFiles\PDF Editor Host\PdfEditor.NativeHost.exe" --diagnostics`,
+        code: WINDOWS_HOST_DIR
+          + String.raw`& "$hostDir\PdfEditor.NativeHost.exe" --diagnostics`,
       },
       { text: 'Close every window of this browser and start it again.' },
     ];
@@ -161,8 +176,9 @@ function reRegisterStep(platform, extensionId) {
         + '(in PowerShell):',
       // Launched through powershell.exe with an explicit policy: Windows client machines default
       // to a Restricted execution policy, under which invoking the shipped .ps1 directly fails.
-      code: 'powershell -NoProfile -ExecutionPolicy Bypass -File '
-        + String.raw`"$env:ProgramFiles\PDF Editor Host\register-host.ps1" -ExtensionId ${extensionId}`,
+      code: WINDOWS_HOST_DIR
+        + 'powershell -NoProfile -ExecutionPolicy Bypass -File '
+        + String.raw`"$hostDir\register-host.ps1" -ExtensionId ${extensionId}`,
     };
   }
   if (platform === 'linux') {
@@ -214,8 +230,9 @@ function dropUserRegistrationStep(platform) {
     return {
       text: 'Remove the per-user (HKCU) registrations, leaving the installer’s machine-wide ones '
         + 'in place (in PowerShell):',
-      code: 'powershell -NoProfile -ExecutionPolicy Bypass -File '
-        + String.raw`"$env:ProgramFiles\PDF Editor Host\register-host.ps1" -Uninstall`,
+      code: WINDOWS_HOST_DIR
+        + 'powershell -NoProfile -ExecutionPolicy Bypass -File '
+        + String.raw`"$hostDir\register-host.ps1" -Uninstall`,
     };
   }
   if (platform === 'linux') {
@@ -235,7 +252,8 @@ function diagnoseStep(platform) {
   if (platform === 'windows') {
     return {
       text: 'Run the host yourself to see why it fails (in PowerShell):',
-      code: String.raw`& "$env:ProgramFiles\PDF Editor Host\PdfEditor.NativeHost.exe" --diagnostics`,
+      code: WINDOWS_HOST_DIR
+        + String.raw`& "$hostDir\PdfEditor.NativeHost.exe" --diagnostics`,
     };
   }
   if (platform === 'linux') {

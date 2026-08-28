@@ -132,7 +132,7 @@ test('Windows advice only names paths an MSI install actually has', () => {
   const forbidden = hostInstallGuideLines(hostInstallGuide({
     state: HOST_STATE.FORBIDDEN, platform: 'windows', extensionId: DEV_EXTENSION_ID,
   })).join('\n');
-  assert.match(forbidden, /PDF Editor Host\\register-host\.ps1" -ExtensionId abcdefghijklmnopabcdefghijklmnop/);
+  assert.match(forbidden, /"\$hostDir\\register-host\.ps1" -ExtensionId abcdefghijklmnopabcdefghijklmnop/);
 });
 
 // Windows client editions default to a Restricted execution policy, under which running a .ps1
@@ -153,6 +153,28 @@ test('every PowerShell command sets an execution policy', () => {
             `${state}/${platform}: a .ps1 is invoked without an execution-policy bypass: ${line}`);
         }
       }
+    }
+  }
+});
+
+// `wix build` defaults to -arch x86, and a 32-bit MSI is redirected by Windows Installer into
+// "C:\\Program Files (x86)". Anyone who installed one of those has the host there -- and they are
+// exactly the population this guidance is shown to, so a command that names $env:ProgramFiles
+// outright points them at a directory they do not have. Every Windows command must instead resolve
+// the directory first and use $hostDir. Swept over every state so a step added later cannot
+// quietly reintroduce a single hardcoded root.
+test('no Windows command hardcodes one Program Files root', () => {
+  for (const state of Object.values(HOST_STATE)) {
+    const guide = hostInstallGuide({ state, platform: 'windows', extensionId: DEV_EXTENSION_ID });
+    for (const step of guide.steps) {
+      const code = step.code ?? '';
+      if (!code.includes('PDF Editor Host')) continue;
+      assert.doesNotMatch(
+        code, /\$env:ProgramFiles\\PDF Editor Host\\/,
+        `${state}: names $env:ProgramFiles directly instead of resolving $hostDir: ${code}`);
+      assert.match(
+        code, /^\$hostDir = .*ProgramFiles\(x86\).*Test-Path/m,
+        `${state}: uses "PDF Editor Host" without the $hostDir discovery line: ${code}`);
     }
   }
 });

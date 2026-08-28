@@ -189,9 +189,12 @@ function listManifestsStep(platform) {
     return {
       text: 'List every registration for this host and the ID each one allows. HKCU wins over '
         + 'HKLM, so a per-user value here is what the browser is actually reading (in PowerShell):',
+      // String.raw only on the segment that carries a backslash (\SOFTWARE); the other two are
+      // plain templates. PowerShell's own $_ and $( ... ) are not JS interpolation, so they pass
+      // through untouched -- but a future edit must not introduce a literal ${ here.
       code: String.raw`'HKCU:','HKLM:' | %{ gci "$_\SOFTWARE" -Recurse -Include NativeMessagingHosts `
-        + String.raw`-EA 0 } | gci -EA 0 | ?{ $_.PSChildName -eq 'com.pdfeditor.host' } | %{ `
-        + String.raw`$p = (gp $_.PSPath).'(default)'; "$($_.Name) -> $p"; gc $p -EA 0 | sls chrome-extension }`,
+        + `-EA 0 } | gci -EA 0 | ?{ $_.PSChildName -eq 'com.pdfeditor.host' } | %{ `
+        + `$p = (gp $_.PSPath).'(default)'; "$($_.Name) -> $p"; gc $p -EA 0 | sls chrome-extension }`,
     };
   }
   return {

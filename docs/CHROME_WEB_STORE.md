@@ -77,10 +77,15 @@ installed and link to the install instructions.
 | `downloads` | Save edited PDFs and the redaction/compliance reports to the user's computer. |
 | `storage` | Persist user preferences (activity-console state, optional Cloudflare credentials) locally. |
 | `contextMenus` | Right-click actions (Edit, Redact, Highlight, etc.) on selected text and pages. |
-| `webNavigation` / `tabs` | Detect when the user navigates to a PDF so the editor can offer to open it, and open the editor in a tab. |
+| `webNavigation` | Detect when the user navigates to a PDF so the editor can offer to open it. One top-frame-only listener, restricted to `.pdf` URLs, and only while the user leaves `autoOpen` on. |
 | `host_permissions: <all_urls>` | PDFs can live on **any** site; the content script must run everywhere to detect them and show the "Edit in PDF Editor" control. It reads only enough to recognise a PDF; it does not collect page content. |
 
-> **Minimise if you can.** `<all_urls>` + `tabs` + `webNavigation` draw the most scrutiny. If the
+> **No `tabs` permission.** `chrome.tabs.create()` and `chrome.tabs.update()` need no permission at
+> all, and the only sensitive `Tab` property the extension reads — `tab.url`, in
+> `extension/src/background.js` — is already populated by the `<all_urls>` host permission. `tabs`
+> was therefore redundant and has been dropped; do not add it back without a call site that needs it.
+
+> **Minimise if you can.** `<all_urls>` + `webNavigation` draw the most scrutiny. If the
 > "detect a PDF on any page" feature can tolerate `activeTab`/narrower matches, consider it — but
 > the current auto-detect-anywhere behaviour does need broad access, so justify it as above.
 

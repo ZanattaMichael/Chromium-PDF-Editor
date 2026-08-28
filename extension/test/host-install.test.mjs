@@ -85,6 +85,33 @@ test('a forbidden host is told to re-register for this extension ID, not to rein
   assert.doesNotMatch(text, /sudo apt install/);
 });
 
+// The published build carries a manifest "key" that forces the pinned ID, so the OS package's own
+// manifest *does* list it. A forbidden result there is a different fault with the same message:
+// some other manifest is being read first. Telling that user their ID is not the pinned one — and
+// handing them a re-register command that writes the very per-user file that is shadowing the
+// package — describes someone else's machine and can entrench the problem.
+test('a forbidden published build is told a stale manifest is shadowing the package', () => {
+  const guide = hostInstallGuide({
+    state: HOST_STATE.FORBIDDEN, platform: 'linux', extensionId: PINNED_EXTENSION_ID,
+  });
+  const text = hostInstallGuideLines(guide).join('\n');
+  assert.match(text, /takes precedence over the system-wide one/);
+  assert.match(text, /pdf-editor-host-register --uninstall/);
+  assert.match(text, /find ~\/\.config/);
+  // The dev-mode fix must not be offered here: re-registering per-user rewrites the shadowing
+  // manifest rather than removing it, and the ID it would pin is the one already allowed.
+  assert.doesNotMatch(text, /--extension-id/);
+});
+
+test('the shadowed-manifest advice is Windows-specific on Windows', () => {
+  const text = hostInstallGuideLines(hostInstallGuide({
+    state: HOST_STATE.FORBIDDEN, platform: 'windows', extensionId: PINNED_EXTENSION_ID,
+  })).join('\n');
+  assert.match(text, /HKCU/);
+  assert.match(text, /register-host\.ps1" -Uninstall/);
+  assert.doesNotMatch(text, /pdf-editor-host-register/);
+});
+
 test('a forbidden host with no known ID still yields a runnable-looking command', () => {
   const text = hostInstallGuideLines(
     hostInstallGuide({ state: HOST_STATE.FORBIDDEN, platform: 'windows' })).join('\n');

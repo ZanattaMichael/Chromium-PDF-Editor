@@ -179,6 +179,54 @@ function reRegisterStep(platform, extensionId) {
   };
 }
 
+// Lists every manifest for this host that the browser might read, per-user ones first. When the
+// package's own registration would have allowed this extension and the browser still says
+// forbidden, some *other* manifest is being read instead, and the only way to see which is to look
+// at the files: Chromium reads the per-user directory in preference to the system-wide one, so a
+// stale per-user manifest left by an earlier install silently wins over a correct package.
+function listManifestsStep(platform) {
+  if (platform === 'windows') {
+    return {
+      text: 'List every registration for this host and the ID each one allows. HKCU wins over '
+        + 'HKLM, so a per-user value here is what the browser is actually reading (in PowerShell):',
+      code: String.raw`'HKCU:','HKLM:' | %{ gci "$_\SOFTWARE" -Recurse -Include NativeMessagingHosts `
+        + String.raw`-EA 0 } | gci -EA 0 | ?{ $_.PSChildName -eq 'com.pdfeditor.host' } | %{ `
+        + String.raw`$p = (gp $_.PSPath).'(default)'; "$($_.Name) -> $p"; gc $p -EA 0 | sls chrome-extension }`,
+    };
+  }
+  return {
+    text: 'List every manifest for this host and the ID each one allows. The per-user copies are '
+      + 'read in preference to the system-wide one, so the first hit is what the browser sees:',
+    code: 'find ~/.config ~/snap ~/.var/app ~/Library/Application\\ Support /etc /etc/opt \\\n'
+      + '     -name com.pdfeditor.host.json 2>/dev/null \\\n'
+      + '  | while read -r f; do echo "== $f"; grep -o "chrome-extension://[a-p]*" "$f"; done',
+  };
+}
+
+// Removes the per-user registrations, so a stale one stops shadowing the package's system-wide
+// manifest. Deliberately separate from re-registering: someone running the published extension
+// against a correctly built package wants the stale file *gone*, not overwritten with the same ID.
+function dropUserRegistrationStep(platform) {
+  if (platform === 'windows') {
+    return {
+      text: 'Remove the per-user (HKCU) registrations, leaving the installer’s machine-wide ones '
+        + 'in place (in PowerShell):',
+      code: 'powershell -NoProfile -ExecutionPolicy Bypass -File '
+        + String.raw`"$env:ProgramFiles\PDF Editor Host\register-host.ps1" -Uninstall`,
+    };
+  }
+  if (platform === 'linux') {
+    return {
+      text: 'Remove the per-user manifests, leaving the package’s system-wide one in place:',
+      code: 'pdf-editor-host-register --uninstall',
+    };
+  }
+  return {
+    text: 'Remove the per-user manifests, leaving any system-wide one in place:',
+    code: './scripts/register-host.sh --uninstall',
+  };
+}
+
 // Where the host lives, so "run it yourself and see the error" is an instruction someone can follow.
 function diagnoseStep(platform) {
   if (platform === 'windows') {
@@ -232,11 +280,32 @@ export function hostInstallGuide({ state, platform, extensionId = '', error = ''
       break;
 
     case HOST_STATE.FORBIDDEN:
+      // Two different faults produce the identical browser message, and the usual advice is wrong
+      // for one of them. If this extension is the pinned Web Store build, the OS package's own
+      // manifest *does* list it -- so the manifest the browser actually read is a different,
+      // staler one. Chromium reads the per-user directory in preference to the system-wide one,
+      // so an earlier `install-host.sh <some-other-id>` keeps winning long after a correct
+      // package is installed, and telling someone to "re-register, your ID is not the pinned
+      // one" misdescribes their machine.
+      if (extensionId && extensionId === PINNED_EXTENSION_ID) {
+        guide.detail = 'This is the published build, and the OS packages pin their manifest to '
+          + `exactly this ID (${extensionId}) — so the manifest the browser read is not the `
+          + 'package’s. A per-user manifest from an earlier install takes precedence over the '
+          + 'system-wide one and keeps being read instead, even after the package is reinstalled.';
+        guide.steps = [
+          listManifestsStep(platform),
+          dropUserRegistrationStep(platform),
+          { text: 'Quit this browser completely and start it again.' },
+        ];
+        break;
+      }
       guide.detail = 'A host is registered, but the manifest’s allowed_origins does not list '
         + `this extension (${extensionId || 'unknown ID'}). The OS packages pin the published Web `
         + 'Store ID, so a developer-mode or self-built extension needs its own registration.';
-      guide.steps = [reRegisterStep(platform, extensionId || '<your-extension-id>')];
-      guide.steps.push({ text: 'Quit this browser completely and start it again.' });
+      guide.steps = [
+        reRegisterStep(platform, extensionId || '<your-extension-id>'),
+        { text: 'Quit this browser completely and start it again.' },
+      ];
       break;
 
     case HOST_STATE.CRASHED:

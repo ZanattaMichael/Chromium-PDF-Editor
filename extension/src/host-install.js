@@ -39,10 +39,12 @@ export const HOST_STATE = {
 // those has the host there, and "$env:ProgramFiles\\PDF Editor Host" names a directory they do not
 // have. They are also precisely the people reading this guidance, so it has to find either.
 //
-// A plain JS string, not a template literal: ${env:ProgramFiles(x86)} is PowerShell's syntax for a
-// variable whose name contains parentheses, and inside a template literal the ${ would be read as
-// JS interpolation.
-const WINDOWS_HOST_DIR = '$hostDir = "$env:ProgramFiles\\PDF Editor Host",'
+// Split across two segments for one reason: ${env:ProgramFiles(x86)} is PowerShell's syntax for a
+// variable whose name contains parentheses, and a template literal -- String.raw included, since it
+// is still a tagged template -- would read that ${ as JS interpolation. So the second segment stays
+// a plain quoted string (it also ends in a real \n, which String.raw could not produce). The first
+// carries only backslashes, so String.raw keeps them unescaped there.
+const WINDOWS_HOST_DIR = String.raw`$hostDir = "$env:ProgramFiles\PDF Editor Host",`
   + '"${env:ProgramFiles(x86)}\\PDF Editor Host" | ?{ Test-Path $_ } | select -First 1\n';
 
 const PATTERNS = [

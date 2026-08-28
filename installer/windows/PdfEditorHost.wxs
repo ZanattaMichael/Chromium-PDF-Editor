@@ -25,6 +25,10 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of the PDF Editor native host is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
+    <!-- 64-bit Program Files. This only resolves as intended when the package itself is 64-bit:
+         `wix build` defaults to -arch x86, and Windows Installer redirects ProgramFiles64Folder
+         to "C:\Program Files (x86)" in a 32-bit package. scripts/package-msi.ps1 therefore passes
+         -arch x64, and scripts/verify-msi.ps1 fails the build if the built MSI is not x64. -->
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="PDF Editor Host" />
     </StandardDirectory>

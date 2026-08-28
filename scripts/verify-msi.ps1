@@ -79,6 +79,39 @@ if ($versionRows.Count -ne 1) {
     Show-Pass "ProductVersion is $($versionRows[0][0])"
 }
 
+# ---------------------------------------------------------------- architecture
+#
+# The single most consequential thing about this package, and the one with no visible symptom at
+# build time. `wix build` defaults to -arch x86, and a 32-bit MSI cannot install into the 64-bit
+# Program Files -- Windows Installer redirects ProgramFiles64Folder to "C:\Program Files (x86)"
+# and every HKLM\SOFTWARE write under WOW6432Node. The MSI still builds, still verifies against
+# every other check here, and still installs; it just puts the host somewhere no instruction we
+# ship points at. Summary property 7 is PID_TEMPLATE: "x64;1033" for a 64-bit package.
+$summary = $installer.GetType().InvokeMember("SummaryInformation", "GetProperty", $null, $installer, @($MsiPath, 0))
+$template = $summary.GetType().InvokeMember("Property", "GetProperty", $null, $summary, @(7))
+if ($template -notmatch '^(x64|Intel64)\b') {
+    Show-Failure "the package template is '$template', not x64 -- a 32-bit MSI installs to Program Files (x86) and writes its registry keys under WOW6432Node (pass -arch x64 to wix build)"
+} else {
+    Show-Pass "package template is $template (64-bit)"
+}
+
+# The other half of the same fault: the package can be x64 and still be pointed at the 32-bit
+# directory. INSTALLFOLDER must hang off ProgramFiles64Folder for the host to land in
+# "C:\Program Files\PDF Editor Host", which is the path register-host.ps1, the README and the
+# extension's own guidance all name.
+# Found with a foreach rather than Where-Object: a row is itself an array, and PowerShell unrolls
+# an array a cmdlet emits, which would flatten the row into its two columns.
+$dirRows = Invoke-MsiQuery $database "SELECT ``Directory``, ``Directory_Parent`` FROM ``Directory``"
+$installParent = $null
+foreach ($row in $dirRows) { if ($row[0] -eq "INSTALLFOLDER") { $installParent = $row[1] } }
+if ($null -eq $installParent) {
+    Show-Failure "the Directory table has no INSTALLFOLDER row"
+} elseif ($installParent -ne "ProgramFiles64Folder") {
+    Show-Failure "INSTALLFOLDER hangs off '$installParent', expected ProgramFiles64Folder"
+} else {
+    Show-Pass "INSTALLFOLDER is under ProgramFiles64Folder"
+}
+
 # ----------------------------------------------------------------------- files
 
 # The File table's FileName is "SHORTNAME|LongName" when a short name was generated; the long name
@@ -125,6 +158,7 @@ if ($unexpected.Count -gt 0) {
     Write-Host "  note: also registers $($unexpected -join ', ')"
 }
 
+[System.Runtime.InteropServices.Marshal]::ReleaseComObject($summary) | Out-Null
 [System.Runtime.InteropServices.Marshal]::ReleaseComObject($database) | Out-Null
 [System.Runtime.InteropServices.Marshal]::ReleaseComObject($installer) | Out-Null
 

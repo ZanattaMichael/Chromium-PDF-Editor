@@ -53,7 +53,13 @@ New-Item -ItemType Directory -Force -Path $outDirFull | Out-Null
 $msiPath = Join-Path $outDirFull "pdf-editor-host-$version-x64.msi"
 
 Write-Host "Building $msiPath ..."
-wix build (Join-Path $repoRoot "installer\windows\PdfEditorHost.wxs") `
+# -arch x64 is not optional. `wix build` defaults to x86, and a 32-bit MSI cannot install into
+# the 64-bit Program Files: Windows Installer redirects ProgramFiles64Folder to
+# "C:\Program Files (x86)". The host would land there while every instruction we ship -- and
+# register-host.ps1's own default -- points at "$env:ProgramFiles\PDF Editor Host". A 32-bit
+# package also gets its HKLM\SOFTWARE writes redirected under WOW6432Node. The payload is
+# published win-x64, so the package must say so.
+wix build (Join-Path $repoRoot "installer\windows\PdfEditorHost.wxs") -arch x64 `
     -d "Version=$version" -d "HostDir=$hostDir" -d "ManifestJson=$manifestJson" `
     -d "RegisterScript=$(Join-Path $PSScriptRoot 'register-host.ps1')" `
     -d "ExtensionIdFile=$extensionIdFile" `

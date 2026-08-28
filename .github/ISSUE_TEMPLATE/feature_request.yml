@@ -1,0 +1,42 @@
+name: Feature request
+description: Propose a capability the extension does not have yet.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that the extension does not let you do today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Viewer / rendering
+        - Text editing
+        - Redaction
+        - Forms
+        - Annotations, highlights, ink
+        - Watermark / Bates / stamps
+        - Security, signing, sanitisation
+        - OCR
+        - Native host / installation
+        - Other or not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you have considered
+      description: Including any workaround you are using now.

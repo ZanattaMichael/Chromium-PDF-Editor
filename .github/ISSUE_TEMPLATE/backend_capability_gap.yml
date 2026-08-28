@@ -1,0 +1,92 @@
+name: Backend capability gap
+description: A capability that does not carry across a PDF backend change, tracked against the iText decoupling work (#115).
+title: "Backend gap: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for a capability the current backend provides and a candidate backend does not —
+        or provides differently enough that the behaviour, the report shape, or the host's JSON
+        contract would change.
+
+        Background: **#115** (should the engine change) and **#116** (the abstraction seam).
+        `docs/backend-portability.md` records the structural blockers and the workarounds that
+        already exist for them.
+
+        A gap is only worth filing if a user could notice it. "The code has to be rewritten" is
+        migration work, not a capability gap.
+
+  - type: input
+    id: action
+    attributes:
+      label: Host action
+      description: The action name from MessageProcessor's dispatch table, or `—` if this is cross-cutting.
+      placeholder: redact
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Regression — the capability is lost or visibly degraded
+        - Rework — reachable, but the behaviour has to be re-derived rather than translated
+        - Infrastructure — no user-visible capability, but the migration cannot proceed without it
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: How it works today
+      description: The current implementation, and which low-level types it depends on.
+    validations:
+      required: true
+
+  - type: textarea
+    id: gap
+    attributes:
+      label: What is missing
+      description: >
+        Be specific about what is unavailable rather than merely different. If a public API covers
+        part of it, say which part.
+    validations:
+      required: true
+
+  - type: textarea
+    id: user-impact
+    attributes:
+      label: What a user would notice
+      description: >
+        The observable difference. If the answer is "nothing, until they inspect the output",
+        say that — a silent fidelity loss is more dangerous than a visible one, not less.
+    validations:
+      required: true
+
+  - type: textarea
+    id: approach
+    attributes:
+      label: Possible approach
+      description: >
+        Options might include: a public API that covers it after all, low-level work through
+        PdfSharp, an upstream request, or accepting the regression and documenting it.
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] …
+        - [ ] Existing tests still pass, and a new test covers the gap specifically
+    validations:
+      required: true
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: How this was determined
+      description: >
+        Source read, an API probe, a compiled prototype, or a measurement. Say which — the
+        distinction matters, and the original survey got some of this wrong by assuming.

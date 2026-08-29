@@ -5,16 +5,29 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
   </PropertyGroup>
 
-  <PropertyGroup>
-    <!-- The version the native host reports to the extension (over the `ping` action, and on
-         the command line via its version and diagnostics flags) and the one the extension checks
-         itself against. Without it every assembly here defaults to 1.0.0.0, so a host built from a
-         2.0.0 tree and shipped in a package *named* 2.0.0 told the browser it was 1.0.0.0.
+  <!-- The version the native host reports to the extension (over the `ping` action, and on the
+       command line via its version and diagnostics flags) and the one the extension checks itself
+       against. Without it every assembly here defaults to 1.0.0.0.
 
-         extension/manifest.json is the single source of truth for the release version (the .deb,
-         .rpm, Arch and MSI packagers all read their version out of it), so this must be kept equal
-         to it. extension/test/version-sync.test.mjs fails if the two ever drift. -->
-    <Version>2.0.0</Version>
+       extension/manifest.json is the single source of truth for the release version, and it is
+       read here rather than copied, because a copy does not survive the release. Both release
+       workflows stamp the computed version into manifest.json alone; the packagers then read their
+       package version out of it and `dotnet publish` the host. A hardcoded <Version> here was never
+       stamped by anything, so every package was *named* with its release version while the binary
+       inside reported the number last committed to this file — 2.0.0 for every release since.
+
+       MSBuild cannot parse JSON, but it can read the file and match the field, which is enough for
+       a value this shape. extension/test/version-sync.test.mjs guards the derivation. -->
+  <PropertyGroup>
+    <ManifestJsonPath>$(MSBuildThisFileDirectory)extension/manifest.json</ManifestJsonPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="Exists('$(ManifestJsonPath)')">
+    <!-- Matches the quoted "version" field, then the number inside it. "manifest_version" and
+         "minimum_chrome_version" do not match: the pattern anchors on the opening quote, and
+         neither is a quoted numeric value. -->
+    <ManifestVersionField>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(ManifestJsonPath)')), '"version"\s*:\s*"[0-9.]+"'))</ManifestVersionField>
+    <Version Condition="'$(ManifestVersionField)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(ManifestVersionField)', '[0-9.]+'))</Version>
   </PropertyGroup>
 
 </Project>

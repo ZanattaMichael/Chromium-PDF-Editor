@@ -38,13 +38,42 @@ public class RedactionBoxTests
     public void Expand_Quantize_RoundsWidthUpToTheGrid_KeepingTheLeftEdge()
     {
         byte[] pdf = TestPdfs.WithText(("secret", 72, 700, 12));
-        var region = new RectRegion(1, 72, 700, 40, 12); // 40pt -> rounds up to 72 (1 inch)
+        var region = new RectRegion(1, 72, 700, 40, 12);
 
         var r = Assert.Single(RedactionBox.Expand(pdf, new[] { region },
             RedactionBox.LengthObfuscation.Quantize));
 
-        Assert.Equal(72f, r.X, 1f);          // left edge preserved
-        Assert.Equal(72f, r.Width, 1f);      // rounded up to the grid
+        Assert.Equal(72f, r.X, 1f);           // left edge preserved
+        Assert.Equal(144f, r.Width, 1f);      // widened, and landing on a grid step
+        Assert.Equal(0f, r.Width % 72f, 1f);
+    }
+
+    [Theory]
+    // Widths that sit just under a grid step are the ones that used to come back barely touched:
+    // 71pt rounded to 72, a box a hair wider than the word it covered, which is the Exact
+    // behaviour wearing the Rounded label (#118).
+    [InlineData(1f)]
+    [InlineData(35f)]
+    [InlineData(36f)]
+    [InlineData(70f)]
+    [InlineData(71f)]
+    [InlineData(72f)]
+    [InlineData(143f)]
+    [InlineData(200f)]
+    public void Expand_Quantize_AlwaysClearsTheTextByHalfAGridStep(float width)
+    {
+        byte[] pdf = TestPdfs.WithText(("secret", 72, 700, 12));
+        var region = new RectRegion(1, 72, 700, width, 12);
+
+        var r = Assert.Single(RedactionBox.Expand(pdf, new[] { region },
+            RedactionBox.LengthObfuscation.Quantize));
+
+        // A box that traces the glyphs still reports their length, whatever the mode is called.
+        Assert.True(r.Width >= width + 36f,
+            $"a {width}pt box widened only to {r.Width}pt, close enough to still trace the text");
+        Assert.Equal(0f, r.Width % 72f, 1f);
+        Assert.True(r.X <= region.X && r.X + r.Width >= region.X + region.Width,
+            "the widened box must still cover the original");
     }
 
     [Fact]
@@ -68,12 +97,13 @@ public class RedactionBoxTests
     {
         byte[] pdf = TestPdfs.WithText(("x", 72, 700, 12));
         var shortR = new RectRegion(1, 72, 700, 20, 12);
-        var longR = new RectRegion(1, 72, 700, 60, 12);
+        var longR = new RectRegion(1, 72, 700, 34, 12);
 
         var a = Assert.Single(RedactionBox.Expand(pdf, new[] { shortR }, RedactionBox.LengthObfuscation.Quantize));
         var b = Assert.Single(RedactionBox.Expand(pdf, new[] { longR }, RedactionBox.LengthObfuscation.Quantize));
 
-        // 20pt and 60pt both round up to one grid step — the length is no longer distinguishable.
+        // Two lengths inside one band come back as the same box — which is the whole point of
+        // bucketing, and survives widening the box to clear the text.
         Assert.Equal(a.Width, b.Width, 1f);
     }
 
@@ -131,6 +161,21 @@ public class RedactionBoxTests
 
         Assert.Equal(72f, merged.X, 1f);
         Assert.Equal(160f, merged.X + merged.Width, 1f);
+    }
+
+    [Fact]
+    public void Prepare_Intensity2_MergesAndThenRoundsTheJoinedBox()
+    {
+        // Both halves of level 2 have to fire: the two words become one box, and that box is
+        // widened past the text rather than left wrapping it.
+        byte[] pdf = TestPdfs.WithText(("x", 72, 700, 12));
+        var regions = new[] { new RectRegion(1, 72, 700, 40, 12), new RectRegion(1, 120, 700, 40, 12) };
+
+        var r = Assert.Single(RedactionBox.Prepare(pdf, regions, 2));
+
+        Assert.Equal(72f, r.X, 1f);
+        Assert.True(r.Width >= 88f + 36f, "the merged 88pt box should be widened, not traced");
+        Assert.Equal(0f, r.Width % 72f, 1f);
     }
 
     [Fact]

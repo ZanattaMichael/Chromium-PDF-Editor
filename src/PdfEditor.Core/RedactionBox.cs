@@ -25,6 +25,11 @@ public static class RedactionBox
     private const float Grid = 72f;
     private const float Margin = 18f;
 
+    // The least a quantized box may grow. Rounding a raw width up to the grid can widen it by
+    // almost nothing — a 71pt run lands on 72 — leaving a box that still traces the text and
+    // reports its length, which is the mode's whole reason to exist.
+    private const float MinWiden = Grid / 2f;
+
     /// <summary>
     /// Prepares the boxes for a given privacy intensity (0–3): 0 leaves them exact; 1 merges
     /// adjacent boxes on a line (so two redactions split by a space read as one, hiding the word
@@ -139,7 +144,10 @@ public static class RedactionBox
     {
         float left = crop.GetLeft(), right = crop.GetRight();
         float pageWidth = Math.Max(r.Width, right - left);
-        float width = Math.Clamp(MathF.Ceiling(r.Width / Grid) * Grid, r.Width, pageWidth);
+        // Quantizing r.Width + MinWiden rather than r.Width keeps the bucketing — widths within one
+        // band still collapse onto a single value — while guaranteeing the box clears the text by at
+        // least half a grid step, so it can never come back hugging the glyphs it covers.
+        float width = Math.Clamp(MathF.Ceiling((r.Width + MinWiden) / Grid) * Grid, r.Width, pageWidth);
         // min(r.X, right - width) slides the box left just enough to fit; clamping to [left, r.X]
         // keeps it on the page while guaranteeing the original stays fully covered.
         float x = Math.Clamp(Math.Min(r.X, right - width), left, r.X);

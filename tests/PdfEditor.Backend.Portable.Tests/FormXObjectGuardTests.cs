@@ -21,8 +21,10 @@ public class FormXObjectGuardTests
     {
         PdfDocument document = PdfFixtures.Load(PdfFixtures.Balanced());
 
-        FormXObjectGuard.EnsureFormXObjectsTerminate(document.Pages[0]);
-        FormXObjectGuard.EnsureAllPagesTerminate(document);
+        // Returning is the whole result here, so it is asserted explicitly rather than left as the
+        // absence of a throw — an unasserted call reads as an unfinished test.
+        Assert.Null(Record.Exception(() => FormXObjectGuard.EnsureFormXObjectsTerminate(document.Pages[0])));
+        Assert.Null(Record.Exception(() => FormXObjectGuard.EnsureAllPagesTerminate(document)));
     }
 
     [Fact]
@@ -41,7 +43,7 @@ public class FormXObjectGuardTests
         // that left forms on its path set would reject the second legitimate use of a shared form.
         PdfPage page = PdfFixtures.Load(PdfFixtures.NestedForms(8)).Pages[0];
 
-        FormXObjectGuard.EnsureFormXObjectsTerminate(page);
+        Assert.Null(Record.Exception(() => FormXObjectGuard.EnsureFormXObjectsTerminate(page)));
     }
 
     [Fact]

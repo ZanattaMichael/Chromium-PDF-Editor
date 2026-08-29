@@ -95,4 +95,32 @@ public class ContentStreamGuardTests
 
         Assert.Throws<InvalidDataException>(() => ContentStreamGuard.Analyze(page));
     }
+
+    [Fact]
+    public void Counts_through_a_nested_sequence_rather_than_stopping_at_the_top_level()
+    {
+        // PdfSharp nests sequences for structures the walk must descend into. A walk that only
+        // looked at the outer level would report this page balanced, and the guard would do nothing.
+        var inner = new PdfSharp.Pdf.Content.Objects.CSequence
+        {
+            PdfSharp.Pdf.Content.Objects.OpCodes.OperatorFromName("q"),
+            PdfSharp.Pdf.Content.Objects.OpCodes.OperatorFromName("cm"),
+        };
+        var outer = new PdfSharp.Pdf.Content.Objects.CSequence
+        {
+            PdfSharp.Pdf.Content.Objects.OpCodes.OperatorFromName("Q"),
+        };
+        // CSequence has an Add(CSequence) overload that splices the contents in rather than
+        // nesting them, and it is the one a collection initializer picks — which would flatten the
+        // very structure under test. Insert takes the CObject overload and stores it as one element.
+        outer.Insert(1, inner);
+        Assert.IsType<PdfSharp.Pdf.Content.Objects.CSequence>(outer[1]);
+
+        ContentStreamGuard.State state = ContentStreamGuard.Analyze(outer);
+
+        Assert.Equal(1, state.Underflow);   // the Q at the top, against an empty stack
+        Assert.Equal(1, state.Depth);       // the q inside, never closed
+        Assert.False(state.LeakedCtm);      // the cm ran inside that q, so it is contained
+        Assert.True(state.NeedsGuard);
+    }
 }

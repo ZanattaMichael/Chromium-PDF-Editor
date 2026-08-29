@@ -100,4 +100,24 @@ public class PdfCryptoEnvelopeTests
         PdfReadOptions? read = PdfPreflightGate.ReadOptions(password);
         return ImoDocument.Open(pdf, read).Text.Inspect(WholePage, read).Text.Trim();
     }
+
+    [Theory]
+    // V5 is AES-256 by definition, whichever revision reports it.
+    [InlineData(5, 5, 256, PdfStandardEncryptionAlgorithm.Aes256)]
+    [InlineData(4, 6, 128, PdfStandardEncryptionAlgorithm.Aes256)]
+    // V4 at 128 bits is AESV2 in practice; a V4 with no stated length is treated the same way.
+    [InlineData(4, 4, 128, PdfStandardEncryptionAlgorithm.Aes128)]
+    [InlineData(4, 4, null, PdfStandardEncryptionAlgorithm.Aes128)]
+    // Everything older re-seals as RC4 rather than being silently strengthened, because a document
+    // that has to stay readable by an old consumer is the only reason it is still RC4.
+    [InlineData(2, 3, 128, PdfStandardEncryptionAlgorithm.LegacyRc4)]
+    [InlineData(1, 2, 40, PdfStandardEncryptionAlgorithm.LegacyRc4)]
+    [InlineData(null, null, null, PdfStandardEncryptionAlgorithm.LegacyRc4)]
+    public void Infers_the_scheme_from_the_encrypt_dictionary_numbers(
+        int? version, int? revision, int? lengthBits, PdfStandardEncryptionAlgorithm expected)
+    {
+        // The document never names its algorithm — /V and /R are what identify it, and getting this
+        // wrong re-seals the file under a scheme the owner did not choose.
+        Assert.Equal(expected, PdfCryptoEnvelope.AlgorithmOf(version, revision, lengthBits));
+    }
 }

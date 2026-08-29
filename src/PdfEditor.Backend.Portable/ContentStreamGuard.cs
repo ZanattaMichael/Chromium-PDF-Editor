@@ -33,9 +33,18 @@ public static class ContentStreamGuard
     public static State Analyze(PdfPage page)
     {
         ArgumentNullException.ThrowIfNull(page);
+        return Analyze(PortableGuard.Run(() => ContentReader.ReadContent(page)));
+    }
+
+    // Taking the parsed sequence rather than the page lets a test hand in a nested CSequence
+    // directly. PdfSharp only nests when the document does, which no fixture can be relied on to
+    // provoke, and the recursion is the part that must not lose count.
+    internal static State Analyze(CSequence sequence)
+    {
+        ArgumentNullException.ThrowIfNull(sequence);
         int depth = 0, underflow = 0;
         bool leaked = false;
-        Walk(PortableGuard.Run(() => ContentReader.ReadContent(page)), ref depth, ref underflow, ref leaked);
+        Walk(sequence, ref depth, ref underflow, ref leaked);
         return new State(depth, underflow, leaked);
     }
 

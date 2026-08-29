@@ -67,6 +67,49 @@ static class PdfFixtures
         return pdf.Build(catalog);
     }
 
+    /// <summary>
+    /// A chain of <paramref name="depth"/> well-formed form XObjects, each drawing the next. The
+    /// guard has to walk all the way down and unwind cleanly, which is the case a self-referencing
+    /// fixture never reaches because it throws on the first step.
+    ///
+    /// The page's /XObject dictionary also carries a form written as a direct dictionary rather
+    /// than a reference, and one entry that is not a dictionary at all, so that every arm of the
+    /// reference resolver is exercised by a real document.
+    /// </summary>
+    public static byte[] NestedForms(int depth)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(depth, 1);
+
+        var pdf = new Builder();
+        int catalog = pdf.Reserve();
+        int pages = pdf.Reserve();
+        int page = pdf.Reserve();
+        int contents = pdf.AddStream("/X1 Do\n");
+
+        int[] forms = new int[depth];
+        for (int i = 0; i < depth; i++) forms[i] = pdf.Reserve();
+
+        for (int i = 0; i < depth; i++)
+        {
+            string resources = i + 1 < depth
+                ? $"/Resources << /XObject << /X1 {forms[i + 1]} 0 R >> >> "
+                : string.Empty;
+            pdf.Set(forms[i], Builder.Stream(
+                $"/Type /XObject /Subtype /Form /BBox [0 0 100 100] {resources}",
+                i + 1 < depth ? "/X1 Do\n" : "0 0 100 100 re f\n"));
+        }
+
+        pdf.Set(catalog, $"<< /Type /Catalog /Pages {pages} 0 R >>");
+        pdf.Set(pages, $"<< /Type /Pages /Kids [{page} 0 R] /Count 1 >>");
+        pdf.Set(page,
+            $"<< /Type /Page /Parent {pages} 0 R /MediaBox [0 0 612 792] " +
+            $"/Resources << /XObject << /X1 {forms[0]} 0 R " +
+            "/XDirect << /Type /XObject /Subtype /Form /BBox [0 0 10 10] >> " +
+            "/XNotADictionary /Nonsense >> >> " +
+            $"/Contents {contents} 0 R >>");
+        return pdf.Build(catalog);
+    }
+
     /// <summary>The balanced page, sealed the way a protected document arrives from a user.</summary>
     public static byte[] Encrypted(PdfStandardEncryptionAlgorithm algorithm = PdfStandardEncryptionAlgorithm.Aes256) =>
         OfficeIMO.Pdf.PdfDocument.Open(Balanced()).Security.Encrypt(EncryptionOptions(algorithm)).Pdf;

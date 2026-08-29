@@ -81,4 +81,19 @@ public class PdfPreflightGateTests
         Assert.Equal(PdfPermissionPolicy.IgnoreRestrictions, options.PermissionPolicy);
         Assert.Null(PdfPreflightGate.ReadOptions(null));
     }
+
+    [Fact]
+    public void A_file_that_is_not_a_pdf_is_reported_rather_than_thrown()
+    {
+        // The native host is handed whatever the user picked. A parser crash on a mislabelled or
+        // truncated file has to arrive as a plan the UI can render, not as an exception crossing
+        // the host boundary — the same contract as a wrong password.
+        byte[] notAPdf = System.Text.Encoding.ASCII.GetBytes("This is not a PDF, it is a sentence.");
+
+        PdfPlan plan = PdfPreflightGate.Plan(notAPdf, PdfOperation.Redact);
+
+        Assert.False(plan.CanExecute);
+        Assert.Equal(PdfRoute.Blocked, plan.Route);
+        Assert.NotEmpty(plan.Blockers);
+    }
 }

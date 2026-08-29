@@ -52,4 +52,22 @@ public class PortableGuardTests
     {
         Assert.False(PortableGuard.IsMalformedInput(new InvalidOperationException()));
     }
+
+    [Fact]
+    public void Guards_a_void_operation_as_well_as_one_that_returns()
+    {
+        // The Action overload exists because most of the guarded parser calls return nothing;
+        // it has to contain the same exception shapes as the generic one.
+#pragma warning disable CA2201
+        var error = Assert.Throws<InvalidDataException>(
+            () => PortableGuard.Run(() => throw new NullReferenceException("inside the parser")));
+#pragma warning restore CA2201
+        Assert.IsType<NullReferenceException>(error.InnerException);
+
+        // Braces matter: `() => ran = true` is an expression lambda that binds to the generic
+        // Func overload instead, leaving the Action path untested.
+        bool ran = false;
+        PortableGuard.Run(() => { ran = true; });
+        Assert.True(ran);
+    }
 }

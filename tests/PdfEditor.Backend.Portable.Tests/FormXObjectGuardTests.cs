@@ -33,4 +33,25 @@ public class FormXObjectGuardTests
         Assert.Equal(32, FormXObjectGuard.MaxFormNesting);
         Assert.Equal(4096, FormXObjectGuard.MaxFormsInspected);
     }
+
+    [Fact]
+    public void Walks_a_well_formed_chain_of_nested_forms_to_the_bottom_and_back()
+    {
+        // Every other fixture here throws on the way down. This one has to unwind cleanly: a guard
+        // that left forms on its path set would reject the second legitimate use of a shared form.
+        PdfPage page = PdfFixtures.Load(PdfFixtures.NestedForms(8)).Pages[0];
+
+        FormXObjectGuard.EnsureFormXObjectsTerminate(page);
+    }
+
+    [Fact]
+    public void Rejects_a_form_chain_deeper_than_any_real_document_nests()
+    {
+        // A chain deep enough to exhaust the stack without ever repeating an object, so the cycle
+        // check never fires and only the depth bound stands between this file and a dead process.
+        PdfPage page = PdfFixtures.Load(PdfFixtures.NestedForms(40)).Pages[0];
+
+        var error = Assert.Throws<InvalidDataException>(() => FormXObjectGuard.EnsureFormXObjectsTerminate(page));
+        Assert.Contains("levels deep", error.Message, StringComparison.Ordinal);
+    }
 }

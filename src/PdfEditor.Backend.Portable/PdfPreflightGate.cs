@@ -74,49 +74,57 @@ public static class PdfPreflightGate
     {
         var result = new List<PdfBlocker>();
         foreach (var blocker in preflight.ReadBlockers)
-            Add(result, blocker.Kind switch
-            {
-                PdfReadBlockerKind.MissingHeader => PdfBlocker.MissingHeader,
-                PdfReadBlockerKind.Encryption => PdfBlocker.Encryption,
-                PdfReadBlockerKind.NoPages => PdfBlocker.NoPages,
-                PdfReadBlockerKind.ParserUnsupported => PdfBlocker.ParserUnsupported,
-                PdfReadBlockerKind.UnsupportedContentStreamFilter => PdfBlocker.UnsupportedFilter,
-                _ => PdfBlocker.Unknown,
-            });
+            Add(result, Translate(blocker.Kind));
 
         foreach (var blocker in preflight.RewriteBlockers)
-            Add(result, blocker.Kind switch
-            {
-                PdfRewriteBlockerKind.Encryption => PdfBlocker.Encryption,
-                PdfRewriteBlockerKind.Signatures => PdfBlocker.Signatures,
-                PdfRewriteBlockerKind.Forms => PdfBlocker.Forms,
-                PdfRewriteBlockerKind.Outlines => PdfBlocker.Outlines,
-                PdfRewriteBlockerKind.CatalogViewSettings => PdfBlocker.CatalogViewSettings,
-                PdfRewriteBlockerKind.PageLabels => PdfBlocker.PageLabels,
-                PdfRewriteBlockerKind.CatalogNameTrees => PdfBlocker.NameTrees,
-                PdfRewriteBlockerKind.NamedDestinations => PdfBlocker.NamedDestinations,
-                PdfRewriteBlockerKind.OpenActions => PdfBlocker.OpenActions,
-                PdfRewriteBlockerKind.ViewerPreferences => PdfBlocker.ViewerPreferences,
-                PdfRewriteBlockerKind.TaggedContent => PdfBlocker.TaggedContent,
-                PdfRewriteBlockerKind.XmpMetadata => PdfBlocker.XmpMetadata,
-                PdfRewriteBlockerKind.CatalogUri => PdfBlocker.CatalogUri,
-                PdfRewriteBlockerKind.OutputIntents => PdfBlocker.OutputIntents,
-                PdfRewriteBlockerKind.EmbeddedFiles => PdfBlocker.EmbeddedFiles,
-                PdfRewriteBlockerKind.OptionalContent => PdfBlocker.OptionalContent,
-                PdfRewriteBlockerKind.ActiveContent => PdfBlocker.ActiveContent,
-                PdfRewriteBlockerKind.InvalidObjectReferences => PdfBlocker.InvalidObjectReferences,
-                _ => PdfBlocker.Unknown,
-            });
+            Add(result, Translate(blocker.Kind));
 
         return result;
     }
+
+    // The two mappings are separated from the walk above so they can be exercised exhaustively.
+    // A kind OfficeIMO adds in a later version falls through to Unknown, which is safe but silent —
+    // the tests enumerate the enums so that silence shows up as a failure here rather than as a
+    // blocker the UI cannot explain.
+    internal static PdfBlocker Translate(PdfReadBlockerKind kind) => kind switch
+    {
+        PdfReadBlockerKind.MissingHeader => PdfBlocker.MissingHeader,
+        PdfReadBlockerKind.Encryption => PdfBlocker.Encryption,
+        PdfReadBlockerKind.NoPages => PdfBlocker.NoPages,
+        PdfReadBlockerKind.ParserUnsupported => PdfBlocker.ParserUnsupported,
+        PdfReadBlockerKind.UnsupportedContentStreamFilter => PdfBlocker.UnsupportedFilter,
+        _ => PdfBlocker.Unknown,
+    };
+
+    internal static PdfBlocker Translate(PdfRewriteBlockerKind kind) => kind switch
+    {
+        PdfRewriteBlockerKind.Encryption => PdfBlocker.Encryption,
+        PdfRewriteBlockerKind.Signatures => PdfBlocker.Signatures,
+        PdfRewriteBlockerKind.Forms => PdfBlocker.Forms,
+        PdfRewriteBlockerKind.Outlines => PdfBlocker.Outlines,
+        PdfRewriteBlockerKind.CatalogViewSettings => PdfBlocker.CatalogViewSettings,
+        PdfRewriteBlockerKind.PageLabels => PdfBlocker.PageLabels,
+        PdfRewriteBlockerKind.CatalogNameTrees => PdfBlocker.NameTrees,
+        PdfRewriteBlockerKind.NamedDestinations => PdfBlocker.NamedDestinations,
+        PdfRewriteBlockerKind.OpenActions => PdfBlocker.OpenActions,
+        PdfRewriteBlockerKind.ViewerPreferences => PdfBlocker.ViewerPreferences,
+        PdfRewriteBlockerKind.TaggedContent => PdfBlocker.TaggedContent,
+        PdfRewriteBlockerKind.XmpMetadata => PdfBlocker.XmpMetadata,
+        PdfRewriteBlockerKind.CatalogUri => PdfBlocker.CatalogUri,
+        PdfRewriteBlockerKind.OutputIntents => PdfBlocker.OutputIntents,
+        PdfRewriteBlockerKind.EmbeddedFiles => PdfBlocker.EmbeddedFiles,
+        PdfRewriteBlockerKind.OptionalContent => PdfBlocker.OptionalContent,
+        PdfRewriteBlockerKind.ActiveContent => PdfBlocker.ActiveContent,
+        PdfRewriteBlockerKind.InvalidObjectReferences => PdfBlocker.InvalidObjectReferences,
+        _ => PdfBlocker.Unknown,
+    };
 
     static void Add(List<PdfBlocker> into, PdfBlocker blocker)
     {
         if (!into.Contains(blocker)) into.Add(blocker);
     }
 
-    static PdfMutationOperation ToNative(PdfOperation operation) => operation switch
+    internal static PdfMutationOperation ToNative(PdfOperation operation) => operation switch
     {
         PdfOperation.ModifyPageContent => PdfMutationOperation.ModifyPageContent,
         PdfOperation.ModifyPageTree => PdfMutationOperation.ModifyPageTree,

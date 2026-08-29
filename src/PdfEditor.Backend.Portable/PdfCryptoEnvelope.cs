@@ -82,15 +82,20 @@ public static class PdfCryptoEnvelope
     /// Maps the raw /Encrypt dictionary numbers onto the three schemes OfficeIMO can write.
     /// The document does not name its algorithm; V and R are what identify it.
     /// </summary>
-    static PdfStandardEncryptionAlgorithm AlgorithmOf(PdfDocumentSecurityInfo info)
+    static PdfStandardEncryptionAlgorithm AlgorithmOf(PdfDocumentSecurityInfo info) =>
+        AlgorithmOf(info.EncryptionVersion, info.EncryptionRevision, info.EncryptionLengthBits);
+
+    // Split from the overload above because PdfDocumentSecurityInfo cannot be constructed outside
+    // OfficeIMO, and the three branches below are exactly the part worth testing.
+    internal static PdfStandardEncryptionAlgorithm AlgorithmOf(int? version, int? revision, int? lengthBits)
     {
         // V5 is AES-256 by definition (R5 is the deprecated Adobe extension, R6 is PDF 2.0).
-        if (info.EncryptionVersion >= 5 || info.EncryptionRevision >= 5)
+        if (version >= 5 || revision >= 5)
             return PdfStandardEncryptionAlgorithm.Aes256;
 
         // V4 with a 128-bit key is AESV2 in every file PdfEditor has seen; V4/RC4 is vanishingly
         // rare and re-sealing it as AES-128 strengthens rather than weakens the result.
-        if (info.EncryptionVersion >= 4 && info.EncryptionLengthBits is null or >= 128)
+        if (version >= 4 && lengthBits is null or >= 128)
             return PdfStandardEncryptionAlgorithm.Aes128;
 
         return PdfStandardEncryptionAlgorithm.LegacyRc4;

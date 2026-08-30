@@ -16,8 +16,9 @@ _Generated 2026-07-28. Source: 40 open issues (#17–#56) on `zanattamichael/chr
 sequenced after #52 so it can assert with that validator rather than reinventing one.
 
 Issues raised by this work, not in the original 40: **#72** (bare `catch {}` hides
-render failures), **#74** (ban interpolated `innerHTML` in `extension/src`). A
-client-side XSS found by the new code scanning was fixed in #73.
+render failures), **#74** (ban interpolated `innerHTML` in `extension/src`), **#146**
+(batch redaction from a configuration file, filed into Tier 6). A client-side XSS
+found by the new code scanning was fixed in #73.
 
 Two corrections to the sequencing below, learned in practice:
 
@@ -122,11 +123,21 @@ not breaking structure once the others are stable.
 - **#48 — Auditable redaction report**
 - **#49 — Redaction recovery-resistance guarantees (tests/verification)**
 - **#51 — Undo/redo cross-operation atomicity**
+- **#146 — Batch redaction across many documents from a configuration file**
 
 Do #49 before shipping #48's "redaction complete" messaging — an audit report is only
 trustworthy once recovery-resistance is verified. #51 (undo/redo atomicity) is
 higher-risk correctness work that benefits from the regression suite (Tier 2) being in
 place first.
+
+#146 comes last in this tier, and deliberately so: it applies the same redaction to a
+whole directory unattended, which multiplies whatever the single-document path gets
+wrong. It needs #49's recovery-resistance verification first, and it should emit #48's
+report per document rather than inventing a second reporting format. Four pieces are
+missing before it can be built — regex matching in `TextTools` (with a bounded
+evaluation, since the patterns arrive from a file), a `--batch` entry point beside
+`HostDiagnostics.TryRunCli`, config parsing that names the offending rule when it
+rejects one, and the multi-document orchestration itself.
 
 ## Tier 7 — Diff / review tooling
 
@@ -160,7 +171,7 @@ since both touch the same image-import pipeline.
 3. **Text/font fidelity**: #29, #28, #34, #35, #32, #33, #31
 4. **Rendering/geometry**: #36, #38, #40, #37, #39, #45
 5. **Forms**: #42, #43, #44, #17
-6. **Redaction/undo**: #49, #48, #51
+6. **Redaction/undo**: #49, #48, #51, #146
 7. **Diff tooling**: #46, #47
 8. **Performance**: #50
 9. **New features**: #25, #26, #55, #27, #30, #41

@@ -89,35 +89,6 @@ jobs:
           EOF
         shell: bash
 
-      - name: Stamp Directory.Build.props with the release version
-        # The host reports this version to the extension over `ping`, prints it for `--version` and
-        # `--diagnostics`, and the extension compares the two. Only manifest.json is stamped from
-        # the tag above, so without this the packages are *named* from the tag while the binary
-        # inside them still carries whatever the tree said -- a package called 2.0.2 shipping a host
-        # that reports 2.0.0. extension/test/version-sync.test.mjs keeps the two files equal in the
-        # tree; this keeps them equal in a build stamped from a tag.
-        run: |
-          python3 - "$STAMP_VERSION" <<'PYEOF'
-          import re
-          import sys
-
-          version = sys.argv[1].strip()
-          if not version:
-              raise SystemExit("no version to stamp into Directory.Build.props")
-          path = "Directory.Build.props"
-          with open(path) as f:
-              props = f.read()
-          props, found = re.subn(
-              r"<Version>[^<]*</Version>", "<Version>" + version + "</Version>", props, count=1)
-          if found != 1:
-              raise SystemExit(path + " has no <Version> element to stamp")
-          with open(path, "w") as f:
-              f.write(props)
-          PYEOF
-        env:
-          STAMP_VERSION: ${{ needs.setup.outputs.manifest_version }}
-        shell: bash
-
       - name: Install the WiX toolset
         # Pin to WiX v5: v6+ require accepting the OSMF EULA non-interactively (fails with WIX7015).
         run: dotnet tool install --global wix --version 5.0.2
@@ -173,35 +144,6 @@ jobs:
           manifest["version"] = sys.argv[1]
           with open(path, "w") as f: json.dump(manifest, f, indent=2); f.write("\n")
           EOF
-
-      - name: Stamp Directory.Build.props with the release version
-        # The host reports this version to the extension over `ping`, prints it for `--version` and
-        # `--diagnostics`, and the extension compares the two. Only manifest.json is stamped from
-        # the tag above, so without this the packages are *named* from the tag while the binary
-        # inside them still carries whatever the tree said -- a package called 2.0.2 shipping a host
-        # that reports 2.0.0. extension/test/version-sync.test.mjs keeps the two files equal in the
-        # tree; this keeps them equal in a build stamped from a tag.
-        run: |
-          python3 - "$STAMP_VERSION" <<'PYEOF'
-          import re
-          import sys
-
-          version = sys.argv[1].strip()
-          if not version:
-              raise SystemExit("no version to stamp into Directory.Build.props")
-          path = "Directory.Build.props"
-          with open(path) as f:
-              props = f.read()
-          props, found = re.subn(
-              r"<Version>[^<]*</Version>", "<Version>" + version + "</Version>", props, count=1)
-          if found != 1:
-              raise SystemExit(path + " has no <Version> element to stamp")
-          with open(path, "w") as f:
-              f.write(props)
-          PYEOF
-        env:
-          STAMP_VERSION: ${{ needs.setup.outputs.manifest_version }}
-        shell: bash
 
       - name: Package extension
         run: ./scripts/package-extension.sh dist

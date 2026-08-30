@@ -109,35 +109,6 @@ jobs:
           EOF
         shell: bash
 
-      - name: Stamp Directory.Build.props with the release-candidate version
-        # The host reports this version to the extension over `ping`, prints it for `--version` and
-        # `--diagnostics`, and the extension compares the two. Only manifest.json is stamped from
-        # the tag above, so without this the packages are *named* from the tag while the binary
-        # inside them still carries whatever the tree said -- a package called 2.0.2 shipping a host
-        # that reports 2.0.0. extension/test/version-sync.test.mjs keeps the two files equal in the
-        # tree; this keeps them equal in a build stamped from a tag.
-        run: |
-          python3 - "$STAMP_VERSION" <<'PYEOF'
-          import re
-          import sys
-
-          version = sys.argv[1].strip()
-          if not version:
-              raise SystemExit("no version to stamp into Directory.Build.props")
-          path = "Directory.Build.props"
-          with open(path) as f:
-              props = f.read()
-          props, found = re.subn(
-              r"<Version>[^<]*</Version>", "<Version>" + version + "</Version>", props, count=1)
-          if found != 1:
-              raise SystemExit(path + " has no <Version> element to stamp")
-          with open(path, "w") as f:
-              f.write(props)
-          PYEOF
-        env:
-          STAMP_VERSION: ${{ needs.version.outputs.manifest_version }}
-        shell: bash
-
       - name: Install the WiX toolset
         # Pin to WiX v5: v6+ require accepting the Open Source Maintenance Fee (OSMF) EULA,
         # which cannot be done non-interactively and fails the build with WIX7015. v5 is the
@@ -186,14 +157,9 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Build
-        run: dotnet build --configuration Release
-      - name: Test
-        # Excludes the timing-based performance guards: this solution-wide run executes the suites
-        # in parallel on a shared runner, so their budgets would measure contention and fail at
-        # random. Performance is gated by the dedicated `perf` job in ci.yml instead.
-        run: dotnet test --configuration Release --no-build --verbosity normal --filter "Category!=Performance"
-
+      # Stamped before anything is compiled: Directory.Build.props reads the version out of
+      # manifest.json, so a build that ran first would bake in the committed number and the
+      # packagers below could reuse those stale outputs.
       - name: Stamp manifest.json with the release-candidate version
         run: |
           python3 - "${{ needs.version.outputs.manifest_version }}" <<'EOF'
@@ -209,34 +175,13 @@ jobs:
               f.write("\n")
           EOF
 
-      - name: Stamp Directory.Build.props with the release-candidate version
-        # The host reports this version to the extension over `ping`, prints it for `--version` and
-        # `--diagnostics`, and the extension compares the two. Only manifest.json is stamped from
-        # the tag above, so without this the packages are *named* from the tag while the binary
-        # inside them still carries whatever the tree said -- a package called 2.0.2 shipping a host
-        # that reports 2.0.0. extension/test/version-sync.test.mjs keeps the two files equal in the
-        # tree; this keeps them equal in a build stamped from a tag.
-        run: |
-          python3 - "$STAMP_VERSION" <<'PYEOF'
-          import re
-          import sys
-
-          version = sys.argv[1].strip()
-          if not version:
-              raise SystemExit("no version to stamp into Directory.Build.props")
-          path = "Directory.Build.props"
-          with open(path) as f:
-              props = f.read()
-          props, found = re.subn(
-              r"<Version>[^<]*</Version>", "<Version>" + version + "</Version>", props, count=1)
-          if found != 1:
-              raise SystemExit(path + " has no <Version> element to stamp")
-          with open(path, "w") as f:
-              f.write(props)
-          PYEOF
-        env:
-          STAMP_VERSION: ${{ needs.version.outputs.manifest_version }}
-        shell: bash
+      - name: Build
+        run: dotnet build --configuration Release
+      - name: Test
+        # Excludes the timing-based performance guards: this solution-wide run executes the suites
+        # in parallel on a shared runner, so their budgets would measure contention and fail at
+        # random. Performance is gated by the dedicated `perf` job in ci.yml instead.
+        run: dotnet test --configuration Release --no-build --verbosity normal --filter "Category!=Performance"
 
       - name: Package extension
         id: package

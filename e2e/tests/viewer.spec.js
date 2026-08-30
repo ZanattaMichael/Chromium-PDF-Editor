@@ -385,7 +385,7 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await page.close();
   });
 
-  test('redaction: "Apply to all" sets the Privacy level on existing marked areas (#privacy)', async () => {
+  test('redaction: the Privacy slider governs areas that were already marked (#privacy)', async () => {
     const file = fixture('privacy-all.pdf', [[
       { text: 'SECRET', x: 72, y: 700 },
       { text: 'PUBLIC', x: 320, y: 700 },
@@ -398,12 +398,13 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     await expect(page.locator('#redact-list li')).toContainText('#1 p1');
     await expect(page.locator('#redact-list li')).not.toContainText('Full line');
 
-    // Raise Privacy to Full line and push it onto the existing area.
+    // Raise Privacy to Full line. Marking first and choosing the level afterwards is the ordinary
+    // order of work, so the already-marked area has to follow the slider rather than keep the
+    // weaker level it was drawn under — otherwise the box silently comes back exact.
     await page.locator('#redact-intensity').evaluate((el) => {
       el.value = '3';
       el.dispatchEvent(new Event('input'));
     });
-    await page.click('#redact-apply-all');
     await expect(page.locator('#redact-list li')).toContainText('Full line');
 
     await page.click('#redact-apply');
@@ -510,8 +511,8 @@ test.describe('PDF Editor end-to-end (extension + native host)', () => {
     const page = await openViewerWith(file);
 
     await ui(page, '#tool-redact');
-    // Privacy intensity 3 = "Full line". Set it before marking so the box captures the level;
-    // "Apply to all" would also push it onto existing boxes.
+    // Privacy intensity 3 = "Full line". The order does not matter — the slider governs areas
+    // marked before it moves as well as after — but here it is chosen up front.
     await page.locator('#redact-intensity').evaluate((el) => {
       el.value = '3';
       el.dispatchEvent(new Event('input'));

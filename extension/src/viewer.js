@@ -4348,15 +4348,15 @@ function wire() {
   $('redact-apply').addEventListener('click', () => applyRedaction());
   $('redact-clear').addEventListener('click', () => { state.regions = []; drawRegions(); });
   // Privacy intensity: 0 exact, 1 merge adjacent boxes, 2 round widths, 3 full line, 4 textured.
+  // The slider governs every marked area, not just the ones drawn after it moves. Snapshotting the
+  // level at mark time left the common order of work — mark the areas, then decide how private the
+  // boxes should be — applying the old, weaker level while the control read the new one, so the
+  // boxes came back wrapping the text exactly and the merging and rounding appeared not to work.
   $('redact-intensity').addEventListener('input', (e) => {
-    $('redact-intensity-label').textContent = REDACT_INTENSITY[Number(e.target.value)] ?? 'Exact';
-  });
-  // "Apply to all" sets every already-marked area to the current Privacy level (global override).
-  $('redact-apply-all').addEventListener('click', () => {
-    if (state.regions.length === 0) { toast('No marked areas to update.'); return; }
-    for (const r of state.regions) r.intensity = redactIntensity();
+    const level = Number(e.target.value);
+    $('redact-intensity-label').textContent = REDACT_INTENSITY[level] ?? 'Exact';
+    for (const r of state.regions) r.intensity = level;
     drawRegions();
-    toast(`Set all marked areas to “${REDACT_INTENSITY[redactIntensity()]}”.`);
   });
   $('redact-search-btn').addEventListener('click', searchAndMarkRedactions);
   $('redact-search-text').addEventListener('keydown', (e) => {

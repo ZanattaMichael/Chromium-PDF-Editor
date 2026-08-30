@@ -682,7 +682,6 @@ body.drag-over::after {
 .redact-privacy-label { display: block; margin-bottom: 4px; }
 #redact-intensity { display: block; width: 100%; box-sizing: border-box; margin: 0; }
 #redact-privacy-hint { font-size: 11px; margin: 0 0 8px; }
-#redact-privacy-hint button { margin-top: 4px; font-size: 12px; }
 
 /* Visual diff (#46/#47). */
 .compare-jump { background: none; border: none; padding: 0; color: var(--accent-2, #1a73e8); cursor: pointer; text-decoration: underline; font: inherit; }

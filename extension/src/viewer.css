@@ -417,7 +417,8 @@ button.danger:hover:not(:disabled) { background: #ef5443; }
 .region.highlight { border-color: #e0a800; background: rgba(255, 235, 59, 0.35); }
 
 #empty-state { align-self: center; text-align: center; max-width: 420px; }
-#empty-state h1 { font-weight: 600; }
+#empty-state h1 { font-weight: 600; margin-bottom: 2px; }
+.tagline { color: var(--muted); letter-spacing: 0.01em; margin: 0 0 14px; }
 /* Native-host trouble in the empty state: wider than the rest of it, because the guidance carries
    a shell command that must not wrap into nonsense. */
 #host-status:not(:empty) { max-width: 520px; margin-inline: auto; text-align: left; }

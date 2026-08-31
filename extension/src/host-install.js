@@ -147,7 +147,7 @@ export function installSteps(platform) {
   if (platform === 'chromeos' || platform === 'android') {
     return [{
       text: 'The native host is a desktop application, and there is no build for this platform. '
-        + 'PDF Editor needs Chrome, Chromium, Edge, Brave, Vivaldi or Opera on Windows, macOS or Linux.',
+        + 'reDACT needs Chrome, Chromium, Edge, Brave, Vivaldi or Opera on Windows, macOS or Linux.',
     }];
   }
   return [{

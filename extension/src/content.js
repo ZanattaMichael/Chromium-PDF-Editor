@@ -1,5 +1,5 @@
 // Content script: extends existing browser-based PDF viewing with an
-// "Edit in PDF Editor" entry point. It covers two cases:
+// "Edit in reDACT" entry point. It covers two cases:
 //   1. The tab itself is a PDF rendered by the browser's built-in viewer.
 //   2. The page embeds PDFs via <embed>, <object>, or <iframe>.
 // Adobe properties are left alone by the background worker's checks; this
@@ -14,7 +14,7 @@
     if (document.getElementById(BUTTON_ID)) return null;
     const button = document.createElement('button');
     button.id = BUTTON_ID;
-    button.textContent = '✏ Edit in PDF Editor';
+    button.textContent = '✏ Edit in reDACT';
     button.style.cssText = [
       'position:' + (fixed ? 'fixed' : 'absolute'),
       'z-index:2147483647',

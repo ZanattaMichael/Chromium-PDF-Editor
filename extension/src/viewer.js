@@ -343,7 +343,7 @@ async function logEnvironment() {
 function downloadConsole() {
   const m = chrome.runtime.getManifest();
   const header = [
-    'Chromium PDF Editor — activity log',
+    'reDACT — activity log',
     `Extension: v${m.version}`,
     `Browser: ${browserSummary()}`,
     `Platform: ${navigator.platform || 'unknown'}`,
@@ -967,7 +967,7 @@ function updateChrome() {
   $('btn-redo').disabled = state.future.length === 0;
   if (loaded) {
     updateNav();
-    document.title = `${state.fileName} — PDF Editor`;
+    document.title = `${state.fileName} — reDACT`;
   }
   const badgesEl = $('badges');
   badgesEl.innerHTML = '';
@@ -1782,7 +1782,7 @@ function downloadComplianceReport(result) {
   code { font: 12px ui-monospace, monospace; word-break: break-all; }
 </style></head><body>
 <h1>Redaction Compliance Report</h1>
-<p class="muted">Generated ${escapeHtml(generated)} by Chromium PDF Editor v${escapeHtml(version)}.</p>
+<p class="muted">Generated ${escapeHtml(generated)} by reDACT v${escapeHtml(version)}.</p>
 <h2>Document</h2>
 <table class="meta">
   <tr><td>File</td><td>${escapeHtml(state.fileName)}</td></tr>
@@ -2387,7 +2387,7 @@ async function digitallySign() {
     try {
       setStatus('Creating certificate…', true);
       const cert = await host.call('create-cert', {
-        name: details.name || 'PDF Editor User', password: details.pw,
+        name: details.name || 'reDACT User', password: details.pw,
       });
       const blob = new Blob([base64ToBytes(cert.pfx)], { type: 'application/x-pkcs12' });
       chrome.downloads.download({
@@ -2849,7 +2849,7 @@ async function openFromBytes(bytes, name, kind) {
         // than surfacing a bare "unknown action".
         if (/unknown action/i.test(e?.message ?? '')) {
           throw new Error('Opening images needs an updated native host. Please reinstall the '
-            + 'PDF Editor native host (it was installed before image support was added), then retry.');
+            + 'reDACT native host (it was installed before image support was added), then retry.');
         }
         throw e;
       }
@@ -4439,8 +4439,13 @@ async function showAbout() {
 
   const name = document.createElement('p');
   name.className = 'about-name';
-  name.textContent = manifest.name || 'Chromium PDF Editor';
+  name.textContent = manifest.name || 'reDACT PDF Editor';
   modal.appendChild(name);
+
+  const tagline = document.createElement('p');
+  tagline.className = 'tagline';
+  tagline.textContent = 'Cut the fat. Keep the signal.';
+  modal.appendChild(tagline);
 
   if (manifest.description) {
     const desc = document.createElement('p');

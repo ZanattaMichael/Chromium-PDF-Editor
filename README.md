@@ -1,3 +1,5 @@
+![reDACT PDF Editor](docs/readme-banner.png)
+
 # reDACT PDF Editor
 
 **Cut the fat. Keep the signal.**

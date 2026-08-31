@@ -55,13 +55,13 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.runtime.onInstalled.addListener((details) => {
   chrome.contextMenus.create({
     id: 'open-link-in-editor',
-    title: 'Open link in PDF Editor',
+    title: 'Open link in reDACT',
     contexts: ['link'],
     targetUrlPatterns: ['*://*/*.pdf*', 'file://*/*.pdf'],
   });
   chrome.contextMenus.create({
     id: 'open-page-in-editor',
-    title: 'Open this PDF in PDF Editor',
+    title: 'Open this PDF in reDACT',
     contexts: ['page'],
   });
   // On a fresh install, take the user straight to the instructions if the host is not there — the
@@ -96,15 +96,15 @@ async function checkHost({ openOptionsIfMissing = false } = {}) {
 
   let badge = '';
   let colour = '';
-  let title = 'Open PDF Editor';
+  let title = 'Open reDACT';
   if (!connected) {
     badge = BADGE_MISSING;
     colour = '#b3261e';
-    title = `PDF Editor — ${hostStateSummary(probe.state)} Click for instructions.`;
+    title = `reDACT — ${hostStateSummary(probe.state)} Click for instructions.`;
   } else if (!ok) {
     badge = BADGE_STALE;
     colour = '#8a6100';
-    title = `PDF Editor — ${versionStateSummary(version.state)} `
+    title = `reDACT — ${versionStateSummary(version.state)} `
       + `Host v${probe.version}, extension v${chrome.runtime.getManifest().version}. `
       + 'Click for instructions.';
   }

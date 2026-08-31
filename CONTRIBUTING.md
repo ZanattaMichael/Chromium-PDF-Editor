@@ -1,4 +1,4 @@
-# Contributing to PDF Editor
+# Contributing to reDACT PDF Editor
 
 Thanks for looking at improving this project. This document covers getting a dev
 environment running, the test suites, and what a PR should look like. For the

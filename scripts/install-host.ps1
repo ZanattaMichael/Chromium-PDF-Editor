@@ -37,7 +37,7 @@ if (-not $ExtensionId) {
 }
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $publishDir = Join-Path $env:LOCALAPPDATA "PdfEditorHost"
-$defaultRepo = "ZanattaMichael/Chromium-PDF-Editor"
+$defaultRepo = "ZanattaMichael/reDACT-PDF-Editor"
 
 # owner/name to download from: explicit -Repo, else inferred from origin's URL, else default.
 function Resolve-Repo {

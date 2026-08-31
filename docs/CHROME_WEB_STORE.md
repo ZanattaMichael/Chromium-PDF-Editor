@@ -10,9 +10,12 @@ checklist for all of that.
 
 ## 0. Before you start — things to decide/fix
 
-- [ ] **Name.** `"PDF Editor"` in `extension/manifest.json` is very generic; the Web Store often
-      rejects generic/already-existing names. Pick a distinctive name (e.g. a brand word +
-      "PDF Editor"). Update `manifest.json` `name` and the store listing to match.
+- [x] **Name.** Done — the extension is **reDACT**, tagline *Cut the fat. Keep the signal.*
+      `manifest.json` carries `"reDACT PDF Editor"` so the listing still matches searches for
+      "PDF editor", while the product calls itself reDACT. The previous name, `"PDF Editor"`,
+      was the kind of generic name the Web Store often rejects. **Still to do:** "redact" is a
+      common word in this category (there is a `RedAction PDF Tool` on the Microsoft Store,
+      among others) — confirm the name is clear of trademarks before submitting.
 - [ ] **Privacy policy hosted.** Host `docs/PRIVACY.md` at a public URL (GitHub Pages works) and
       have that URL ready — it is **required** for this listing (broad host access).
 - [ ] **Native host reality.** This extension needs a separately-installed native messaging host
@@ -47,9 +50,10 @@ The workflow needs four repo secrets. Get them via the Chrome Web Store API setu
 
 Paste these into the Developer Dashboard listing.
 
-**Summary (≤132 chars):**
-> Edit, redact, merge, sign and password-protect PDFs in your browser. Local processing via a
-> native host — your files never leave your device.
+**Summary (≤132 chars):** keep this identical to `description` in `extension/manifest.json` —
+that field is what the store actually shows, and a second copy here only drifts from it.
+> Edit text, truly redact, merge, OCR, sign and encrypt PDFs in your browser. Processed
+> locally — files never leave your PC.
 
 **Description:** adapt the feature list from the README. Lead with the single purpose (a PDF
 editor), then the highlights (edit text, true redaction with a compliance report, watermark,
@@ -78,7 +82,7 @@ installed and link to the install instructions.
 | `storage` | Persist user preferences (activity-console state, optional Cloudflare credentials) locally. |
 | `contextMenus` | Right-click actions (Edit, Redact, Highlight, etc.) on selected text and pages. |
 | `webNavigation` | Detect when the user navigates to a PDF so the editor can offer to open it. One top-frame-only listener, restricted to `.pdf` URLs, and only while the user leaves `autoOpen` on. |
-| `host_permissions: <all_urls>` | PDFs can live on **any** site; the content script must run everywhere to detect them and show the "Edit in PDF Editor" control. It reads only enough to recognise a PDF; it does not collect page content. |
+| `host_permissions: <all_urls>` | PDFs can live on **any** site; the content script must run everywhere to detect them and show the "Edit in reDACT" control. It reads only enough to recognise a PDF; it does not collect page content. |
 
 > **No `tabs` permission.** `chrome.tabs.create()` and `chrome.tabs.update()` need no permission at
 > all, and the only sensitive `Tab` property the extension reads — `tab.url`, in

@@ -1,6 +1,6 @@
-# Privacy Policy — PDF Editor
+# Privacy Policy — reDACT PDF Editor
 
-_Last updated: 2026-08-07_
+_Last updated: 2026-08-31_
 
 > Fill in the **Developer** and **Contact** placeholders below, host this page at a public
 > URL (e.g. GitHub Pages), and enter that URL in the Chrome Web Store listing. A privacy
@@ -11,7 +11,7 @@ _Last updated: 2026-08-07_
 
 ## The short version
 
-PDF Editor edits your PDFs **on your own computer**. The document content is processed by a
+reDACT edits your PDFs **on your own computer**. The document content is processed by a
 **native host** that runs locally on your machine — it is never uploaded to us or to any server
 we control. We do **not** operate any backend, do **not** run analytics or telemetry, and do
 **not** create accounts or collect personal information.
@@ -22,7 +22,7 @@ we control. We do **not** operate any backend, do **not** run analytics or telem
   by the native host installed on your device. Their content is not transmitted to the developer.
 - **Pages you navigate to (host access).** The extension detects PDFs in the browser so it can
   offer to open them in the editor. It reads only enough of the page to recognise a PDF and to
-  place its "Edit in PDF Editor" control; it does not read or transmit page content otherwise.
+  place its "Edit in reDACT" control; it does not read or transmit page content otherwise.
 - **Downloads.** Used to save your edited PDFs and reports to your computer, at your request.
 - **Local settings storage.** Preferences (such as the activity-console state and any Cloudflare
   credentials you choose to enter) are stored in your browser's local extension storage on your

@@ -21,7 +21,7 @@
 #     --tag <vX.Y.Z>             release tag to download (default: latest release)
 set -euo pipefail
 
-DEFAULT_REPO="ZanattaMichael/Chromium-PDF-Editor"
+DEFAULT_REPO="ZanattaMichael/reDACT-PDF-Editor"
 
 EXTENSION_ID=""
 FROM_SOURCE=false

@@ -1,8 +1,8 @@
 blank_issues_enabled: true
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/ZanattaMichael/Chromium-PDF-Editor/security/advisories/new
+    url: https://github.com/ZanattaMichael/reDACT-PDF-Editor/security/advisories/new
     about: Report privately through a security advisory. Please do not open a public issue for a vulnerability in redaction, sanitisation, or the native host.
   - name: Question or idea
-    url: https://github.com/ZanattaMichael/Chromium-PDF-Editor/discussions
+    url: https://github.com/ZanattaMichael/reDACT-PDF-Editor/discussions
     about: Ask about usage, or float an idea before it is a concrete request.

@@ -63,11 +63,13 @@ installed and link to the install instructions.
 **Category:** Productivity. **Language(s):** as applicable.
 
 **Graphics required by the store:**
-- [ ] Store icon 128×128 (already in `extension/icons/icon128.png`).
+- [x] Store icon 128×128 — `extension/icons/icon128.png` (also mirrored at
+      `docs/store/store-icon-128.png`, with a 512×512 master at `docs/store/store-icon-512.png`).
 - [ ] At least one **screenshot 1280×800** (or 640×400). The generated shots in
       `docs/screenshots/` are a starting point but are captured at a different size — recapture at
       1280×800 (adjust the viewport in `e2e/scripts/doc-shots.js`) or crop/pad to the required size.
-- [ ] Optional: small promo tile 440×280.
+- [x] Optional: small promo tile 440×280 — `docs/store/small-promo-440x280.png`.
+- [x] Optional: marquee promo tile 1400×560 — `docs/store/marquee-1400x560.png`.
 
 **Single purpose statement:**
 > A PDF editor: it lets the user view and edit PDF documents (text, redaction, forms, pages,

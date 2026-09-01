@@ -1,0 +1,80 @@
+name: Generate Screenshots
+
+# Regenerates docs/screenshots/ by driving the real extension and native host against the sample
+# document (e2e/scripts/doc-shots.js) -- the same images the README embeds and the store listings
+# use. Manual only: these are visual assets for a public listing, worth a human look before they
+# land, not something that should regenerate (and diff) on every push.
+#
+# Opens a PR with whatever changed rather than pushing straight to the default branch, so the
+# images get reviewed like any other change. If nothing changed, the job stops after uploading the
+# artifact -- no empty PR.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - name: Install e2e dependencies
+        working-directory: e2e
+        run: npm ci --ignore-scripts
+      - name: Install Playwright Chromium
+        working-directory: e2e
+        run: npx --no-install playwright@1.61.1 install --with-deps chromium
+
+      - name: Generate screenshots
+        working-directory: e2e
+        # doc-shots.js catches each screenshot's own errors so one bad shot doesn't abort the
+        # rest -- it prints "✗ name — reason" for that one and keeps going, and still exits 0.
+        # Left alone that ships a stale image with a green run, so this step fails the build
+        # itself on any ✗ in the script's own summary.
+        run: |
+          set -o pipefail
+          node scripts/doc-shots.js 2>&1 | tee /tmp/doc-shots.log
+          if grep -q '✗' /tmp/doc-shots.log; then
+            echo "::error::One or more screenshots failed to capture:"
+            grep '✗' /tmp/doc-shots.log
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: doc-screenshots
+          path: docs/screenshots/
+          if-no-files-found: error
+
+      - name: Open a PR with the regenerated screenshots
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- docs/screenshots; then
+            echo "No screenshot changes; nothing to open a PR for."
+            exit 0
+          fi
+
+          branch="docs/screenshots-$(date -u +%Y%m%d-%H%M%S)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add docs/screenshots
+          git commit -m "Regenerate documentation/store screenshots"
+          git push origin "$branch"
+
+          gh pr create \
+            --title "Regenerate documentation/store screenshots" \
+            --base "$DEFAULT_BRANCH" \
+            --head "$branch" \
+            --body "Automated run of \`e2e/scripts/doc-shots.js\` via the Generate Screenshots workflow (run ${{ github.run_id }}). Every shot in the run's own summary reported ✓ (a ✗ would have failed the job before this step), but review the images themselves before merging -- nothing here checks that a screenshot shows the right *thing*, only that it was captured."

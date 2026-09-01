@@ -9,10 +9,11 @@
 # It reads the MSI's own tables through the Windows Installer API (no install required) and, when
 # it can, also extracts the payload with an administrative install to check the shipped manifest.
 #
-# Usage: .\scripts\verify-msi.ps1 <path-to-msi> [-ExpectedExtensionId <id>]
+# Usage: .\scripts\verify-msi.ps1 <path-to-msi> [-ExpectedExtensionId <id>] [-ExpectedEdgeExtensionId <id>]
 param(
     [Parameter(Mandatory = $true)][string]$MsiPath,
-    [string]$ExpectedExtensionId = ""
+    [string]$ExpectedExtensionId = "",
+    [string]$ExpectedEdgeExtensionId = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,7 +32,7 @@ $expectedKeys = @(
     "SOFTWARE\Vivaldi\NativeMessagingHosts\$hostName",
     "SOFTWARE\Opera Software\NativeMessagingHosts\$hostName"
 )
-$expectedFiles = @("PdfEditor.NativeHost.exe", $manifestName, "register-host.ps1", "extension-id.txt")
+$expectedFiles = @("PdfEditor.NativeHost.exe", $manifestName, "register-host.ps1", "extension-id.txt", "edge-extension-id.txt")
 
 $script:failures = 0
 # Named with the Show- verb rather than Add-/Write-: both write to the host for a human reading the
@@ -206,12 +207,15 @@ if ($extracted) {
         }
 
         $origins = @($manifest.allowed_origins)
-        if ($origins.Count -ne 1 -or $origins[0] -notmatch '^chrome-extension://[a-p]{32}/$') {
-            Show-Failure "$manifestName allowed_origins is '$($origins -join ', ')', expected a single chrome-extension://<id>/ origin"
+        if ($origins.Count -ne 2 -or ($origins | Where-Object { $_ -notmatch '^chrome-extension://[a-p]{32}/$' })) {
+            Show-Failure "$manifestName allowed_origins is '$($origins -join ', ')', expected exactly two chrome-extension://<id>/ origins (Chrome, then Edge)"
         } else {
-            Show-Pass "$manifestName allows $($origins[0])"
+            Show-Pass "$manifestName allows $($origins -join ', ')"
             if ($ExpectedExtensionId -and $origins[0] -ne "chrome-extension://$ExpectedExtensionId/") {
-                Show-Failure "$manifestName pins a different extension ID than the expected $ExpectedExtensionId"
+                Show-Failure "$manifestName pins a different Chrome extension ID than the expected $ExpectedExtensionId"
+            }
+            if ($ExpectedEdgeExtensionId -and $origins[1] -ne "chrome-extension://$ExpectedEdgeExtensionId/") {
+                Show-Failure "$manifestName pins a different Edge extension ID than the expected $ExpectedEdgeExtensionId"
             }
         }
     }

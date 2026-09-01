@@ -138,6 +138,7 @@ jobs:
         # a packaging failure. The suite picks it up via PDF_EDITOR_DEB.
         env:
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          EDGE_EXTENSION_ID: ${{ secrets.EDGE_EXTENSION_ID }}
         run: ./scripts/package-deb.sh dist
       - name: Install the package and run the extension against it
         working-directory: e2e
@@ -201,21 +202,24 @@ jobs:
       - name: Build the Linux host installers (.deb / .rpm / Arch .pkg.tar.zst)
         env:
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          EDGE_EXTENSION_ID: ${{ secrets.EDGE_EXTENSION_ID }}
         run: |
           ./scripts/package-deb.sh dist
           ./scripts/package-rpm.sh dist
           ./scripts/package-arch.sh dist
       - name: Note how to use these dry-run packages
-        # These artifacts pin the host to whichever extension ID the build used (the
-        # CHROME_EXTENSION_ID secret, else the committed scripts/extension-id.txt = the published
-        # Web Store ID). Anyone downloading them to test against a developer-mode/unpacked extension
-        # (a different ID) must re-register — spell that out in the job summary so it isn't a mystery.
+        # These artifacts pin the host to whichever extension IDs the build used (the
+        # CHROME_EXTENSION_ID/EDGE_EXTENSION_ID secrets, else the committed scripts/extension-id.txt
+        # and edge-extension-id.txt = the published Web Store IDs). Anyone downloading them to test
+        # against a developer-mode/unpacked extension (a different ID) must re-register — spell that
+        # out in the job summary so it isn't a mystery.
         run: |
           pinned="${CHROME_EXTENSION_ID:-$(tr -d '[:space:]' < scripts/extension-id.txt)}"
+          pinned_edge="${EDGE_EXTENSION_ID:-$(tr -d '[:space:]' < scripts/edge-extension-id.txt)}"
           {
             echo "## Linux host installers (dry run)"
             echo "These \`.deb\`/\`.rpm\`/\`.pkg.tar.zst\` packages register the native host for the"
-            echo "extension ID **\`$pinned\`** only."
+            echo "extension IDs **\`$pinned\`** (Chrome) and **\`$pinned_edge\`** (Edge) only."
             echo ""
             echo "To use them with a **developer-mode / unpacked** extension (which has a different"
             echo "ID), after installing the package run:"
@@ -227,6 +231,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
         env:
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          EDGE_EXTENSION_ID: ${{ secrets.EDGE_EXTENSION_ID }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pdf-editor-host-linux-installers-dry-run
@@ -255,6 +260,7 @@ jobs:
       - name: Build the MSI
         env:
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          EDGE_EXTENSION_ID: ${{ secrets.EDGE_EXTENSION_ID }}
         run: ./scripts/package-msi.ps1 -OutputDir dist
         shell: pwsh
       - name: Verify the MSI registers the native messaging host
@@ -265,26 +271,32 @@ jobs:
         # extension. This reads the MSI's own tables and checks each of those.
         env:
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          EDGE_EXTENSION_ID: ${{ secrets.EDGE_EXTENSION_ID }}
         shell: pwsh
         run: |
           $id = $env:CHROME_EXTENSION_ID
           if (-not $id) { $id = (Get-Content scripts/extension-id.txt -Raw).Trim() }
+          $edgeId = $env:EDGE_EXTENSION_ID
+          if (-not $edgeId) { $edgeId = (Get-Content scripts/edge-extension-id.txt -Raw).Trim() }
           $msi = (Get-ChildItem dist/*.msi | Select-Object -First 1).FullName
-          ./scripts/verify-msi.ps1 $msi -ExpectedExtensionId $id
+          ./scripts/verify-msi.ps1 $msi -ExpectedExtensionId $id -ExpectedEdgeExtensionId $edgeId
       - name: Note how to use this dry-run package
-        # Same caveat as the Linux dry-run job: the MSI pins the host to one extension ID, so a
-        # developer-mode/unpacked extension (different ID) must re-register per-user afterward.
+        # Same caveat as the Linux dry-run job: the MSI pins the host to two extension IDs, so a
+        # developer-mode/unpacked extension (a different ID) must re-register per-user afterward.
         shell: pwsh
         env:
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          EDGE_EXTENSION_ID: ${{ secrets.EDGE_EXTENSION_ID }}
         run: |
           $pinned = $env:CHROME_EXTENSION_ID
           if (-not $pinned) { $pinned = (Get-Content scripts/extension-id.txt -Raw).Trim() }
-          # Single-quoted lines so backticks/backslashes are literal markdown; only the ID line
-          # interpolates, via string concatenation, to avoid PowerShell backtick-escape surprises.
+          $pinnedEdge = $env:EDGE_EXTENSION_ID
+          if (-not $pinnedEdge) { $pinnedEdge = (Get-Content scripts/edge-extension-id.txt -Raw).Trim() }
+          # Single-quoted lines so backticks/backslashes are literal markdown; only the ID lines
+          # interpolate, via string concatenation, to avoid PowerShell backtick-escape surprises.
           $lines = @(
             '## Windows MSI (dry run)',
-            'This `.msi` registers the native host for the extension ID **`' + $pinned + '`** only.',
+            'This `.msi` registers the native host for the extension IDs **`' + $pinned + '`** (Chrome) and **`' + $pinnedEdge + '`** (Edge) only.',
             '',
             'To use it with a **developer-mode / unpacked** extension (a different ID), after',
             'installing the MSI run the helper it puts next to the host:',

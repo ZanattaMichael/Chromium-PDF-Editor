@@ -7,7 +7,8 @@
 # the native-messaging manifest as a package-owned file (marked %config so `dnf remove` cleans it
 # up). The manifest points at the /usr/bin launcher rather than at /opt, because a sandboxed
 # browser is far more likely to be permitted to execute it there. allowed_origins is pinned to the
-# extension ID (from $CHROME_EXTENSION_ID, else scripts/extension-id.txt).
+# Chrome and Edge extension IDs (from $CHROME_EXTENSION_ID/$EDGE_EXTENSION_ID, else
+# scripts/extension-id.txt/edge-extension-id.txt).
 #
 # It also ships /usr/bin/pdf-editor-host-register, the per-user helper for the two cases no
 # system-wide manifest can reach: snap/flatpak browsers, and a developer-mode extension whose ID
@@ -34,6 +35,15 @@ if [[ -z "$EXTENSION_ID" && -f "$REPO_ROOT/scripts/extension-id.txt" ]]; then
 fi
 if [[ -z "$EXTENSION_ID" ]]; then
   echo "error: no extension ID (set CHROME_EXTENSION_ID or scripts/extension-id.txt)" >&2
+  exit 1
+fi
+
+EDGE_ID="${EDGE_EXTENSION_ID:-}"
+if [[ -z "$EDGE_ID" && -f "$REPO_ROOT/scripts/edge-extension-id.txt" ]]; then
+  EDGE_ID="$(tr -d '[:space:]' < "$REPO_ROOT/scripts/edge-extension-id.txt")"
+fi
+if [[ -z "$EDGE_ID" ]]; then
+  echo "error: no Edge extension ID (set EDGE_EXTENSION_ID or scripts/edge-extension-id.txt)" >&2
   exit 1
 fi
 
@@ -71,16 +81,19 @@ find "$BUILDROOT$INSTALL_DIR" -type f \( -name '*.so' -o -name 'createdump' \) -
 mkdir -p "$BUILDROOT/usr/bin"
 ln -sf "$INSTALL_DIR/$EXE" "$BUILDROOT$LAUNCH_PATH"
 
-# Per-user registration helper, plus the extension ID this package was built with so the helper
-# defaults to the same one.
+# Per-user registration helper, plus the extension IDs this package was built with so the helper
+# defaults to the same ones.
 install -Dm0755 "$REPO_ROOT/scripts/register-host.sh" "$BUILDROOT$REGISTER_PATH"
 install -d -m0755 "$BUILDROOT$SHARE_DIR"
 printf '%s\n' "$EXTENSION_ID" > "$BUILDROOT$SHARE_DIR/extension-id"
 chmod 0644 "$BUILDROOT$SHARE_DIR/extension-id"
+printf '%s\n' "$EDGE_ID" > "$BUILDROOT$SHARE_DIR/edge-extension-id"
+chmod 0644 "$BUILDROOT$SHARE_DIR/edge-extension-id"
 
-# Native-messaging manifest, pinned to the extension ID and pointing at the launcher symlink.
+# Native-messaging manifest, pinned to both extension IDs and pointing at the launcher symlink.
 render_manifest() {
   sed -e "s|__HOST_PATH__|$LAUNCH_PATH|" -e "s|__EXTENSION_ID__|$EXTENSION_ID|" \
+    -e "s|__EDGE_EXTENSION_ID__|$EDGE_ID|" \
     "$REPO_ROOT/scripts/com.pdfeditor.host.json.template"
 }
 # Register for every common Chromium-based browser (see linux-manifest-dirs.sh). Each %config
@@ -119,6 +132,7 @@ cp -a %{_sourcedir}/buildroot/. %{buildroot}/
 echo "PDF Editor native messaging host installed."
 echo "  host:     $LAUNCH_PATH -> $INSTALL_DIR/$EXE"
 echo "  allowed:  chrome-extension://$EXTENSION_ID/"
+echo "            chrome-extension://$EDGE_ID/"
 if "$LAUNCH_PATH" --version >/dev/null 2>&1; then
   echo "  self-test: OK"
 else
@@ -163,7 +177,8 @@ mv "$BUILT" "$RPM_PATH"
 
 echo
 echo "Built: $RPM_PATH ($(du -h "$RPM_PATH" | cut -f1))"
-echo "Extension ID pinned: $EXTENSION_ID"
+echo "Extension ID pinned:      $EXTENSION_ID"
+echo "Edge extension ID pinned: $EDGE_ID"
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   echo "rpm_path=$RPM_PATH" >> "$GITHUB_OUTPUT"
 fi

@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_to_store:
-        description: "Also upload the package to the Chrome Web Store (requires CHROME_* secrets)"
+        description: "Also upload the package to the Chrome Web Store and Microsoft Edge Add-ons store (requires the respective CHROME_*/EDGE_* secrets)"
         type: boolean
         default: false
 
@@ -116,6 +116,18 @@ jobs:
         with:
           name: pdf-editor-extension-v${{ steps.package.outputs.version }}
           path: ${{ steps.package.outputs.zip_path }}
+          if-no-files-found: error
+
+      # Same package, minus manifest.json's "key": the Microsoft Edge Add-ons store's validator
+      # rejects a submission whose manifest has one (see package-edge-extension.sh). Built from the
+      # Chrome zip above rather than from extension/ directly so the two can never drift apart.
+      - name: Package Edge extension
+        id: package_edge
+        run: ./scripts/package-edge-extension.sh "${{ steps.package.outputs.zip_path }}" dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pdf-editor-extension-edge-v${{ steps.package_edge.outputs.version }}
+          path: ${{ steps.package_edge.outputs.edge_zip_path }}
           if-no-files-found: error
 
       - name: Package all-in-one bundles (extension + native host, per platform)
@@ -286,3 +298,100 @@ jobs:
             --client-id "$CLIENT_ID" \
             --client-secret "$CLIENT_SECRET" \
             --refresh-token "$REFRESH_TOKEN"
+
+  publish-to-edge-add-ons-store:
+    needs: package
+    # Same trigger as the Chrome Web Store deploy: only a non-prerelease Release (the manual
+    # "promote" step), or an explicit workflow_dispatch opt-in.
+    if: ${{ github.event.inputs.publish_to_store == 'true' || needs.package.outputs.is_prerelease == 'false' }}
+    runs-on: ubuntu-latest
+    environment: edge-add-ons-store
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pdf-editor-extension-edge-v${{ needs.package.outputs.version }}
+          path: dist
+      - name: Check Microsoft Edge Add-ons credentials are configured
+        id: creds
+        env:
+          PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          API_KEY: ${{ secrets.EDGE_API_KEY }}
+        run: |
+          if [[ -n "$PRODUCT_ID" && -n "$CLIENT_ID" && -n "$API_KEY" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping Microsoft Edge Add-ons upload — EDGE_PRODUCT_ID/EDGE_CLIENT_ID/EDGE_API_KEY secrets are not all set. The packaged zip is still available as a build artifact for manual upload."
+          fi
+      # Talks to the Edge Add-ons submission API (v1.1) directly with curl rather than a
+      # third-party package or Action, matching how the Chrome Web Store step above avoids a
+      # GitHub Marketplace Action -- one fewer opaque external dependency in a release pipeline.
+      # v1.1 auth is just two headers (no OAuth token exchange, unlike the superseded v1 API):
+      # https://learn.microsoft.com/microsoft-edge/extensions/update/api/using-addons-api
+      - name: Upload (and publish) to the Microsoft Edge Add-ons store
+        if: steps.creds.outputs.configured == 'true'
+        env:
+          PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+          CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+          API_KEY: ${{ secrets.EDGE_API_KEY }}
+        run: |
+          set -euo pipefail
+          zip_path=$(ls dist/*.zip | head -1)
+          base="https://api.addons.microsoftedge.microsoft.com/v1/products/$PRODUCT_ID"
+
+          # operation_id <headers-file> -- the Location header's value IS the operation ID (not a
+          # URL to follow); ${v##*/} also tolerates it arriving as a path/URL, harmlessly.
+          operation_id() {
+            local v
+            v="$(grep -i '^Location:' "$1" | tr -d '\r' | awk '{print $2}')"
+            echo "${v##*/}"
+          }
+
+          # poll <endpoint-template-with-%s> <operation-id> -- polls until the operation leaves
+          # "InProgress". Edge's docs give no fixed SLA for package processing; 30 tries * 10s is a
+          # generous 5-minute budget before failing loudly rather than hanging the job forever.
+          poll() {
+            local url status body
+            url="$(printf "$1" "$2")"
+            for _ in $(seq 1 30); do
+              body="$(curl -sS -H "Authorization: ApiKey $API_KEY" -H "X-ClientID: $CLIENT_ID" "$url")"
+              status="$(echo "$body" | jq -r '.status // empty' 2>/dev/null)"
+              case "$status" in
+                Succeeded|Completed) echo "$status"; return 0 ;;
+                Failed|Rejected) echo "error: operation failed: $body" >&2; return 1 ;;
+              esac
+              sleep 10
+            done
+            echo "error: operation did not finish in time: $body" >&2
+            return 1
+          }
+
+          echo "Uploading $zip_path..."
+          headers="$(mktemp)"
+          curl -sS -X POST -H "Authorization: ApiKey $API_KEY" -H "X-ClientID: $CLIENT_ID" \
+            -H "Content-Type: application/zip" --data-binary "@$zip_path" \
+            -D "$headers" -o /dev/null "$base/submissions/draft/package"
+          upload_op="$(operation_id "$headers")"
+          if [[ -z "$upload_op" ]]; then
+            echo "error: upload did not return an operation Location header:" >&2
+            cat "$headers" >&2
+            exit 1
+          fi
+          echo "Upload accepted (operation $upload_op), polling..."
+          poll "$base/submissions/draft/package/operations/%s" "$upload_op"
+          echo "Upload processed."
+
+          echo "Publishing the draft submission..."
+          curl -sS -X POST -H "Authorization: ApiKey $API_KEY" -H "X-ClientID: $CLIENT_ID" \
+            -H "Content-Type: application/json" -d '{}' \
+            -D "$headers" -o /dev/null "$base/submissions"
+          publish_op="$(operation_id "$headers")"
+          if [[ -z "$publish_op" ]]; then
+            echo "error: publish did not return an operation Location header:" >&2
+            cat "$headers" >&2
+            exit 1
+          fi
+          echo "Publish accepted (operation $publish_op), polling..."
+          poll "$base/submissions/operations/%s" "$publish_op"
+          echo "Published."

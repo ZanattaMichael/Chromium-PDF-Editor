@@ -11,7 +11,11 @@
 // the viewer and the service worker alike.
 
 /** The pinned Chrome Web Store ID. The manifest "key" forces this ID even when loaded unpacked. */
-export const PINNED_EXTENSION_ID = 'ikbkielkpaloojhibinmcfbeekhkdblc';
+export const PINNED_EXTENSION_ID = 'cbmfodojjlfppljbdebmpbcppngkkibi';
+
+/** The pinned Microsoft Edge Add-ons ID. Edge's own validator forbids a manifest "key", so this
+ *  one is not enforced by loading the extension unpacked — only the published Edge build has it. */
+export const EDGE_PINNED_EXTENSION_ID = 'kcppllhgnfmdbmglohgmabipeikopfhb';
 
 export const RELEASES_URL = 'https://github.com/ZanattaMichael/Chromium-PDF-Editor/releases/latest';
 
@@ -307,13 +311,13 @@ export function hostInstallGuide({ state, platform, extensionId = '', error = ''
 
     case HOST_STATE.FORBIDDEN:
       // Two different faults produce the identical browser message, and the usual advice is wrong
-      // for one of them. If this extension is the pinned Web Store build, the OS package's own
-      // manifest *does* list it -- so the manifest the browser actually read is a different,
-      // staler one. Chromium reads the per-user directory in preference to the system-wide one,
-      // so an earlier `install-host.sh <some-other-id>` keeps winning long after a correct
-      // package is installed, and telling someone to "re-register, your ID is not the pinned
-      // one" misdescribes their machine.
-      if (extensionId && extensionId === PINNED_EXTENSION_ID) {
+      // for one of them. If this extension is a pinned Web Store build (Chrome or Edge), the OS
+      // package's own manifest *does* list it -- so the manifest the browser actually read is a
+      // different, staler one. Chromium reads the per-user directory in preference to the
+      // system-wide one, so an earlier `install-host.sh <some-other-id>` keeps winning long after
+      // a correct package is installed, and telling someone to "re-register, your ID is not the
+      // pinned one" misdescribes their machine.
+      if (extensionId && [PINNED_EXTENSION_ID, EDGE_PINNED_EXTENSION_ID].includes(extensionId)) {
         guide.detail = 'This is the published build, and the OS packages pin their manifest to '
           + `exactly this ID (${extensionId}) — so the manifest the browser read is not the `
           + 'package’s. A per-user manifest from an earlier install takes precedence over the '
@@ -326,8 +330,9 @@ export function hostInstallGuide({ state, platform, extensionId = '', error = ''
         break;
       }
       guide.detail = 'A host is registered, but the manifest’s allowed_origins does not list '
-        + `this extension (${extensionId || 'unknown ID'}). The OS packages pin the published Web `
-        + 'Store ID, so a developer-mode or self-built extension needs its own registration.';
+        + `this extension (${extensionId || 'unknown ID'}). The OS packages pin the published `
+        + 'Chrome and Edge Web Store IDs, so a developer-mode or self-built extension needs its '
+        + 'own registration.';
       guide.steps = [
         reRegisterStep(platform, extensionId || '<your-extension-id>'),
         { text: 'Quit this browser completely and start it again.' },

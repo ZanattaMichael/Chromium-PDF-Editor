@@ -24,10 +24,17 @@ checklist for all of that.
 
 ## 1. One-time account + registration
 
-1. Create/enter a **Chrome Web Store developer account** (one-time US$5 fee) at
-   <https://chrome.google.com/webstore/devconsole>.
-2. Upload the packaged zip once (from a build artifact or `./scripts/package-extension.sh`) to
-   **register the item** and obtain its **Extension ID**. (You can save it as a draft.)
+- [x] **Done.** The item is registered: extension ID `cbmfodojjlfppljbdebmpbcppngkkibi`, committed
+      at `scripts/extension-id.txt` and used everywhere the native-messaging packages pin
+      `allowed_origins` to it. If you ever need to redo this from scratch:
+
+  1. Create/enter a **Chrome Web Store developer account** (one-time US$5 fee) at
+     <https://chrome.google.com/webstore/devconsole>.
+  2. Upload the packaged zip once (from a build artifact or `./scripts/package-extension.sh`) to
+     **register the item** and obtain its **Extension ID**. (You can save it as a draft.)
+  3. Update `scripts/extension-id.txt` to the ID the store assigned, and re-run
+     `node --test "extension/test/**/*.test.mjs"` — `host-install.test.mjs` checks
+     `extension/src/host-install.js`'s `PINNED_EXTENSION_ID` stays in sync with it.
 
 ## 2. API credentials for automated publishing
 

@@ -56,7 +56,7 @@ public class HostDiagnosticsTests
         // Chrome launches the host with the calling extension's origin as argv[0].
         var writer = new StringWriter();
         Assert.Null(HostDiagnostics.TryRunCli(
-            new[] { "chrome-extension://ikbkielkpaloojhibinmcfbeekhkdblc/" }, writer));
+            new[] { "chrome-extension://cbmfodojjlfppljbdebmpbcppngkkibi/" }, writer));
         Assert.Equal("", writer.ToString());
     }
 }

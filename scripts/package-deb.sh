@@ -4,8 +4,8 @@
 # The package installs the self-contained host under /opt/pdf-editor-host, exposes it on PATH as
 # /usr/bin/pdf-editor-host, and registers it system-wide with Chrome/Chromium by shipping the
 # native-messaging manifest as a package-owned file — so `apt remove` cleans it up automatically.
-# The manifest's allowed_origins is pinned to the extension ID (from $CHROME_EXTENSION_ID, else
-# scripts/extension-id.txt).
+# The manifest's allowed_origins is pinned to the Chrome and Edge extension IDs (from
+# $CHROME_EXTENSION_ID/$EDGE_EXTENSION_ID, else scripts/extension-id.txt/edge-extension-id.txt).
 #
 # Three things decide whether the browser actually finds the host, and all three are handled here:
 #   1. the manifest has to sit in the directory that browser build reads (see linux-manifest-dirs.sh);
@@ -34,6 +34,15 @@ if [[ -z "$EXTENSION_ID" && -f "$REPO_ROOT/scripts/extension-id.txt" ]]; then
 fi
 if [[ -z "$EXTENSION_ID" ]]; then
   echo "error: no extension ID (set CHROME_EXTENSION_ID or scripts/extension-id.txt)" >&2
+  exit 1
+fi
+
+EDGE_ID="${EDGE_EXTENSION_ID:-}"
+if [[ -z "$EDGE_ID" && -f "$REPO_ROOT/scripts/edge-extension-id.txt" ]]; then
+  EDGE_ID="$(tr -d '[:space:]' < "$REPO_ROOT/scripts/edge-extension-id.txt")"
+fi
+if [[ -z "$EDGE_ID" ]]; then
+  echo "error: no Edge extension ID (set EDGE_EXTENSION_ID or scripts/edge-extension-id.txt)" >&2
   exit 1
 fi
 
@@ -71,14 +80,17 @@ ln -sf "$INSTALL_DIR/$EXE" "$DEBROOT$LAUNCH_PATH"
 # Per-user registration helper — the only way to reach snap/flatpak browsers, and the escape hatch
 # for a developer-mode extension whose ID differs from the pinned one.
 install -Dm0755 "$REPO_ROOT/scripts/register-host.sh" "$DEBROOT$REGISTER_PATH"
-# Record the ID this package was built with, so the helper defaults to the same one.
+# Record the IDs this package was built with, so the helper defaults to the same ones.
 install -d -m0755 "$DEBROOT$SHARE_DIR"
 printf '%s\n' "$EXTENSION_ID" > "$DEBROOT$SHARE_DIR/extension-id"
 chmod 0644 "$DEBROOT$SHARE_DIR/extension-id"
+printf '%s\n' "$EDGE_ID" > "$DEBROOT$SHARE_DIR/edge-extension-id"
+chmod 0644 "$DEBROOT$SHARE_DIR/edge-extension-id"
 
-# Native-messaging manifest, pinned to the extension ID and pointing at the launcher symlink.
+# Native-messaging manifest, pinned to both extension IDs and pointing at the launcher symlink.
 render_manifest() {
   sed -e "s|__HOST_PATH__|$LAUNCH_PATH|" -e "s|__EXTENSION_ID__|$EXTENSION_ID|" \
+    -e "s|__EDGE_EXTENSION_ID__|$EDGE_ID|" \
     "$REPO_ROOT/scripts/com.pdfeditor.host.json.template"
 }
 # System-wide manifest dirs for the common Chromium-based browsers. Each browser reads only its
@@ -131,6 +143,7 @@ echo "PDF Editor native messaging host installed."
 echo "  host:     $LAUNCH_PATH -> $INSTALL_DIR/$EXE"
 echo "  manifest: $HOST_NAME.json, registered for Chrome, Chromium, Edge, Brave, Vivaldi and Opera"
 echo "  allowed:  chrome-extension://$EXTENSION_ID/"
+echo "            chrome-extension://$EDGE_ID/"
 
 if "$LAUNCH_PATH" --version >/dev/null 2>&1; then
   echo "  self-test: OK"
@@ -180,7 +193,8 @@ dpkg-deb --root-owner-group --build "$DEBROOT" "$DEB_PATH" >/dev/null
 
 echo
 echo "Built: $DEB_PATH ($(du -h "$DEB_PATH" | cut -f1))"
-echo "Extension ID pinned: $EXTENSION_ID"
+echo "Extension ID pinned:      $EXTENSION_ID"
+echo "Edge extension ID pinned: $EDGE_ID"
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   echo "deb_path=$DEB_PATH" >> "$GITHUB_OUTPUT"
 fi

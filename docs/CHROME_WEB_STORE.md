@@ -72,9 +72,9 @@ installed and link to the install instructions.
 **Graphics required by the store:**
 - [x] Store icon 128×128 — `extension/icons/icon128.png` (also mirrored at
       `docs/store/store-icon-128.png`, with a 512×512 master at `docs/store/store-icon-512.png`).
-- [ ] At least one **screenshot 1280×800** (or 640×400). The generated shots in
-      `docs/screenshots/` are a starting point but are captured at a different size — recapture at
-      1280×800 (adjust the viewport in `e2e/scripts/doc-shots.js`) or crop/pad to the required size.
+- [ ] At least one **screenshot 1280×800**. `e2e/scripts/doc-shots.js` now captures at exactly that
+      size (`node e2e/scripts/doc-shots.js`, needs the .NET SDK and Playwright's Chromium — see
+      CONTRIBUTING.md) — the shots in `docs/screenshots/` just haven't been regenerated with it yet.
 - [x] Optional: small promo tile 440×280 — `docs/store/small-promo-440x280.png`.
 - [x] Optional: marquee promo tile 1400×560 — `docs/store/marquee-1400x560.png`.
 

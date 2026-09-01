@@ -58,6 +58,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           if git diff --quiet -- docs/screenshots; then
@@ -73,8 +75,24 @@ jobs:
           git commit -m "Regenerate documentation/store screenshots"
           git push origin "$branch"
 
-          gh pr create \
+          # Best-effort, like release-extension.yml's GitHub Release attach step: the images are
+          # already generated and pushed by this point, which is the actual point of the job, so a
+          # repo with "Allow GitHub Actions to create pull requests" left off (the default) should
+          # not turn a successful screenshot run red over the one step that needs it.
+          if gh pr create \
             --title "Regenerate documentation/store screenshots" \
             --base "$DEFAULT_BRANCH" \
             --head "$branch" \
-            --body "Automated run of \`e2e/scripts/doc-shots.js\` via the Generate Screenshots workflow (run ${{ github.run_id }}). Every shot in the run's own summary reported ✓ (a ✗ would have failed the job before this step), but review the images themselves before merging -- nothing here checks that a screenshot shows the right *thing*, only that it was captured."
+            --body "Automated run of \`e2e/scripts/doc-shots.js\` via the Generate Screenshots workflow ($RUN_URL). Every shot in the run's own summary reported ✓ (a ✗ would have failed the job before this step), but review the images themselves before merging -- nothing here checks that a screenshot shows the right *thing*, only that it was captured."
+          then
+            exit 0
+          fi
+
+          compare_url="${{ github.server_url }}/$REPO/compare/$DEFAULT_BRANCH...$branch?expand=1"
+          echo "::warning::Could not open a PR automatically (likely \"Allow GitHub Actions to create and approve pull requests\" is off under Settings > Actions > General). The screenshots are pushed to $branch -- open one by hand: $compare_url"
+          {
+            echo "## Screenshots pushed, PR needs opening by hand"
+            echo "Branch \`$branch\` has the regenerated images, but this token isn't allowed to open a"
+            echo "pull request. Either open one at $compare_url, or enable \"Allow GitHub Actions to"
+            echo "create and approve pull requests\" under Settings > Actions > General and re-run."
+          } >> "$GITHUB_STEP_SUMMARY"

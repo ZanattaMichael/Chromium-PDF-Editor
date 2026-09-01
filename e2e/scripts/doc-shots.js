@@ -41,7 +41,8 @@ async function ui(page, sel) {
 
 async function openViewer(ext) {
   const page = await ext.context.newPage();
-  await page.setViewportSize({ width: 1440, height: 960 });
+  // The Chrome/Edge store listings want a 1280x800 screenshot exactly.
+  await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(ext.viewerUrl);
   const chooser = page.waitForEvent('filechooser');
   await page.click('#btn-open-empty');
@@ -83,8 +84,9 @@ async function shot(page, name, fn) {
     execFileSync('node', [path.join(REPO_ROOT, 'scripts', 'generate-sample-pdf.mjs')], { stdio: 'inherit' });
   }
   buildPrerequisites();
-  // The Chrome/Edge store listings want a 1280x800 screenshot; Playwright's own default
-  // (1280x720) is 80px short.
+  // The context-level default; every page this script actually screenshots is opened by
+  // openViewer() below, which sets its own per-page size that wins over this -- keep both in
+  // sync. This one only matters for a page opened some other way (there is currently none).
   const ext = await launchExtension({ viewport: { width: 1280, height: 800 } });
   try {
     // 1) Overview — the document open, both charts visible on page 1.

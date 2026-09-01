@@ -185,8 +185,9 @@ async function launchExtension({ host: hostSource = 'profile', viewport } = {}) 
       `--load-extension=${EXTENSION_DIR}`,
     ],
   };
-  // Undefined leaves Playwright's own default (1280x720) for every caller except doc-shots.js,
-  // which needs the store's exact 1280x800 screenshot size.
+  // Undefined leaves Playwright's own context-level default for every caller except
+  // doc-shots.js. Note this is only the *context* default: a page that later calls
+  // page.setViewportSize() (as doc-shots.js's openViewer() does) overrides it per-page.
   if (viewport) {
     launchOptions.viewport = viewport;
   }

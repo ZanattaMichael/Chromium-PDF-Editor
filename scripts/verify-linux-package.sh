@@ -23,6 +23,11 @@ if [[ -z "$EXPECTED_ID" && -f "$REPO_ROOT/scripts/extension-id.txt" ]]; then
   EXPECTED_ID="$(tr -d '[:space:]' < "$REPO_ROOT/scripts/extension-id.txt")"
 fi
 
+EXPECTED_EDGE_ID="${EDGE_EXTENSION_ID:-}"
+if [[ -z "$EXPECTED_EDGE_ID" && -f "$REPO_ROOT/scripts/edge-extension-id.txt" ]]; then
+  EXPECTED_EDGE_ID="$(tr -d '[:space:]' < "$REPO_ROOT/scripts/edge-extension-id.txt")"
+fi
+
 if [[ $# -eq 0 ]]; then
   echo "Usage: $0 <package> [<package>...]" >&2
   exit 1
@@ -132,12 +137,14 @@ verify_one() {
     fail "manifest points at '$host_path', expected '$LAUNCH_PATH'"
   fi
 
-  # 4. allowed_origins must be the pinned extension ID, with the trailing slash Chrome requires.
-  if [[ -n "$EXPECTED_ID" ]]; then
-    if [[ "$origins" == "chrome-extension://$EXPECTED_ID/" ]]; then
-      pass "allowed_origins pinned to $EXPECTED_ID"
+  # 4. allowed_origins must be the pinned Chrome and Edge extension IDs, with the trailing slash
+  #    Chrome requires, Chrome first then Edge (the order every renderer here uses).
+  if [[ -n "$EXPECTED_ID" && -n "$EXPECTED_EDGE_ID" ]]; then
+    expected="chrome-extension://$EXPECTED_ID/,chrome-extension://$EXPECTED_EDGE_ID/"
+    if [[ "$origins" == "$expected" ]]; then
+      pass "allowed_origins pinned to $EXPECTED_ID and $EXPECTED_EDGE_ID"
     else
-      fail "allowed_origins is '$origins', expected 'chrome-extension://$EXPECTED_ID/'"
+      fail "allowed_origins is '$origins', expected '$expected'"
     fi
   fi
 

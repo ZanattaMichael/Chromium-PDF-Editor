@@ -194,8 +194,8 @@ It builds the `.deb` (or reuses one via `PDF_EDITOR_DEB=/path/to.deb`), installs
 tests, and purges the package again afterwards, pass or fail. Installing needs root, so it uses
 `sudo` when you are not already root, and it refuses to run over an existing install rather than
 removing a host you use. It works because the extension's manifest `key` pins its ID to the
-published Web Store one even when loaded unpacked — the same ID the package writes into
-`allowed_origins`.
+published Chrome Web Store one even when loaded unpacked (in any Chromium-based browser, not
+just Chrome) — one of the two IDs the package writes into `allowed_origins`.
 
 CI runs it as the `package-install-e2e` job. The `.deb` is the only one of the three Linux
 packages an Ubuntu runner can install; the `.rpm` and Arch packages are checked structurally
@@ -428,11 +428,15 @@ a missing runtime library is reported at install time rather than discovered in 
 
 > [!IMPORTANT]
 > These packages pin the host's `allowed_origins` to the **published Chrome Web Store
-> extension ID** (`ikbkielkpaloojhibinmcfbeekhkdblc`). They work only for the extension
-> installed **from the Web Store**, which has that exact ID.
+> extension ID** (`cbmfodojjlfppljbdebmpbcppngkkibi`) **and Microsoft Edge Add-ons ID**
+> (`kcppllhgnfmdbmglohgmabipeikopfhb`). They work only for the extension installed **from
+> one of those stores**, which has one of those exact IDs.
 >
 > A **developer-mode / unpacked** extension — including one loaded to test the dry-run
-> packages built by CI — gets a *different*, machine-specific ID, so the pinned origin will
+> packages built by CI — gets the ID the manifest's `key` computes to (the same one in every
+> Chromium-based browser, Edge included, since `key` — not the browser — determines the ID),
+> which matches the pinned Chrome ID above and so still connects. A **custom-built or
+> re-keyed** extension gets a *different*, machine-specific ID, so the pinned origins will
 > not match and the host connection is refused ("Specified native messaging host not found"
 > or a rejected connection). Two ways to fix it:
 >

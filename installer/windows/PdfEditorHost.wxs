@@ -13,7 +13,8 @@
     HostDir       published win-x64 self-contained host folder (harvested)
     ManifestJson  path to the rendered com.pdfeditor.host.json (allowed_origins pinned)
     RegisterScript  path to scripts/register-host.ps1 (per-user re-registration helper)
-    ExtensionIdFile path to a file holding the pinned extension ID, shipped next to the script
+    ExtensionIdFile path to a file holding the pinned Chrome extension ID, shipped next to the script
+    EdgeExtensionIdFile path to a file holding the pinned Edge extension ID, shipped next to the script
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="PDF Editor Native Host"
@@ -47,13 +48,14 @@
 
     <!-- The per-user re-registration helper, installed next to the host so someone who installed
          the MSI (and therefore has no repository checkout) can still run it. The MSI pins
-         allowed_origins to the published Web Store ID; a developer-mode extension has a different
-         ID and needs a per-user manifest, which Chromium reads from HKCU in preference to the HKLM
-         values below. extension-id.txt carries the ID this MSI was built with so the script
-         defaults to the same one. -->
+         allowed_origins to the published Chrome and Edge Web Store IDs; a developer-mode extension
+         has a different ID and needs a per-user manifest, which Chromium reads from HKCU in
+         preference to the HKLM values below. extension-id.txt / edge-extension-id.txt carry the
+         IDs this MSI was built with so the script defaults to the same ones. -->
     <Component Id="HostRegisterTools" Directory="INSTALLFOLDER" Guid="E45AB775-539D-4B94-923C-1741789D36E4">
       <File Id="RegisterHostPs1" Source="$(var.RegisterScript)" Name="register-host.ps1" KeyPath="yes" />
       <File Id="PinnedExtensionId" Source="$(var.ExtensionIdFile)" Name="extension-id.txt" />
+      <File Id="PinnedEdgeExtensionId" Source="$(var.EdgeExtensionIdFile)" Name="edge-extension-id.txt" />
     </Component>
 
     <!-- The registry pointers that register the manifest with each Chromium-based browser.

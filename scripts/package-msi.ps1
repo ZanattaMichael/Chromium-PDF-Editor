@@ -5,10 +5,11 @@
 # not built in the Linux dev box.
 #
 # It publishes the self-contained win-x64 host, renders the native-messaging manifest with the
-# pinned extension ID (the manifest's "path" is relative to itself, which Chrome allows on Windows),
-# and invokes `wix build` against installer/windows/PdfEditorHost.wxs. The MSI also ships
-# register-host.ps1 and the pinned extension ID next to the host, so an installed-from-MSI user can
-# re-register per-user for a developer-mode extension without a repository checkout.
+# pinned Chrome and Edge extension IDs (the manifest's "path" is relative to itself, which Chrome
+# allows on Windows), and invokes `wix build` against installer/windows/PdfEditorHost.wxs. The MSI
+# also ships register-host.ps1 and the pinned extension IDs next to the host, so an
+# installed-from-MSI user can re-register per-user for a developer-mode extension without a
+# repository checkout.
 #
 # Usage: .\scripts\package-msi.ps1 [-OutputDir dist]
 param(
@@ -19,12 +20,19 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 
 $version = (Get-Content (Join-Path $repoRoot "extension\manifest.json") -Raw | ConvertFrom-Json).version
 
-# Pinned extension ID: $env:CHROME_EXTENSION_ID wins, else the committed extension-id.txt.
+# Pinned extension IDs: $env:CHROME_EXTENSION_ID / $env:EDGE_EXTENSION_ID win, else the committed
+# extension-id.txt / edge-extension-id.txt.
 $extensionId = $env:CHROME_EXTENSION_ID
 if (-not $extensionId) {
     $extensionId = (Get-Content (Join-Path $PSScriptRoot "extension-id.txt") -Raw).Trim()
 }
 if (-not $extensionId) { throw "No extension ID (set CHROME_EXTENSION_ID or provide extension-id.txt)." }
+
+$edgeExtensionId = $env:EDGE_EXTENSION_ID
+if (-not $edgeExtensionId) {
+    $edgeExtensionId = (Get-Content (Join-Path $PSScriptRoot "edge-extension-id.txt") -Raw).Trim()
+}
+if (-not $edgeExtensionId) { throw "No Edge extension ID (set EDGE_EXTENSION_ID or provide edge-extension-id.txt)." }
 
 $stage = Join-Path ([System.IO.Path]::GetTempPath()) ("pdfeditor-msi-" + [guid]::NewGuid())
 $hostDir = Join-Path $stage "host"
@@ -38,15 +46,17 @@ dotnet publish (Join-Path $repoRoot "src\PdfEditor.NativeHost") `
 # explicitly -- otherwise the script sails past a failed publish and reports a build it never made.
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE." }
 
-# Render the native-messaging manifest with a relative exe path and the pinned allowed origin.
+# Render the native-messaging manifest with a relative exe path and the pinned allowed origins.
 $template = Get-Content (Join-Path $PSScriptRoot "com.pdfeditor.host.json.template") -Raw
 $manifestJson = Join-Path $stage "com.pdfeditor.host.json"
-$template.Replace("__HOST_PATH__", "PdfEditor.NativeHost.exe").Replace("__EXTENSION_ID__", $extensionId) |
+$template.Replace("__HOST_PATH__", "PdfEditor.NativeHost.exe").Replace("__EXTENSION_ID__", $extensionId).Replace("__EDGE_EXTENSION_ID__", $edgeExtensionId) |
     Set-Content -Path $manifestJson -Encoding UTF8
 
-# Shipped alongside the host so register-host.ps1 defaults to the same ID this MSI pinned.
+# Shipped alongside the host so register-host.ps1 defaults to the same IDs this MSI pinned.
 $extensionIdFile = Join-Path $stage "extension-id.txt"
 Set-Content -Path $extensionIdFile -Value $extensionId -Encoding ascii -NoNewline
+$edgeExtensionIdFile = Join-Path $stage "edge-extension-id.txt"
+Set-Content -Path $edgeExtensionIdFile -Value $edgeExtensionId -Encoding ascii -NoNewline
 
 $outDirFull = Join-Path $repoRoot $OutputDir
 New-Item -ItemType Directory -Force -Path $outDirFull | Out-Null
@@ -63,8 +73,10 @@ wix build (Join-Path $repoRoot "installer\windows\PdfEditorHost.wxs") -arch x64 
     -d "Version=$version" -d "HostDir=$hostDir" -d "ManifestJson=$manifestJson" `
     -d "RegisterScript=$(Join-Path $PSScriptRoot 'register-host.ps1')" `
     -d "ExtensionIdFile=$extensionIdFile" `
+    -d "EdgeExtensionIdFile=$edgeExtensionIdFile" `
     -o $msiPath
 if ($LASTEXITCODE -ne 0) { throw "wix build failed with exit code $LASTEXITCODE." }
 
 Write-Host "Built: $msiPath"
-Write-Host "Extension ID pinned: $extensionId"
+Write-Host "Extension ID pinned:      $extensionId"
+Write-Host "Edge extension ID pinned: $edgeExtensionId"

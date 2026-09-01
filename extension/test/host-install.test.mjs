@@ -1,12 +1,26 @@
 // Unit tests for the native-host install diagnosis (see extension/src/host-install.js).
 // Run with: node --test extension/test/host-install.test.mjs
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import {
-  HOST_STATE, PINNED_EXTENSION_ID, classifyHostError, detectPlatform,
+  EDGE_PINNED_EXTENSION_ID, HOST_STATE, PINNED_EXTENSION_ID, classifyHostError, detectPlatform,
   hostInstallGuide, hostInstallGuideLines, hostStateSummary,
 } from '../src/host-install.js';
+
+const repoFile = (rel) => readFileSync(fileURLToPath(new URL(`../../${rel}`, import.meta.url)), 'utf8');
+
+// The algorithm Chromium uses to derive an extension's ID from its manifest "key": SHA-256 of the
+// DER-encoded public key, first 16 bytes, each nibble mapped to a-p.
+function crxIdFromKey(base64Key) {
+  const digest = createHash('sha256').update(Buffer.from(base64Key, 'base64')).digest();
+  return [...digest.subarray(0, 16)]
+    .map((b) => String.fromCharCode(97 + (b >> 4)) + String.fromCharCode(97 + (b & 0xf)))
+    .join('');
+}
 
 // A stand-in for the ID an unpacked, developer-mode extension gets: 32 characters from a-p,
 // and deliberately not the pinned Web Store one the OS packages register.
@@ -228,8 +242,32 @@ test('hostInstallGuide tolerates being called with nothing', () => {
   assert.deepEqual(hostInstallGuideLines(null), []);
 });
 
-test('the pinned ID is a well-formed extension ID', () => {
-  // The packages pin allowed_origins to exactly this; a typo here would be invisible until a
+test('the pinned IDs are well-formed extension IDs', () => {
+  // The packages pin allowed_origins to exactly these; a typo here would be invisible until a
   // browser silently refused the connection.
   assert.match(PINNED_EXTENSION_ID, /^[a-p]{32}$/);
+  assert.match(EDGE_PINNED_EXTENSION_ID, /^[a-p]{32}$/);
+  assert.notEqual(PINNED_EXTENSION_ID, EDGE_PINNED_EXTENSION_ID);
+});
+
+test('the pinned IDs agree with every other copy of them in the repo', () => {
+  // Four independent copies of the same two IDs exist, by nature of what each one is: this
+  // constant (used for the extension's own diagnostics), the committed default the native-host
+  // packagers/registration scripts fall back to, and extension/manifest.json's "key" (which
+  // determines the *actual* ID Chromium assigns an unpacked load of this extension). None of
+  // them derive from each other, so nothing stops them drifting apart silently -- which is
+  // exactly what happened here before this test existed (see git history around this line).
+  assert.equal(
+    PINNED_EXTENSION_ID, repoFile('scripts/extension-id.txt').trim(),
+    'PINNED_EXTENSION_ID must match scripts/extension-id.txt');
+  assert.equal(
+    EDGE_PINNED_EXTENSION_ID, repoFile('scripts/edge-extension-id.txt').trim(),
+    'EDGE_PINNED_EXTENSION_ID must match scripts/edge-extension-id.txt');
+
+  const manifestKey = JSON.parse(repoFile('extension/manifest.json')).key;
+  assert.ok(manifestKey, 'extension/manifest.json must have a "key" -- see host-install.js');
+  assert.equal(
+    crxIdFromKey(manifestKey), PINNED_EXTENSION_ID,
+    'extension/manifest.json\'s "key" must compute to PINNED_EXTENSION_ID, or an unpacked load '
+    + 'gets an ID the native-host packages never allow');
 });

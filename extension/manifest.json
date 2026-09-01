@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "reDACT PDF Editor",
   "version": "2.0.2",
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArK1fIDsukhIoTqFOKiZr6Beg2PtYsnlFkqcxMd31yjMkE7KIwFj8/tc2HoBUICzCbE4YI53TTyq//Fx1beLafT0oRL3LJSN7aMkdutz4mnkOCxVVrP8Og2tZJgp9uLH1OADxzOzhun/5Vj1PvTmDwKIwTjJ6qSN93xOpgzSS5yqiWJbpHthYpsxay5kSiOy4C6qxPKYp/u0s0pVhTjuUUjcgmrAWp/xo5Eov6vLsaonfVJVgcApdaUrBXQ3+uUnQrxR9AdVxcCZ7FL0Am9J/iJ0poha2mss2tarpbn+jZ3GQWwE52a2pNg6MjYElXczApal5b6IL/pqaICG+GQP5lQIDAQAB",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnCJtKqFQacaY0uHvI7We7kYlDq+uL4gX3nRSnSKAOKlOO5tyOzvSc4D5mCMb6qIDBBOzwiOZR2MBizmMTY/cqRf/1wZALr0g4+ZqNFiUpZYXDlLeiuR8KgjTU+25qYPFJQuuGlhnUGu4P43lYl6YRDOb+kUFjRyKRcZ4emCu93VLm3/hS1DfWjz65HT0kp8sGfwGBnTnLhJqGiHzavQmTFFvXp4c3Zu/ndx4XRlyp9f3dY3w0F3f5IQCLhsRLwt1zOpWcrYYij9heqsfZk6Pom8D+FEDCoIfjmat75Xn6gP5CDx6WItsrmi2xZOifMibCxzcDoc/IoIRHCczFZ154QIDAQAB",
   "description": "Edit text, truly redact, merge, OCR, sign and encrypt PDFs in your browser. Processed locally \u2014 files never leave your PC.",
   "minimum_chrome_version": "116",
   "permissions": [

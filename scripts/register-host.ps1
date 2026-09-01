@@ -1,10 +1,10 @@
 # Registers an already-installed PDF Editor native messaging host with the *current user's*
 # Chromium-based browsers on Windows. The counterpart of scripts/register-host.sh on Linux/macOS.
 #
-# The MSI registers the host machine-wide under HKLM and pins allowed_origins to the published Web
-# Store extension ID. That is right for the common case and wrong for one: a developer-mode /
-# unpacked extension has a different, machine-specific ID, so the pinned origin never matches and
-# the browser refuses the connection. Chromium looks in HKEY_CURRENT_USER before
+# The MSI registers the host machine-wide under HKLM and pins allowed_origins to the published
+# Chrome and Edge Web Store extension IDs. That is right for the common case and wrong for one: a
+# developer-mode / unpacked extension has a different, machine-specific ID, so the pinned origins
+# never match and the browser refuses the connection. Chromium looks in HKEY_CURRENT_USER before
 # HKEY_LOCAL_MACHINE, so writing a per-user manifest here overrides the MSI's without touching it.
 #
 # The MSI installs this script next to the host (Program Files\PDF Editor Host\register-host.ps1)
@@ -13,9 +13,10 @@
 # is safe to re-run.
 #
 # Usage:
-#   .\register-host.ps1 [-ExtensionId <id>] [-HostPath <path>] [-List] [-Uninstall]
+#   .\register-host.ps1 [-ExtensionId <id>] [-EdgeExtensionId <id>] [-HostPath <path>] [-List] [-Uninstall]
 param(
     [string]$ExtensionId = "",
+    [string]$EdgeExtensionId = "",
     [string]$HostPath = "",
     [switch]$List,
     [switch]$Uninstall
@@ -24,9 +25,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 $hostName = "com.pdfeditor.host"
-# Pinned Chrome Web Store extension ID, used when nothing else supplies one. The MSI drops the ID
-# it was built with next to the host so a rebuild for a different ID stays self-consistent.
-$defaultExtensionId = "ikbkielkpaloojhibinmcfbeekhkdblc"
+# Pinned Chrome and Edge Web Store extension IDs, used when nothing else supplies one. The MSI
+# drops the IDs it was built with next to the host so a rebuild for different IDs stays
+# self-consistent.
+$defaultExtensionId = "cbmfodojjlfppljbdebmpbcppngkkibi"
+$defaultEdgeExtensionId = "kcppllhgnfmdbmglohgmabipeikopfhb"
 
 # Per-user manifests live under LOCALAPPDATA: HKCU keys are per-user, so pointing them at a
 # machine-wide file the user cannot rewrite would defeat the purpose.
@@ -62,10 +65,21 @@ if (-not $ExtensionId) {
 }
 if (-not $ExtensionId) { $ExtensionId = $defaultExtensionId }
 
-# A Chrome extension ID is exactly 32 characters from a-p (a base-16 digest re-encoded into
-# letters). Catching a typo here beats a browser silently refusing the connection later.
+if (-not $EdgeExtensionId) { $EdgeExtensionId = $env:EDGE_EXTENSION_ID }
+if (-not $EdgeExtensionId) {
+    $edgeIdFile = Join-Path $PSScriptRoot "edge-extension-id.txt"
+    if (Test-Path $edgeIdFile) { $EdgeExtensionId = (Get-Content $edgeIdFile -Raw).Trim() }
+}
+if (-not $EdgeExtensionId) { $EdgeExtensionId = $defaultEdgeExtensionId }
+
+# A Chromium extension ID is exactly 32 characters from a-p (a base-16 digest re-encoded into
+# letters), for Chrome and Edge alike. Catching a typo here beats a browser silently refusing the
+# connection later.
 if ($ExtensionId -cnotmatch '^[a-p]{32}$') {
     throw "'$ExtensionId' is not a valid extension ID (expected 32 characters, a-p). Find yours at chrome://extensions with Developer mode on."
+}
+if ($EdgeExtensionId -cnotmatch '^[a-p]{32}$') {
+    throw "'$EdgeExtensionId' is not a valid Edge extension ID (expected 32 characters, a-p)."
 }
 
 # ------------------------------------------------------------------- host path
@@ -104,7 +118,8 @@ if ($HostPath) { $HostPath = [System.IO.Path]::GetFullPath($HostPath) }
 # ---------------------------------------------------------------------- actions
 
 if ($List) {
-    Write-Host "Extension ID: $ExtensionId"
+    Write-Host "Extension ID:      $ExtensionId"
+    Write-Host "Edge extension ID: $EdgeExtensionId"
     if ($HostPath) { Write-Host "Host path:    $HostPath" } else { Write-Host "Host path:    <not found>" }
     Write-Host "Manifest:     $manifestPath"
     Write-Host "Registry keys:"
@@ -145,7 +160,8 @@ $manifest = @"
   "path": "$escapedHostPath",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://$ExtensionId/"
+    "chrome-extension://$ExtensionId/",
+    "chrome-extension://$EdgeExtensionId/"
   ]
 }
 "@
@@ -160,9 +176,10 @@ foreach ($root in $registryRoots) {
 
 Write-Host ""
 Write-Host "Registered the host for this user in $($registryRoots.Count) location(s)."
-Write-Host "  host path:    $HostPath"
-Write-Host "  extension ID: $ExtensionId"
-Write-Host "  manifest:     $manifestPath"
+Write-Host "  host path:         $HostPath"
+Write-Host "  extension ID:      $ExtensionId"
+Write-Host "  Edge extension ID: $EdgeExtensionId"
+Write-Host "  manifest:          $manifestPath"
 
 # The host is only useful if it actually starts. A host that exits immediately is reported by the
 # browser as one that "has exited", which looks much like a host that was never installed -- say so

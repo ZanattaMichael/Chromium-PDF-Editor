@@ -7,23 +7,28 @@
 #
 #   * snap and flatpak browsers  -- they run sandboxed and read their manifests from inside the
 #     sandbox's own config tree (~/snap/... or ~/.var/app/...), never from /etc.
-#   * a developer-mode extension -- the packages pin allowed_origins to the published Web Store
-#     extension ID; an unpacked extension has a different, machine-specific ID, so it needs its own
-#     manifest. A per-user manifest takes precedence over the system-wide one.
+#   * a developer-mode extension whose ID is neither published one -- the packages pin
+#     allowed_origins to the published Chrome and Edge Web Store IDs; a custom-built/re-keyed
+#     extension has a different ID, so it needs its own manifest. A per-user manifest takes
+#     precedence over the system-wide one.
 #
 # This script fixes both. It only writes manifests -- it never downloads or builds anything, so it
 # is safe to re-run. The Linux packages install it as /usr/bin/pdf-editor-host-register; it also
 # runs on macOS, where scripts/install-host.sh delegates its registration step to it.
 #
 # Usage:
-#   pdf-editor-host-register [--extension-id ID] [--host-path PATH] [--uninstall] [--list]
+#   pdf-editor-host-register [--extension-id ID] [--edge-extension-id ID] [--host-path PATH]
+#                             [--uninstall] [--list]
 set -euo pipefail
 
 HOST_NAME="com.pdfeditor.host"
-# Pinned Chrome Web Store extension ID, used when nothing else supplies one. The packages drop the
-# ID they were built with next to the host so a rebuild for a different ID stays self-consistent.
-DEFAULT_EXTENSION_ID="ikbkielkpaloojhibinmcfbeekhkdblc"
+# Pinned Chrome and Edge Web Store extension IDs, used when nothing else supplies one. The
+# packages drop the IDs they were built with next to the host so a rebuild for different IDs
+# stays self-consistent.
+DEFAULT_EXTENSION_ID="cbmfodojjlfppljbdebmpbcppngkkibi"
+DEFAULT_EDGE_EXTENSION_ID="kcppllhgnfmdbmglohgmabipeikopfhb"
 EXTENSION_ID_FILE="/usr/share/pdf-editor-host/extension-id"
+EDGE_EXTENSION_ID_FILE="/usr/share/pdf-editor-host/edge-extension-id"
 # Where the OS packages put the host. The /usr/bin entry is a symlink onto the second path; it is
 # preferred because sandboxed browsers are far more likely to be allowed to execute /usr/bin.
 HOST_PATH_CANDIDATES=(
@@ -33,6 +38,7 @@ HOST_PATH_CANDIDATES=(
 )
 
 EXTENSION_ID=""
+EDGE_ID=""
 HOST_PATH=""
 MODE="install"
 
@@ -40,19 +46,22 @@ usage() {
   cat >&2 <<'USAGE'
 Usage: pdf-editor-host-register [options]
 
-  --extension-id ID   Extension ID to allow (default: the pinned Web Store ID, or the ID the
-                      installed package was built with). Use your unpacked extension's ID --
-                      find it at chrome://extensions with Developer mode on.
-  --host-path PATH    Path to the host executable (default: autodetected).
-  --uninstall         Remove the per-user manifests this script wrote.
-  --list              Show what would be written (or removed) and exit.
-  -h, --help          This message.
+  --extension-id ID        Chrome/Chromium extension ID to allow (default: the pinned Web Store
+                           ID, or the ID the installed package was built with). Use your unpacked
+                           extension's ID -- find it at chrome://extensions with Developer mode on.
+  --edge-extension-id ID   Same, for Microsoft Edge (default: the pinned Edge Add-ons ID, or the
+                           ID the installed package was built with).
+  --host-path PATH         Path to the host executable (default: autodetected).
+  --uninstall              Remove the per-user manifests this script wrote.
+  --list                   Show what would be written (or removed) and exit.
+  -h, --help               This message.
 USAGE
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --extension-id) EXTENSION_ID="${2:?--extension-id needs a value}"; shift 2 ;;
+    --extension-id)      EXTENSION_ID="${2:?--extension-id needs a value}"; shift 2 ;;
+    --edge-extension-id) EDGE_ID="${2:?--edge-extension-id needs a value}"; shift 2 ;;
     --host-path)    HOST_PATH="${2:?--host-path needs a value}"; shift 2 ;;
     --uninstall)    MODE="uninstall"; shift ;;
     --list)         MODE="list"; shift ;;
@@ -69,10 +78,23 @@ if [[ -z "$EXTENSION_ID" && -r "$EXTENSION_ID_FILE" ]]; then
 fi
 : "${EXTENSION_ID:=$DEFAULT_EXTENSION_ID}"
 
-# A Chrome extension ID is exactly 32 characters from a-p (a base-16 digest re-encoded into
-# letters). Catching a typo here beats a browser silently refusing the connection later.
+if [[ -z "$EDGE_ID" ]]; then
+  EDGE_ID="${EDGE_EXTENSION_ID:-}"
+fi
+if [[ -z "$EDGE_ID" && -r "$EDGE_EXTENSION_ID_FILE" ]]; then
+  EDGE_ID="$(tr -d '[:space:]' < "$EDGE_EXTENSION_ID_FILE")"
+fi
+: "${EDGE_ID:=$DEFAULT_EDGE_EXTENSION_ID}"
+
+# A Chromium extension ID is exactly 32 characters from a-p (a base-16 digest re-encoded into
+# letters), for Chrome and Edge alike. Catching a typo here beats a browser silently refusing the
+# connection later.
 if [[ ! "$EXTENSION_ID" =~ ^[a-p]{32}$ ]]; then
   echo "error: '$EXTENSION_ID' is not a valid extension ID (expected 32 characters, a-p)" >&2
+  exit 1
+fi
+if [[ ! "$EDGE_ID" =~ ^[a-p]{32}$ ]]; then
+  echo "error: '$EDGE_ID' is not a valid Edge extension ID (expected 32 characters, a-p)" >&2
   exit 1
 fi
 
@@ -216,7 +238,8 @@ add_flatpak com.opera.Opera opera
 # -------------------------------------------------------------------- actions
 
 if [[ "$MODE" == "list" ]]; then
-  echo "Extension ID: $EXTENSION_ID"
+  echo "Extension ID:      $EXTENSION_ID"
+  echo "Edge extension ID: $EDGE_ID"
   echo "Host path:    ${HOST_PATH:-<not found>}"
   if [[ -n "$HOST_PATH" && "$FLATPAK_HOST_PATH" != "$HOST_PATH" ]]; then
     echo "  (flatpak:   $FLATPAK_HOST_PATH -- flatpak will not share $HOST_PATH into a sandbox)"
@@ -256,7 +279,8 @@ manifest_for() {
   "path": "$1",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://$EXTENSION_ID/"
+    "chrome-extension://$EXTENSION_ID/",
+    "chrome-extension://$EDGE_ID/"
   ]
 }
 MANIFEST_JSON
@@ -278,8 +302,9 @@ done
 
 echo
 echo "Registered the host for this user in $written location(s)."
-echo "  host path:    $HOST_PATH"
-echo "  extension ID: $EXTENSION_ID"
+echo "  host path:         $HOST_PATH"
+echo "  extension ID:      $EXTENSION_ID"
+echo "  Edge extension ID: $EDGE_ID"
 
 # The host is only useful if it actually starts; a self-contained .NET build that is missing a
 # system library exits immediately and the browser reports it as a host that "has exited", which

@@ -83,7 +83,9 @@ async function shot(page, name, fn) {
     execFileSync('node', [path.join(REPO_ROOT, 'scripts', 'generate-sample-pdf.mjs')], { stdio: 'inherit' });
   }
   buildPrerequisites();
-  const ext = await launchExtension();
+  // The Chrome/Edge store listings want a 1280x800 screenshot; Playwright's own default
+  // (1280x720) is 80px short.
+  const ext = await launchExtension({ viewport: { width: 1280, height: 800 } });
   try {
     // 1) Overview — the document open, both charts visible on page 1.
     let page = await openViewer(ext);

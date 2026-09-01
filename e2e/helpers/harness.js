@@ -142,7 +142,7 @@ function systemHostManifests() {
  *   a leftover installed package turns "no host" into a connected one, and a missing package
  *   turns the package suite into a test of nothing.
  */
-async function launchExtension({ host: hostSource = 'profile' } = {}) {
+async function launchExtension({ host: hostSource = 'profile', viewport } = {}) {
   // Only the two host sources that depend on what is installed system-wide look; the default
   // registers its own host into the profile and would just be paying for the scan.
   const systemManifests = hostSource === 'profile' ? [] : systemHostManifests();
@@ -185,6 +185,11 @@ async function launchExtension({ host: hostSource = 'profile' } = {}) {
       `--load-extension=${EXTENSION_DIR}`,
     ],
   };
+  // Undefined leaves Playwright's own default (1280x720) for every caller except doc-shots.js,
+  // which needs the store's exact 1280x800 screenshot size.
+  if (viewport) {
+    launchOptions.viewport = viewport;
+  }
   if (executablePath) {
     launchOptions.executablePath = executablePath;
   } else {

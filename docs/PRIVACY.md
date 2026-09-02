@@ -6,9 +6,6 @@ _Last updated: 2026-08-31_
 > URL (e.g. GitHub Pages), and enter that URL in the Chrome Web Store listing. A privacy
 > policy URL is **required** for this extension because it requests broad host access.
 
-**Developer:** `<your name / organisation>`
-**Contact:** `<your support email>`
-
 ## The short version
 
 reDACT edits your PDFs **on your own computer**. The document content is processed by a

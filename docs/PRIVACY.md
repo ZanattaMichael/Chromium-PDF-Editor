@@ -53,7 +53,3 @@ from anyone.
 
 If this policy changes, the "Last updated" date above will change and the new version will be
 published at the same URL.
-
-## Contact
-
-Questions about this policy: `<your support email>`.

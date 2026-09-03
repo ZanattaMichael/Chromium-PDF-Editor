@@ -15,11 +15,12 @@
 // whatever was last committed. Nothing fails either way; the number is just wrong everywhere it
 // is shown, and host-version.js compares only major.minor, so the drift raises no banner.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const repoFile = (rel) => readFileSync(fileURLToPath(new URL(`../../${rel}`, import.meta.url)), 'utf8');
+const repoDir = (rel) => readdirSync(fileURLToPath(new URL(`../../${rel}`, import.meta.url)));
 
 const manifestVersion = JSON.parse(repoFile('extension/manifest.json')).version;
 const props = repoFile('Directory.Build.props');
@@ -70,6 +71,40 @@ test('no workflow stamps a version into Directory.Build.props', () => {
       `${wf} stamps Directory.Build.props; it derives its version from the manifest instead, and `
       + 'a substitution step there fails the release when it finds no literal to replace');
   }
+});
+
+test('no workflow pushes to the default branch', () => {
+  // The bump has to be a human step, and this is why. A GITHUB_TOKEN push to the default branch
+  // is rejected by the branch ruleset ("Changes must be made through a pull request", GH013), so
+  // a job that syncs the manifest there cannot work no matter how it retries. One did: it ran on
+  // the v2.0.4 release, hit GH013 three times, downgraded the failure to a ::warning so it would
+  // not fail a release whose artifacts were already out, and reported success — leaving 2.0.4
+  // shipped from a manifest that still said 2.0.2, with nothing red to notice. Writing to the
+  // default branch from CI is the shape of that bug; pushing a branch and opening a pull request
+  // (generate-screenshots.yml) is the shape that works.
+  const pushesToDefault = /git push[^\n]*(\$\{?DEFAULT_BRANCH|default_branch|HEAD:main\b|origin\s+main\b)/;
+  for (const wf of repoDir('.github/workflows').filter((f) => /\.ya?ml$/.test(f))) {
+    const match = pushesToDefault.exec(repoFile(`.github/workflows/${wf}`));
+    assert.equal(
+      match, null,
+      `.github/workflows/${wf} pushes to the default branch (${match?.[0]}); the ruleset rejects `
+      + 'that, so it can only ever fail or silently no-op — push a branch and open a pull request');
+  }
+});
+
+test('a final release verifies the committed manifest against its tag', () => {
+  // With nothing writing the manifest back, the only thing keeping the repository's version equal
+  // to the last thing shipped is that a mismatch fails the release. Deleting this check would
+  // restore the silent drift the sync job left behind, just without the warning.
+  const wf = repoFile('.github/workflows/release-extension.yml');
+  assert.match(
+    wf, /committed manifest version must match the release tag/i,
+    'release-extension.yml no longer checks extension/manifest.json against the release tag, so a '
+    + 'release cut without bumping it would ship a version the repository never claims');
+  assert.match(
+    wf, /prerelease == false/,
+    'the manifest/tag check must be scoped to final releases: a "vX.Y.Z-<build>" prerelease '
+    + 'packages as the four-part "X.Y.Z.<build>", which never equals a committed three-part version');
 });
 
 test('the packagers all read the version from the manifest, not a copy of their own', () => {

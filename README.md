@@ -246,8 +246,9 @@ empty **prerelease** for it. Creating that prerelease triggers stage 2.
 auto-created RC prereleases and manually-promoted final releases — and does the actual
 build/test/package/publish work:
 
-1. **`verify`** — builds and runs the full .NET test suite. Nothing downstream runs if
-   this fails.
+1. **`verify`** — on a final release, first checks that the committed
+   `extension/manifest.json` version equals the tag being released; then builds and runs
+   the full .NET test suite. Nothing downstream runs if this fails.
 2. **`package`** — stamps `extension/manifest.json`'s version from the release's tag
    (an RC tag `v1.0.1-57` becomes manifest version `1.0.1.57` — Chrome allows up to four
    dot-separated parts — a final tag `v1.0.1` stays `1.0.1`), packages via
@@ -263,6 +264,15 @@ with a clean tag — `v1.0.1`, no `-<build>` suffix — and leave "Set as a pre-
 unchecked. `release-extension.yml` refuses to deploy an RC-style tag if it isn't marked
 as a prerelease, so a mistagged promotion fails loudly instead of shipping the wrong
 version.
+
+**Bump `extension/manifest.json` before you promote.** The `package` job's stamp lives only
+in the runner's checkout, and nothing in CI writes the number back — the branch ruleset
+requires a pull request, so a workflow cannot push to `main` at all. The committed manifest
+is what a source build, an unpacked load from `extension/`, and `Directory.Build.props` (and
+so the version the host reports over `ping`) all read, so leaving it behind means the
+repository claims a version it never shipped. Set it to the version you are about to tag in
+the same pull request as the release notes; `verify` compares the two on every final release
+and fails the run when they disagree.
 
 `scripts/package-extension.sh` (used by both workflows, and manually if you want) builds
 a Chrome Web Store-ready zip: it (re)generates the icons, validates

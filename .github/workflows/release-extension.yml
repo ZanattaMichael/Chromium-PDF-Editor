@@ -34,6 +34,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # A final release ships whatever extension/manifest.json says at the tagged commit. The
+      # packaging job stamps the tag's version into the runner's copy, but the committed file is
+      # what everything else reads: a source build, an unpacked load from the repo, and
+      # Directory.Build.props, which derives the assembly version the host reports over `ping`.
+      # If the two disagree, the repository claims a version it never shipped.
+      #
+      # CI cannot fix that for you. The default branch's ruleset requires changes to go through a
+      # pull request, so a GITHUB_TOKEN push to it is rejected outright (GH013) -- an earlier job
+      # here tried exactly that, swallowed the rejection into a warning, and left v2.0.4 shipping
+      # from a manifest that still said 2.0.2, with a green run to show for it. So the bump is a
+      # human step: change extension/manifest.json in the same pull request as the release notes,
+      # before tagging, and this fails the release loudly when that was missed.
+      #
+      # Final releases only. A prerelease tag "vX.Y.Z-<build>" packages as the four-part version
+      # "X.Y.Z.<build>", which can never equal the three-part number a manifest carries, and a
+      # workflow_dispatch run has no tag to compare against.
+      - name: The committed manifest version must match the release tag
+        if: ${{ github.event_name == 'release' && github.event.release.prerelease == false }}
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          expected="${TAG_NAME#v}"
+          committed=$(python3 -c 'import json; print(json.load(open("extension/manifest.json"))["version"])')
+          if [[ "$committed" != "$expected" ]]; then
+            echo "::error file=extension/manifest.json::extension/manifest.json is at $committed but this release is tagged $TAG_NAME (expected $expected). Bump the manifest on the default branch, then re-tag this release at that commit -- nothing in CI writes it for you."
+            exit 1
+          fi
+          echo "extension/manifest.json is at $committed, matching $TAG_NAME."
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: "8.0.x"
@@ -170,83 +200,6 @@ jobs:
           files: |
             dist/pdf-editor-extension-*.zip
             dist/pdf-editor-bundle-*.zip
-
-  # Write the released version back to extension/manifest.json on the default branch.
-  #
-  # The stamp above lives only in the runner's checkout, so before this job the committed manifest
-  # never moved: it still said 2.0.0 while v2.0.2 was the shipped release. Everything derived from
-  # it inherited that — a host built from a clean checkout reported 2.0.0, and an unpacked
-  # extension loaded from the repo showed 2.0.0 in chrome://extensions no matter how many releases
-  # had gone out. Syncing it here keeps the repository's own number equal to the last thing
-  # actually shipped.
-  #
-  # A separate job, deliberately: it must not sit between `package` and the Chrome Web Store
-  # deploy, and a push that loses a race is not a reason to fail a release that already shipped.
-  # Pushing with GITHUB_TOKEN does not fire another workflow (GitHub's anti-recursion rule), so
-  # this commit does not cut a release candidate of its own.
-  sync-manifest-version:
-    needs: package
-    # Final releases only. A prerelease (every RC) is not what the repository should claim to be.
-    if: ${{ github.event_name == 'release' && github.event.release.prerelease == false && needs.package.outputs.version != '' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-      - uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
-        with:
-          python-version: "3.x"
-
-      - name: Sync extension/manifest.json to the released version
-        env:
-          RELEASE_VERSION: ${{ needs.package.outputs.version }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          python3 - "$RELEASE_VERSION" <<'EOF'
-          import json
-          import sys
-
-          path = "extension/manifest.json"
-          with open(path) as f:
-              manifest = json.load(f)
-          released = tuple(int(p) for p in sys.argv[1].split("."))
-          committed = tuple(int(p) for p in manifest["version"].split("."))
-          # Never walk the number backwards: the default branch may already carry a later version
-          # than the release being published (a hotfix promoted out of order, or a manual bump).
-          if committed >= released:
-              print(f"manifest.json is already at {manifest['version']}; leaving it alone.")
-              sys.exit(0)
-          manifest["version"] = sys.argv[1]
-          with open(path, "w") as f:
-              json.dump(manifest, f, indent=2)
-              f.write("\n")
-          print(f"manifest.json: {'.'.join(map(str, committed))} -> {sys.argv[1]}")
-          EOF
-
-          if git diff --quiet -- extension/manifest.json; then
-            echo "Nothing to sync."
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add extension/manifest.json
-          git commit -m "Sync extension/manifest.json to released v$RELEASE_VERSION"
-
-          # Someone may have pushed while the release was building; rebase and retry rather than
-          # failing a release whose artifacts are already out.
-          for attempt in 1 2 3; do
-            if git push origin "HEAD:$DEFAULT_BRANCH"; then
-              exit 0
-            fi
-            echo "Push rejected (attempt $attempt); rebasing onto $DEFAULT_BRANCH."
-            git fetch origin "$DEFAULT_BRANCH"
-            git rebase "origin/$DEFAULT_BRANCH" || { git rebase --abort; break; }
-          done
-          echo "::warning::Could not sync extension/manifest.json to v$RELEASE_VERSION on $DEFAULT_BRANCH; bump it by hand."
 
   publish-to-chrome-web-store:
     needs: package

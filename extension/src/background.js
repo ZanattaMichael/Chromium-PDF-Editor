@@ -8,7 +8,20 @@ import { checkHostVersion, versionStateSummary } from './host-version.js';
 
 const VIEWER = chrome.runtime.getURL('src/viewer.html');
 
-function viewerUrlFor(pdfUrl) {
+// The viewer loads its `?src=` URL with `fetch()` (viewer.js), which for a file:// URL needs the
+// separate "Allow access to file URLs" grant — a different toggle than "Allow in Incognito", and
+// one this extension never asks for on its own. Without it the fetch always fails; sending the
+// tab there anyway doesn't even fail gracefully everywhere — Brave has been seen blocking the
+// whole navigation outright ("ERR_BLOCKED_BY_CLIENT") rather than letting the page load and the
+// fetch report the real error. So check first, and never build a src the viewer can't read.
+let fileAccessPromise;
+function hasFileAccess() {
+  fileAccessPromise ??= new Promise((resolve) => chrome.extension.isAllowedFileSchemeAccess(resolve));
+  return fileAccessPromise;
+}
+
+async function viewerUrlFor(pdfUrl) {
+  if (pdfUrl?.startsWith('file:') && !(await hasFileAccess())) pdfUrl = null;
   return pdfUrl ? `${VIEWER}?src=${encodeURIComponent(pdfUrl)}` : VIEWER;
 }
 
@@ -40,14 +53,18 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
   if (!looksLikePdfUrl(details.url) || isAdobeContext(details.url)) return;
   const { autoOpen } = await chrome.storage.sync.get({ autoOpen: true });
   if (!autoOpen) return;
-  chrome.tabs.update(details.tabId, { url: viewerUrlFor(details.url) });
+  // Without file access a file:// tab can't be redirected into a working editor (see
+  // viewerUrlFor above) — leave the browser's own PDF view in place rather than swap it for
+  // one that's certain to fail or, in Brave, simply won't load at all.
+  if (details.url.startsWith('file:') && !(await hasFileAccess())) return;
+  chrome.tabs.update(details.tabId, { url: await viewerUrlFor(details.url) });
 });
 
 // --- Toolbar button. ---------------------------------------------------------
 
-chrome.action.onClicked.addListener((tab) => {
+chrome.action.onClicked.addListener(async (tab) => {
   const src = tab?.url && looksLikePdfUrl(tab.url) && !isAdobeContext(tab.url) ? tab.url : null;
-  chrome.tabs.create({ url: viewerUrlFor(src) });
+  chrome.tabs.create({ url: await viewerUrlFor(src) });
 });
 
 // --- Context menus. -----------------------------------------------------------
@@ -123,12 +140,12 @@ async function checkHost({ openOptionsIfMissing = false } = {}) {
 // and this is what clears the badge afterwards without the user having to hunt for a re-test.
 chrome.runtime.onStartup.addListener(() => { checkHost(); });
 
-chrome.contextMenus.onClicked.addListener((info, tab) => {
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'open-link-in-editor' && info.linkUrl) {
-    chrome.tabs.create({ url: viewerUrlFor(info.linkUrl) });
+    chrome.tabs.create({ url: await viewerUrlFor(info.linkUrl) });
   } else if (info.menuItemId === 'open-page-in-editor') {
     const src = tab?.url && looksLikePdfUrl(tab.url) ? tab.url : null;
-    chrome.tabs.create({ url: viewerUrlFor(src) });
+    chrome.tabs.create({ url: await viewerUrlFor(src) });
   }
 });
 
@@ -136,9 +153,11 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'open-in-editor') {
-    chrome.tabs.create({ url: viewerUrlFor(message.url) });
-    sendResponse({ ok: true });
-    return false;
+    viewerUrlFor(message.url).then((url) => {
+      chrome.tabs.create({ url });
+      sendResponse({ ok: true });
+    });
+    return true; // the response is async, so keep the channel open
   }
   // The options page re-tests on demand; let its result clear or restore the badge too.
   if (message?.type === 'recheck-host') {

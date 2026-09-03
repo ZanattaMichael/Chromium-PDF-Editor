@@ -504,16 +504,15 @@ a missing runtime library is reported at install time rather than discovered in 
   replacement uses the closest standard font).
 - **Sign then don't rewrite**: a digital signature is invalidated by any subsequent
   full rewrite — encrypt **before** signing (the UI warns about this ordering).
-- Files opened from `file://` URLs need *Allow access to file URLs* enabled for the
-  extension, or just use the 📂 Open button.
-- **Private/Incognito windows**: like any extension, reDACT is disabled in private
-  windows until you turn it on. Chrome and Brave block the extension's own pages
-  there by default, so opening it shows a browser error page (Brave: "This page has
-  been blocked by Brave", `ERR_BLOCKED_BY_CLIENT`) instead of anything reDACT
-  controls. Enable it from the browser's extension settings — `chrome://extensions`
-  (or `brave://extensions`) → reDACT PDF Editor → *Details* → toggle *Allow in
-  Incognito* (Chrome) or *Allow in private windows* (Brave) — then reopen the
-  private window.
+- Files opened from `file://` URLs (navigating straight to a local PDF, rather than
+  the 📂 Open button or dragging the file in) need *Allow access to file URLs*
+  enabled for the extension — `chrome://extensions` (or `brave://extensions`) →
+  reDACT PDF Editor → *Details*. This is separate from *Allow in Incognito*, which
+  private windows also need if you want reDACT there at all. Without file access,
+  reDACT now leaves the browser's own PDF view alone rather than opening a page that
+  can't read the file; on some Brave versions, before this was fixed, it could
+  instead show Brave's own "This page has been blocked by Brave" /
+  `ERR_BLOCKED_BY_CLIENT` error.
 
 ## Repository layout
 

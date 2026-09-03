@@ -13,6 +13,9 @@ source (not a misunderstanding correctable by reading further docs) — but they
 phrased as questions/requests, since it's possible the capability already exists
 under a name this pass didn't find.
 
+**Draft #5 is the one that matters.** Drafts #1–#4 are papercuts; #5 decides whether
+a full migration off iText is possible at all.
+
 ---
 
 ## Draft #1 — Is blend mode (e.g. `Multiply`) settable on `Stamp.Content` canvas fills?
@@ -142,3 +145,72 @@ point for.
 Happy to share our current shape (`HiddenDataReport` with one int per category, and a
 `SanitizeOptions` with one bool per category) as a concrete reference if that's useful
 for scoping.
+
+---
+
+## Draft #5 — Sub-text-object redaction granularity (or public content-stream primitives)
+
+**Labels:** enhancement
+
+**Body:**
+
+First: thank you for `OfficeIMO.Pdf` — the redaction subsystem is clearly built with
+care, the fail-toward-removal posture in `IntersectsTarget` is the right call for a
+confidentiality boundary, and `Redactions.Verify` is a feature most PDF libraries
+don't offer at all.
+
+I'm evaluating it as a replacement for iText in an interactive PDF redaction editor,
+where a user drags a rectangle over a few words and expects exactly that content to
+disappear. Reading `PdfRedactionApplier.TextScrubbing.cs`, redaction resolves to whole
+text objects:
+
+- `BuildRedactionTextObject` unions the bounds of every span in a `BT`…`ET` block into
+  one bounding box (`AddSpanBounds`).
+- `MarkMatchingTextObjects` → `IntersectsTarget` tests the requested rectangle against
+  that union box.
+- `RemoveTextObjectSpans` then excises the whole `BT`→`ET` byte range.
+
+Because most producers emit one text object per line, a rectangle over one word removes
+the whole line. Measured on real files: Word-produced PDFs in your own
+`OfficeIMO.Pdf.Tests/Pdf/ReferenceBaselines/` run ~73–145 text objects per stream with
+the largest holding 89–105 characters across a single baseline.
+
+`PdfTextEditor.RemoveTextPreservingUnmatchedSpans` compensates by re-stamping the
+collateral spans, which is a clever recovery — but the re-stamp resolves through
+`ResolveStandardFont(...)`, so text originally in an embedded font returns as its
+closest standard-14 approximation (correctly reported via
+`BuildSubstitutionWarnings`). For a redaction tool the visible result is that
+redacting one word changes the typeface of the rest of the line.
+
+**Ask — either of these would unblock this use case, whichever fits your design:**
+
+1. **Sub-text-object redaction granularity**: when a rectangle partially intersects a
+   text object, rewrite the show-text operators so glyphs outside the rectangle survive
+   in place — replacing removed glyphs with equivalent-width `TJ` displacements so the
+   surviving text keeps its original spacing and doesn't reflow. Possibly opt-in via
+   `PdfRedactionApplyOptions` (e.g. `TextGranularity = TextObject | Span | Glyph`) so
+   the current conservative default is preserved.
+2. **Or make the content-stream primitives public** so callers can implement that
+   themselves on top of your parser: `PdfContentStreamInterpreter`, `TextContentParser`
+   (and a supported way to write a rewritten content stream back). These already exist
+   and are used internally by exactly this code path; today they're `internal`, so the
+   only route to glyph-level editing is a different library. `PdfReadPage.GetTextSpans()`
+   being public is already halfway there — the missing half is writing.
+
+Two smaller observations from the same file, offered as data rather than requests:
+
+- The applier estimates every glyph advance as a flat half-em
+  (`SumWidth1000 => bytes.Length * 500D`, line ~525), while `PdfRedactionPlanner` derives
+  its matches from `document.TextBlocks` in the logical read model, which uses real
+  font metrics. So `Plan()` and `Apply()` compute geometry two different ways; a
+  proportional-font line whose true width the estimate undershoots could in principle
+  leave text inside a painted area, which seems contrary to the intent documented in
+  `IntersectsTarget`'s comment.
+- `IsSafelyEditableSpan` requires `TextRenderingMode == 0`, so the text-edit path
+  rejects invisible text. That's the correct conservative default in general, but it
+  also means OCR'd "searchable scans" (an invisible `Tr 3` layer over a page image) —
+  a very common redaction input — can't go through text editing at all. An explicit
+  opt-in for that case (the caller knowing the layer is an OCR layer) might be worth
+  considering.
+
+Happy to contribute failing test fixtures for any of the above if that's useful.

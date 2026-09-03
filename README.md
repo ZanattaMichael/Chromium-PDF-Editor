@@ -506,6 +506,14 @@ a missing runtime library is reported at install time rather than discovered in 
   full rewrite — encrypt **before** signing (the UI warns about this ordering).
 - Files opened from `file://` URLs need *Allow access to file URLs* enabled for the
   extension, or just use the 📂 Open button.
+- **Private/Incognito windows**: like any extension, reDACT is disabled in private
+  windows until you turn it on. Chrome and Brave block the extension's own pages
+  there by default, so opening it shows a browser error page (Brave: "This page has
+  been blocked by Brave", `ERR_BLOCKED_BY_CLIENT`) instead of anything reDACT
+  controls. Enable it from the browser's extension settings — `chrome://extensions`
+  (or `brave://extensions`) → reDACT PDF Editor → *Details* → toggle *Allow in
+  Incognito* (Chrome) or *Allow in private windows* (Brave) — then reopen the
+  private window.
 
 ## Repository layout
 

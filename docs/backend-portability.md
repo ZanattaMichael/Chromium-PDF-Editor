@@ -19,7 +19,39 @@ this file rated the content-stream work "🟡→🟢 by evidence of scale" — i
 capability from the size and naming of OfficeIMO's redaction files rather than from
 reading the algorithm. Reading the algorithm gives a different answer, recorded below.
 
-## Headline finding
+## Update — the blocking finding is fixed in unreleased `master`
+
+Everything below analyses `OfficeIMO.Pdf` **3.3.0**, which is what NuGet ships today
+(release `OfficeIMO-v20260902190744`, commit `bd9e881f`). That analysis stands for the
+shipped package.
+
+Since it was written, `master` has picked up ~33 commits that fix the core blocker:
+
+- **Glyph-level redaction** — new `PdfContentStreamTextRewriter.cs` (commit `6a384161`,
+  "Preserve unaffected PDF glyphs during redaction"). `TrySplitGlyphs` splits encoded
+  strings per glyph, tests each against the rectangle, keeps survivors **in their
+  original encoding** (`kept.AddRange(glyph.Bytes)` — so no standard-font substitution)
+  and flushes removed glyphs as numeric `TJ` displacements. That is the same technique
+  as our `ContentStreamEditor`, and it removes both the whole-line blast radius and the
+  font-fidelity regression described below. Backed by ~1,050 lines of new tests.
+- **Font width providers** — the P0 bug is fixed: `SumWidth1000` now resolves real
+  per-font providers via `ResourceResolver.GetFontWidthProviders(...)`, threaded through
+  the whole call chain, so applier geometry matches the read model.
+- **Invisible-text opt-in** (`allowTextRenderingMode3`), **scoped canvas blend modes**,
+  **typed action sanitization**, and **combined before-sharing sanitization** also
+  landed — see [`officeimo-issues-to-file.md`](officeimo-issues-to-file.md).
+
+**None of this is published.** Latest NuGet remains 3.3.0. So the verdict changes from
+*"blocked at the core"* to *"blocked pending a release"* — a capability question has
+become a timing question. Re-validate against the first published version that contains
+it, using our own fixtures, rather than trusting commit messages or this summary.
+
+One caveat cuts the other way: redaction internals were substantially rewritten inside
+24 hours. That responsiveness is a real asset, but it reinforces the churn note at the
+bottom of this document — pin an exact version and re-run our own assertions on every
+bump.
+
+## Headline finding (as shipped in 3.3.0)
 
 **The migration is clean for roughly 80% of the surface and blocked at the core.**
 
@@ -228,24 +260,18 @@ text), `OcrTool` (Tesseract; but see the invisible-text finding), `UrlClassifier
 1. **Phase 0 — build the seam (#116). Unchanged, and still worth doing on its own.**
    It isolates the iText surface, makes the tools testable against fakes, and is the
    only way to migrate the 🟢 majority without a big-bang rewrite.
-2. **Do not plan a full engine swap on today's OfficeIMO.** The 🟢 items are genuinely
-   ready, but migrating them alone leaves iText in the tree for redaction and text
-   editing, so the AGPL goal — the entire point of #115 — is not met. Migrating the
-   core as-is would trade an AGPL problem for a product-quality regression: losing a
-   line of text per redaction box, standard-font substitution on every edit, and
-   `NotSupportedException` on OCR'd scans.
-3. **Open the upstream conversation now** (drafts in
-   [`docs/officeimo-issues-to-file.md`](officeimo-issues-to-file.md)). Draft #5 is the
-   one that decides this project's outcome: sub-text-object redaction granularity,
-   and/or public content-stream tokenizer + writer primitives so a per-glyph editor can
-   be built on an MIT base. OfficeIMO already has the machinery internally
-   (`PdfContentStreamInterpreter`, `TextContentParser`, font decoders, real metrics in
-   the read model) — it is `internal`, not absent. This is a plausible ask, not a
-   rewrite request.
-4. **Re-evaluate when that lands.** If OfficeIMO exposes sub-object granularity or the
-   primitives, the migration becomes attractive across the board and Phase 0 will have
-   made it incremental. If it does not, the honest answer to #115 is **stay on iText**
-   and keep the seam as the net win.
+2. **Don't migrate against 3.3.0 — and don't build against `master` either.** The
+   shipped package still has the whole-line blast radius, the width-provider bug and
+   the OCR rejection. Tracking an unreleased branch for a security-critical guarantee
+   is the wrong trade, however good the fixes look.
+3. **Watch for the next published release above 3.3.0**, then validate it against our
+   own fixtures before trusting it: redact a word mid-line and assert the rest of the
+   line survives *in its original font*; redact a partially-overlapping run and assert
+   no reflow; redact on an OCR'd searchable scan; confirm `Plan()` and `Apply()` agree
+   on geometry. That is the spike #115 always asked for, now with a much better prior.
+4. **File only what's left.** Six of the seven drafted upstream issues are already
+   fixed on `master`; only the per-field form JavaScript question remains
+   ([`docs/officeimo-issues-to-file.md`](officeimo-issues-to-file.md)).
 5. **Adopt one idea regardless of the outcome:** a post-redaction residue assertion in
    the spirit of `Redactions.Verify`. This project makes a removal guarantee (#48) and
    currently has no independent post-hoc check that the bytes are actually gone.
